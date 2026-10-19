@@ -1,0 +1,56 @@
+name: Build IPA
+
+# Builds an UNSIGNED .ipa. Sign it with your own signer.
+# Manual only: macOS runner minutes are expensive on private repos.
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: Bundle ID baked into the app (your signer may rewrite it)
+        type: string
+        default: com.example.rolleimeter
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Archive without signing
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project RolleiMeter.xcodeproj \
+            -scheme RolleiMeter \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/RolleiMeter.xcarchive" \
+            PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundle_id }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/RolleiMeter.xcarchive/Products/Applications/RolleiMeter.app"
+          test -d "$APP"
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          (cd build && zip -qry RolleiMeter.ipa Payload)
+          rm -rf build/Payload
+          ls -la build
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: RolleiMeter-ipa
+          path: build/RolleiMeter.ipa
+          if-no-files-found: error
