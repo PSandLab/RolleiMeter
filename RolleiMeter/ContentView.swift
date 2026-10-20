@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 
+private let viewfinderPaper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
+private let viewfinderInk = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
+
 struct ContentView: View {
     @StateObject private var meter = CameraMeter()
 
@@ -111,7 +114,8 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0).ignoresSafeArea())
+        .background(viewfinderPaper.ignoresSafeArea())
+        .preferredColorScheme(.light)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear {
@@ -149,6 +153,7 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(simpleMode: $simpleMode, useDIN: $useDIN, useFeet: $useFeet, golden: $golden, calibration: $calibration)
                 .presentationDetents([.medium, .large])
+                .preferredColorScheme(.light)
         }
     }
 
@@ -255,8 +260,8 @@ struct ContentView: View {
                 if spotActive {
                     let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
                     Circle()
-                        .strokeBorder(Color.white, lineWidth: 2)
-                        .shadow(color: .black.opacity(0.5), radius: 2)
+                        .strokeBorder(viewfinderPaper, lineWidth: 2)
+                        .shadow(color: viewfinderInk.opacity(0.5), radius: 2)
                         .frame(width: d, height: d)
                         .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
                         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
@@ -266,11 +271,7 @@ struct ContentView: View {
                 }
 
                 if meter.hasLiDAR {
-                    FocusMarker(
-                        text: shownDistance.map { Fmt.distance($0, feet: useFeet) },
-                        tooClose: tooClose,
-                        labelAbove: focus.y > 0.75
-                    )
+                    FocusMarker(tooClose: tooClose)
                     .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
                     .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
                     .allowsHitTesting(false)
@@ -279,10 +280,10 @@ struct ContentView: View {
                 if showHint {
                     Text("Tap: distance   ·   Hold: spot meter")
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(viewfinderPaper)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.55), in: Capsule())
+                        .background(viewfinderInk.opacity(0.88), in: Capsule())
                         .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
                         .transition(.opacity)
                         .allowsHitTesting(false)
@@ -297,9 +298,9 @@ struct ContentView: View {
                         } label: {
                             Image(systemName: "gearshape.fill")
                                 .font(.system(size: 14))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(viewfinderPaper)
                                 .frame(width: 32, height: 32)
-                                .background(Color.black.opacity(0.55), in: Circle())
+                                .background(viewfinderInk.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         }
                     }
                     Spacer()
@@ -321,7 +322,7 @@ struct ContentView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                 }
             }
-            .clipShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
@@ -340,13 +341,13 @@ struct ContentView: View {
                 } label: {
                     Text(m.title)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(viewfinderPaper)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 7)
                         .background {
                             if !spotActive && baseMode == m {
                                 Capsule()
-                                    .fill(Color.black)
+                                    .fill(viewfinderInk)
                                     .matchedGeometryEffect(id: "chip", in: chipNS)
                             }
                         }
@@ -354,7 +355,7 @@ struct ContentView: View {
             }
         }
         .padding(4)
-        .background(Color.black.opacity(0.35), in: Capsule())
+        .background(viewfinderInk.opacity(0.35), in: Capsule())
     }
 
     // MARK: - Controls
@@ -425,6 +426,11 @@ struct SettingsView: View {
                     Text("Shifts every reading, in stops. Set it once against a meter you trust.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(viewfinderPaper)
+            .listRowBackground(viewfinderPaper)
+            .toolbarBackground(viewfinderPaper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
