@@ -262,7 +262,17 @@ private struct SimpleFocusColumn: View {
     let feet: Bool
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Image(systemName: "scope").font(.system(size: 16, weight: .regular))
+                Text("FOCUS").font(AppTypography.next(size: 12, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(mutedInk)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
             if tooClose {
                 Text("0")
                     .font(AppTypography.bold(size: 68))
@@ -278,12 +288,6 @@ private struct SimpleFocusColumn: View {
                     .foregroundStyle(mutedInk)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            HStack(spacing: 5) {
-                Image(systemName: "scope").font(.system(size: 13, weight: .regular))
-                Text("FOCUS").font(AppTypography.next(size: 11, weight: .medium))
-            }
-            .foregroundStyle(mutedInk)
-            .padding(.bottom, 8)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 174, maxHeight: 174)
@@ -293,8 +297,7 @@ private struct SimpleFocusColumn: View {
     }
 }
 
-/// One big lens-style focus dial. The red pointer is fixed at the top; the scale
-/// turns beneath it. Only the marks near the pointer are numbered (left / middle / right).
+/// A straight focus scale. The pointer is fixed at the top; the ruler slides beneath it. Only the marks near the pointer are numbered (left / middle / right).
 private struct FocusRingScale: View {
     let distance: Double
     let aperture: (label: String, n: Double)
@@ -344,92 +347,75 @@ private struct FocusDialFace: View, Animatable {
         }
     }
 
-    /// Degrees of dial rotation per full focus travel.
-    private let degreesPerUnit = 190.0
+    /// Points of horizontal travel for the full near-to-infinity focus range.
+    private let pointsPerUnit: CGFloat = 420
 
     var body: some View {
         Canvas { context, size in
-            let top: CGFloat = 14
-            let radius = size.width * 1.05
             let cx = size.width / 2
-            let cy = top + radius
-            let maxA = asin(min(1, Double((size.width / 2 - 4) / radius)))
+            let baseline = size.height - 10
+            let numberY: CGFloat = 27
+            let markTop: CGFloat = 42
+            let fadeWidth: CGFloat = 44
 
-            func angle(_ p: Double) -> Double { (p - position) * degreesPerUnit * .pi / 180 }
-            func point(_ a: Double, _ r: CGFloat) -> CGPoint {
-                CGPoint(x: cx + CGFloat(sin(a)) * r, y: cy - CGFloat(cos(a)) * r)
-            }
-            func fade(_ a: Double) -> Double {
-                let edge = 0.16
-                return min(1, max(0, (maxA - abs(a)) / edge))
+            func x(_ p: Double) -> CGFloat { cx + CGFloat(p - position) * pointsPerUnit }
+            func fade(_ x: CGFloat) -> Double {
+                let edge = min(x, size.width - x)
+                return Double(min(1, max(0, edge / fadeWidth)))
             }
 
-            // Depth-of-field band, just inside the ticks.
-            var band = Path()
-            let lo = max(near, position - maxA / (degreesPerUnit * .pi / 180))
-            let hi = min(far, position + maxA / (degreesPerUnit * .pi / 180))
-            if hi > lo {
-                let steps = 40
-                for s in 0...steps {
-                    let p = lo + (hi - lo) * Double(s) / Double(steps)
-                    let pt = point(angle(p), radius - 14)
-                    if s == 0 { band.move(to: pt) } else { band.addLine(to: pt) }
-                }
+            // Depth-of-field band along the foot of the scale.
+            let bandL = max(x(near), 0), bandR = min(x(far), size.width)
+            if bandR > bandL {
+                var band = Path()
+                band.move(to: CGPoint(x: bandL, y: baseline + 5))
+                band.addLine(to: CGPoint(x: bandR, y: baseline + 5))
                 context.stroke(band, with: .color(sharpLabel != nil ? goldenGreen : accentOrange.opacity(0.55)),
                                style: StrokeStyle(lineWidth: 3, lineCap: .round))
             }
 
-            // Ticks: fine ones everywhere, longer every 5th, longest at the engraved marks.
+            // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
             let markPositions = marks.map { $0.p }
             let n = 150
             for i in 0...n {
                 let p = Double(i) / Double(n)
                 if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
-                let a = angle(p)
-                let f = fade(a)
+                let px = x(p)
+                let f = fade(px)
                 if f <= 0 { continue }
-                let length: CGFloat = i.isMultiple(of: 5) ? 16 : 10
+                let h: CGFloat = i.isMultiple(of: 5) ? 24 : 13
                 var tick = Path()
-                tick.move(to: point(a, radius))
-                tick.addLine(to: point(a, radius - length))
+                tick.move(to: CGPoint(x: px, y: baseline))
+                tick.addLine(to: CGPoint(x: px, y: baseline - h))
                 context.stroke(tick, with: .color(mutedInk.opacity(f)), lineWidth: 1)
             }
             for mark in marks {
-                let a = angle(mark.p)
-                let f = fade(a)
+                let px = x(mark.p)
+                let f = fade(px)
                 if f <= 0 { continue }
                 let green = mark.label == sharpLabel
+                let color: Color = green ? goldenGreen : inkColor
                 var tick = Path()
-                tick.move(to: point(a, radius))
-                tick.addLine(to: point(a, radius - 26))
-                context.stroke(tick, with: .color((green ? goldenGreen : inkColor).opacity(f)),
-                               lineWidth: green ? 2.5 : 1.8)
-            }
-
-            // Numbers, upright, only for marks inside the window.
-            for mark in marks {
-                let a = angle(mark.p)
-                let f = fade(a)
-                if f <= 0 { continue }
-                let color: Color = mark.label == sharpLabel ? goldenGreen : inkColor
+                tick.move(to: CGPoint(x: px, y: baseline))
+                tick.addLine(to: CGPoint(x: px, y: markTop))
+                context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 2.5 : 1.5)
                 let text = context.resolve(
-                    Text(mark.label).font(AppTypography.bold(size: 22)).foregroundColor(color.opacity(f))
+                    Text(mark.label).font(AppTypography.bold(size: 20)).foregroundColor(color.opacity(f))
                 )
-                context.draw(text, at: point(a, radius - 50), anchor: .center)
+                context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
             }
 
             // Fixed pointer
             var tri = Path()
-            tri.move(to: CGPoint(x: cx - 8, y: 0))
-            tri.addLine(to: CGPoint(x: cx + 8, y: 0))
-            tri.addLine(to: CGPoint(x: cx, y: top + 2))
+            tri.move(to: CGPoint(x: cx - 7, y: 0))
+            tri.addLine(to: CGPoint(x: cx + 7, y: 0))
+            tri.addLine(to: CGPoint(x: cx, y: 11))
             tri.closeSubpath()
             context.fill(tri, with: .color(accentOrange))
         }
         .clipped()
     }
 }
-
 
 /// Lens marks with a small downward index showing the interval to set between.
 private struct FocusRangeIndicator: View {
