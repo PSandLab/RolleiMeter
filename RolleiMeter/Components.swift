@@ -170,7 +170,6 @@ private struct SimpleApertureColumn: View {
     let comp: Double
     let aperture: (label: String, n: Double)
     let symbol: String
-    let selected: Bool
     let onSelect: () -> Void
 
     private var idealTime: Double {
@@ -195,9 +194,6 @@ private struct SimpleApertureColumn: View {
             .foregroundStyle(paper)
             .padding(.horizontal, 9)
             .frame(height: 34)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(selected ? paper : Color.clear).frame(height: 1)
-            }
             GeometryReader { geo in
                 let center = geo.size.width / 2
                 ZStack(alignment: .topLeading) {
@@ -247,62 +243,68 @@ struct SimpleExposurePair: View {
     @ObservedObject var damp: Damper
     let iso: Double
     let comp: Double
-    let selected: Int
-    let onSelect: (Int) -> Void
-    @State private var recoveryAperture: Int?
-
-    private var bothOverexposed: Bool {
-        [Rollei.stops[0], Rollei.stops[3]].allSatisfy { stop in
-            Exposure.result(for: Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: stop.n)).status == .tooFast
-        }
-    }
-
-    private func result(at index: Int) -> ShutterResult {
-        let stop = Rollei.stops[index]
-        return Exposure.result(for: Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: stop.n))
-    }
-
-    private var firstUsableRecoveryAperture: Int {
-        let candidates = Array(4..<Rollei.stops.count)
-        return candidates.first { result(at: $0).status == .ok } ?? candidates.first ?? Rollei.stops.count - 1
-    }
-
-    private func selectFromPair(_ index: Int) {
-        guard bothOverexposed else { onSelect(index); return }
-        let recovery = firstUsableRecoveryAperture
-        recoveryAperture = recovery
-        onSelect(recovery)
-    }
-
-    private func advanceRecovery(from index: Int) {
-        guard result(at: index).status == .tooFast, index < Rollei.stops.count - 1 else {
-            recoveryAperture = nil
-            return
-        }
-        let next = ((index + 1)..<Rollei.stops.count).first { result(at: $0).status == .ok } ?? index + 1
-        recoveryAperture = next
-        onSelect(next)
-    }
+    let apertureIndex: Int
+    let distance: Double?
+    let advice: FocusAdvice?
+    let tooClose: Bool
+    let feet: Bool
+    let onToggleAperture: () -> Void
 
     var body: some View {
-        Group {
-            if let recoveryAperture {
-                SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[recoveryAperture], symbol: "sun.max", selected: selected == recoveryAperture, onSelect: { advanceRecovery(from: recoveryAperture) })
-                    .frame(maxWidth: .infinity)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
-            } else {
-                HStack(spacing: 0) {
-                    SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[0], symbol: "figure.stand", selected: selected == 0, onSelect: { selectFromPair(0) })
-                    Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
-                    SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[3], symbol: "sun.horizon", selected: selected == 3, onSelect: { selectFromPair(3) })
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.97)))
-            }
+        HStack(spacing: 0) {
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[apertureIndex], symbol: "camera.aperture", onSelect: onToggleAperture)
+            Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
+            SimpleFocusColumn(distance: distance, advice: advice, tooClose: tooClose, feet: feet)
         }
-        .animation(.easeInOut(duration: 0.22), value: recoveryAperture)
         .background(paper)
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct SimpleFocusColumn: View {
+    let distance: Double?
+    let advice: FocusAdvice?
+    let tooClose: Bool
+    let feet: Bool
+
+    private var unit: String { feet ? "ft" : "m" }
+    private var mainText: String {
+        guard !tooClose, let advice else { return tooClose ? "TOO CLOSE" : "—" }
+        return advice.label == "∞" ? "∞" : advice.label + " " + unit
+    }
+    private var detailText: String {
+        if tooClose { return "MIN " + (feet ? "3 FT" : "0.9 M") }
+        guard let distance, let advice else { return "NO LIDAR" }
+        if advice.sharp { return Fmt.distance(distance, feet: feet) + " · SHARP" }
+        return "BETWEEN " + advice.lo + "–" + advice.hi + " " + unit.uppercased()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "scope").font(.system(size: 13, weight: .regular))
+                Text("FOCUS").font(.system(size: 12, weight: .medium, design: .monospaced))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(mutedInk)
+            Spacer(minLength: 0)
+            Text(mainText)
+                .font(.system(size: tooClose ? 14 : 21, weight: .medium, design: .monospaced))
+                .foregroundStyle(tooClose ? warnRed : inkColor)
+                .lineLimit(1).minimumScaleFactor(0.72)
+                .contentTransition(.numericText())
+            Text(detailText)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(tooClose ? warnRed : (advice?.sharp == true ? goldenGreen : mutedInk))
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 9)
+        .frame(minHeight: 134, maxHeight: 134)
+        .background(paper)
+        .accessibilityElement(children: .combine)
     }
 }
 
