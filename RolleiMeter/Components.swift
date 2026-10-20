@@ -3,21 +3,20 @@ import AVFoundation
 import AVKit
 import UIKit
 
-private let accentOrange = Color(red: 0.88, green: 0.42, blue: 0.22)
-private let goldenGreen = Color(red: 0.25, green: 0.70, blue: 0.35)
-private let warnRed = Color(red: 0.85, green: 0.20, blue: 0.20)
-private let inkColor = Color(white: 0.15)
+private let paper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
+private let inkColor = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
+private let mutedInk = Color(red: Double(0x8B) / 255.0, green: Double(0x89) / 255.0, blue: Double(0x82) / 255.0)
+private let hairline = Color(red: Double(0xD4) / 255.0, green: Double(0xD0) / 255.0, blue: Double(0xC7) / 255.0)
+private let accentOrange = Color(red: Double(0xB6) / 255.0, green: Double(0x5B) / 255.0, blue: Double(0x4B) / 255.0)
+private let goldenGreen = Color(red: Double(0x25) / 255.0, green: Double(0x70) / 255.0, blue: Double(0x35) / 255.0)
+private let warnRed = accentOrange
 
 private struct Panel: ViewModifier {
-    var stroke: Color = Color(white: 0.8)
+    var stroke: Color = hairline
     var lineWidth: CGFloat = 1
 
     func body(content: Content) -> some View {
-        content.background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(white: 0.97))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(stroke, lineWidth: lineWidth))
-        )
+        content.background(Rectangle().fill(paper).overlay(Rectangle().stroke(stroke, lineWidth: lineWidth)))
     }
 }
 
@@ -126,8 +125,8 @@ struct RulerView: View {
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { _ in
                     ZStack {
-                        Rectangle().fill(Color(white: 0.7)).frame(height: 1)
-                        Rectangle().fill(Color(white: 0.3)).frame(width: 1.5, height: 8)
+                        Rectangle().fill(hairline).frame(height: 1)
+                        Rectangle().fill(mutedInk).frame(width: 1.5, height: 8)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -167,6 +166,105 @@ struct RulerView: View {
     }
 }
 
+// MARK: - Simple exposure pair
+
+private struct SimpleApertureColumn: View {
+    let damp: Damper
+    let iso: Double
+    let comp: Double
+    let aperture: (label: String, n: Double)
+    let symbol: String
+    let selected: Bool
+    let onSelect: () -> Void
+
+    private var idealTime: Double {
+        Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
+    }
+    private var reading: ShutterResult { Exposure.result(for: idealTime) }
+    private var rulerPosition: Double {
+        min(max(log2(max(idealTime, Rollei.fastest) / Rollei.fastest), 0), log2(Rollei.slowest / Rollei.fastest))
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .regular))
+                Text("f/" + aperture.label)
+                    .font(.system(size: 17, weight: .medium, design: .monospaced))
+                Spacer(minLength: 0)
+                if let deviation = reading.deviation {
+                    Text(Fmt.exposureDeviation(deviation))
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                }
+            }
+            .foregroundStyle(reading.deviation == nil ? inkColor : paper)
+            .padding(.horizontal, 9)
+            .frame(height: 42)
+            .background(reading.deviation == nil ? Color.clear : accentOrange)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(selected ? inkColor : Color.clear).frame(height: 1)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onSelect)
+
+            GeometryReader { geo in
+                let center = geo.size.width / 2
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(hairline).frame(height: 1).offset(y: 14)
+                    ForEach(Rollei.speeds.indices.reversed(), id: \.self) { i in
+                        let speed = Rollei.speeds[i]
+                        let coordinate = log2(Rollei.slowest / speed.t)
+                        let x = center + CGFloat(coordinate - rulerPosition) * 38
+                        VStack(spacing: 3) {
+                            Rectangle().fill(hairline).frame(width: 1, height: i == 0 || i == Rollei.speeds.count - 1 ? 10 : 6)
+                            Text(speed.label)
+                                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                                .foregroundStyle(mutedInk)
+                        }
+                        .fixedSize()
+                        .position(x: x, y: 23)
+                    }
+                    Rectangle().fill(inkColor).frame(width: 1.5, height: 20)
+                        .position(x: center, y: 9)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+            }
+            .frame(height: 43)
+
+            Text(reading.label)
+                .font(.system(size: 24, weight: .medium, design: .monospaced))
+                .foregroundStyle(inkColor)
+                .contentTransition(.numericText())
+                .frame(height: 30)
+                .frame(maxWidth: .infinity)
+                .animation(.smooth(duration: 0.18), value: reading.label)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
+    }
+}
+
+struct SimpleExposurePair: View {
+    @ObservedObject var damp: Damper
+    let iso: Double
+    let comp: Double
+    let selected: Int
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[0], symbol: "person.crop.portrait", selected: selected == 0, onSelect: { onSelect(0) })
+            Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[3], symbol: "mountain.2", selected: selected == 3, onSelect: { onSelect(3) })
+        }
+        .background(paper)
+        .overlay(Rectangle().stroke(hairline, lineWidth: 1))
+    }
+}
+
 // MARK: - Wheel
 
 struct WheelBox: View {
@@ -198,7 +296,7 @@ struct WheelBox: View {
                     .allowsHitTesting(false)
             }
             .modifier(Panel())
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(Rectangle())
             .onChange(of: selection) {
                 UISelectionFeedbackGenerator().selectionChanged()
             }
@@ -223,13 +321,13 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(Color(white: 0.84)).frame(width: 84, height: 84)
+                Circle().fill(hairline).frame(width: 84, height: 84)
                 Circle()
-                    .fill(LinearGradient(colors: [Color.white, Color(white: 0.88)], startPoint: .top, endPoint: .bottom))
+                    .fill(paper)
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
-                    .stroke(frozen ? accentOrange : Color(white: 0.72), lineWidth: frozen ? 4 : 1)
+                    .stroke(frozen ? accentOrange : mutedInk, lineWidth: frozen ? 4 : 1)
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
             }
@@ -265,7 +363,6 @@ struct FocusMarker: View {
                 .stroke(tooClose ? warnRed : Color.white,
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 .frame(width: 34, height: 34)
-                .shadow(color: .black.opacity(0.55), radius: 2)
             if let text {
                 Text(text)
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -321,7 +418,7 @@ struct FocusPanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .modifier(Panel(stroke: tooClose ? warnRed : Color(white: 0.8), lineWidth: tooClose ? 2 : 1))
+        .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 2 : 1))
         .animation(.smooth(duration: 0.25), value: tooClose)
     }
 
@@ -348,7 +445,7 @@ struct FocusPanel: View {
                 } else {
                     Text(bigText)
                         .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(advice == nil ? Color(white: 0.55) : inkColor)
+                        .foregroundStyle(advice == nil ? mutedInk : inkColor)
                         .contentTransition(.numericText())
                         .animation(.smooth(duration: 0.2), value: bigText)
                 }
@@ -374,7 +471,7 @@ struct FocusPanel: View {
                     }
                 } else {
                     Text("no LiDAR reading")
-                        .foregroundStyle(Color(white: 0.55))
+                        .foregroundStyle(mutedInk)
                 }
             }
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -404,7 +501,7 @@ struct FocusPanel: View {
 
                 ZStack(alignment: .topLeading) {
                     Rectangle()
-                        .fill(Color(white: 0.7))
+                        .fill(hairline)
                         .frame(width: w, height: 1)
                         .position(x: geo.size.width / 2, y: 17)
 
@@ -429,7 +526,7 @@ struct FocusPanel: View {
                     ForEach(marks.indices, id: \.self) { i in
                         let x = inset + CGFloat(Focus.position(marks[i].m)) * w
                         Rectangle()
-                            .fill(i == 0 ? goldenGreen : Color(white: 0.3))
+                            .fill(i == 0 ? goldenGreen : mutedInk)
                             .frame(width: 1.5, height: 12)
                             .position(x: x, y: 17)
                         Text(marks[i].label)
