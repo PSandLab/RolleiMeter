@@ -7,9 +7,9 @@ import QuartzCore
 /// On LiDAR phones it also reads distance at the metered point.
 ///
 /// Per frame: EV of the exposure the frame was actually shot at
-/// + log2(measured luminance / reference). Keeping the camera's own auto exposure
-/// pointed at the metered area keeps the pixels near mid-grey, where Apple's tone
-/// curve matters least.
+/// + log2(measured luminance / reference). A slow servo on the camera's exposure bias
+/// (`steerExposure`) holds the metered reference near mid-grey, so the preview shows
+/// the metered exposure and Apple's tone curve matters least.
 final class CameraMeter: NSObject, ObservableObject,
     AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureDepthDataOutputDelegate {
 
@@ -28,7 +28,6 @@ final class CameraMeter: NSObject, ObservableObject,
     private let depthOutput = AVCaptureDepthDataOutput()
     private var device: AVCaptureDevice?
     private var configured = false
-    private var aeKey = ""
 
     private let lock = NSLock()
     private var mode: MeterMode = .matrix
@@ -41,9 +40,11 @@ final class CameraMeter: NSObject, ObservableObject,
 
     /// Highlight mode: the bright end of the scene (98th percentile) is not allowed to
     /// land more than this many stops above middle grey.
-    private let highlightStops = 2.0
-    /// Highlight mode shoots the preview darker so bright areas don't clip and hide their true level.
-    private let highlightBias: Float = -1.5
+    private let highlightStops = 1.5
+
+    /// Exposure-bias servo state. Only touched from the frame queue. See `steerExposure`.
+    private var currentBias: Float = 0
+    private var lastBiasUpdate: CFTimeInterval = 0
 
     /// sRGB decoding curve. We request the sRGB colour space, so this is the right inverse.
     private static let lut: [Double] = (0..<256).map { i in
@@ -59,7 +60,6 @@ final class CameraMeter: NSObject, ObservableObject,
         self.smoothed = nil
         self.distSmoothed = nil
         lock.unlock()
-        sessionQueue.async { self.applyExposureTarget() }
     }
 
     func start() {
@@ -94,8 +94,8 @@ final class CameraMeter: NSObject, ObservableObject,
             if configured, let dev = device { tune(dev) }
         }
         if configured {
-            aeKey = ""
-            applyExposureTarget()
+            currentBias = 0
+            setBias(0)
             if !session.isRunning { session.startRunning() }
         }
     }
@@ -185,36 +185,46 @@ final class CameraMeter: NSObject, ObservableObject,
             if dev.activeFormat.isVideoHDRSupported { dev.isVideoHDREnabled = false }
             if dev.isLowLightBoostSupported { dev.automaticallyEnablesLowLightBoostWhenAvailable = false }
             if dev.activeFormat.supportedColorSpaces.contains(.sRGB) { dev.activeColorSpace = .sRGB }
+            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5) }
             if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
             dev.unlockForConfiguration()
         } catch {}
     }
 
-    /// Aim the camera's auto exposure at what we are metering.
-    /// Spot: AE follows the spot, so the spot lands near mid-grey. Highlight: shoot darker so highlights don't clip.
-    private func applyExposureTarget() {
-        guard let dev = device else { return }
+    private func setBias(_ b: Float) {
+        sessionQueue.async {
+            guard let dev = self.device else { return }
+            do {
+                try dev.lockForConfiguration()
+                let c = min(max(b, dev.minExposureTargetBias), dev.maxExposureTargetBias)
+                dev.setExposureTargetBias(c, completionHandler: nil)
+                dev.unlockForConfiguration()
+            } catch {}
+        }
+    }
 
-        lock.lock()
-        let m = mode
-        let sp = spot
-        lock.unlock()
+    /// Slow servo on the camera's exposure bias: nudge it until the metered reference
+    /// (matrix average, the spot, or the protected highlight) sits at middle grey in the preview.
+    ///
+    /// Two reasons:
+    /// 1. The preview becomes the picture the film would get. Tap a bright spot and the whole view
+    ///    darkens by the same number of stops the shutter speed moves. Highlight mode darkens by exactly
+    ///    the protection it applies. Picture and reading can't disagree.
+    /// 2. The pixels that define the reading always sit near mid-grey, where Apple's tone curve
+    ///    does the least damage. Errors in the curve cancel out.
+    private func steerExposure(refY: Double) {
+        let now = CACurrentMediaTime()
+        guard now - lastBiasUpdate > 0.2 else { return }
+        lastBiasUpdate = now
 
-        // Portrait (x, y) -> sensor (y, 1 - x), same mapping as the depth map.
-        let poi = (m == .spot) ? CGPoint(x: sp.y, y: 1 - sp.x) : CGPoint(x: 0.5, y: 0.5)
-        let bias: Float = (m == .highlight) ? highlightBias : 0
-        let key = "\(m.rawValue)-\(poi.x)-\(poi.y)"
-        guard key != aeKey else { return }
-        aeKey = key
-
-        do {
-            try dev.lockForConfiguration()
-            if dev.isExposurePointOfInterestSupported { dev.exposurePointOfInterest = poi }
-            if dev.isExposureModeSupported(.continuousAutoExposure) { dev.exposureMode = .continuousAutoExposure }
-            let b = min(max(bias, dev.minExposureTargetBias), dev.maxExposureTargetBias)
-            dev.setExposureTargetBias(b, completionHandler: nil)
-            dev.unlockForConfiguration()
-        } catch {}
+        let err = log2(refY / 0.18)           // stops above mid-grey
+        guard abs(err) > 0.1 else { return }
+        // Gain kept low on purpose: the camera takes a few frames to act on a bias change, and a
+        // higher gain makes the preview breathe. The reading itself doesn't wait for this to settle.
+        let next = min(max(currentBias - Float(err) * 0.15, -6), 6)
+        guard abs(next - currentBias) > 0.02 else { return }
+        currentBias = next
+        setBias(next)
     }
 
     // MARK: - Depth (LiDAR)
@@ -392,6 +402,7 @@ final class CameraMeter: NSObject, ObservableObject,
 
         let yRef = max(yRaw, 0.0005)
         let ev = evCam + log2(yRef / 0.18)
+        steerExposure(refY: yRef)
 
         lock.lock()
         if let s = smoothed, abs(ev - s) < 1.0 {

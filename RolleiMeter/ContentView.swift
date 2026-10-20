@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var evDamp = Damper(count: 1, initial: 12, stiffness: 70, damping: 12)
     @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 110, damping: 17)
 
-    @AppStorage("mode") private var mode: MeterMode = .matrix
+    @AppStorage("mode") private var mode: MeterMode = .matrix   // matrix or highlight
     @AppStorage("isoIndex") private var isoIndex = 6      // ISO 100
     @AppStorage("evIndex") private var evIndex = 6        // 0 compensation
     @AppStorage("useDIN") private var useDIN = false
@@ -20,7 +20,10 @@ struct ContentView: View {
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
     @State private var distPrimed = false
-    @State private var spot = CGPoint(x: 0.5, y: 0.5)
+    /// Spot metering only happens after a tap in the viewfinder. Tapping a mode chip goes back.
+    @State private var spotActive = false
+    @State private var spot = CGPoint(x: 0.5, y: 0.5)      // where you tapped, in viewfinder coordinates
+    @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)   // the same point in camera-frame coordinates
     @State private var spotRadius: CGFloat = 0.05
     @State private var pinchBase: CGFloat = 0.05
     @State private var showSettings = false
@@ -36,13 +39,21 @@ struct ContentView: View {
     private var ev: Double { frozenEV ?? liveEV }
     private var shownDistance: Double? { frozenEV != nil ? frozenDist : meter.distance }
 
+    private var baseMode: MeterMode { mode == .spot ? .matrix : mode }
+    private var engineMode: MeterMode { spotActive ? .spot : baseMode }
+
+    private var tooClose: Bool {
+        guard let d = shownDistance else { return false }
+        return d < Focus.nearest
+    }
+
     private var dof: (near: Double, far: Double)? {
-        guard let d = shownDistance else { return nil }
+        guard let d = shownDistance, d >= Focus.nearest else { return nil }
         return DepthOfField.range(subject: d, n: DepthOfField.apertures[safeSelected])
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             preview
 
             RulerView(
@@ -66,6 +77,7 @@ struct ContentView: View {
                     distance: shownDistance,
                     near: dof?.near,
                     far: dof?.far,
+                    tooClose: tooClose,
                     feet: useFeet,
                     onTap: {
                         UISelectionFeedbackGenerator().selectionChanged()
@@ -82,6 +94,7 @@ struct ContentView: View {
         .background(Color(white: 0.93).ignoresSafeArea())
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            if mode == .spot { mode = .matrix }   // older versions could save spot as the mode
             pushConfig()
             evDamp.set([ev], snap: true)
             syncDistance()
@@ -92,13 +105,17 @@ struct ContentView: View {
             meter.stop()
         }
         .onChange(of: mode) { pushConfig() }
-        .onChange(of: spot) { pushConfig() }
+        .onChange(of: spotActive) { pushConfig() }
+        .onChange(of: spotBuf) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
         .onChange(of: meter.sceneEV) { evDamp.set([ev]) }
         .onChange(of: calibration) { evDamp.set([ev]) }
         .onChange(of: frozenEV) { evDamp.set([ev]) }
         .onChange(of: shownDistance) { syncDistance() }
         .onChange(of: selected) { syncDistance() }
+        .onChange(of: tooClose) {
+            if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(useDIN: $useDIN, useFeet: $useFeet, golden: $golden, calibration: $calibration)
                 .presentationDetents([.medium, .large])
@@ -106,14 +123,15 @@ struct ContentView: View {
     }
 
     private func pushConfig() {
-        meter.setConfig(mode: mode, spot: spot, radius: spotRadius)
+        meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius)
     }
 
     private func syncDistance() {
-        guard let d = shownDistance, let r = dof else {
+        guard let d = shownDistance else {
             distPrimed = false
             return
         }
+        let r = dof ?? (near: d, far: d)
         let target = [Focus.position(d), Focus.position(r.near), Focus.position(r.far)]
         // First reading after nothing: jump there instead of sweeping in from the left.
         distDamp.set(target, snap: !distPrimed)
@@ -125,7 +143,18 @@ struct ContentView: View {
         frozenDist = nil
     }
 
-    // MARK: - Preview
+    /// The camera frame is 3:4 and the viewfinder fills its box, cropping whatever overflows.
+    /// Converts a point in the box (0...1) to a point in the camera frame (0...1).
+    private func bufferPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
+        let frame = 0.75
+        let aspect = size.width / max(size.height, 1)
+        if aspect < frame {
+            return CGPoint(x: 0.5 + (p.x - 0.5) * aspect / frame, y: p.y)
+        }
+        return CGPoint(x: p.x, y: 0.5 + (p.y - 0.5) * frame / aspect)
+    }
+
+    // MARK: - Viewfinder
 
     private var preview: some View {
         GeometryReader { geo in
@@ -139,9 +168,11 @@ struct ContentView: View {
                         SpatialTapGesture().onEnded { value in
                             let x = min(max(value.location.x / geo.size.width, 0), 1)
                             let y = min(max(value.location.y / geo.size.height, 0), 1)
+                            let p = CGPoint(x: x, y: y)
+                            spotBuf = bufferPoint(p, in: geo.size)
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
-                                spot = CGPoint(x: x, y: y)
-                                mode = .spot
+                                spot = p
+                                spotActive = true
                             }
                             unfreeze()
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -157,11 +188,12 @@ struct ContentView: View {
                             }
                     )
 
-                if mode == .spot {
+                if spotActive {
+                    let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
                     Circle()
                         .strokeBorder(Color.white, lineWidth: 2)
                         .shadow(color: .black.opacity(0.5), radius: 2)
-                        .frame(width: spotRadius * 2 * geo.size.width, height: spotRadius * 2 * geo.size.width)
+                        .frame(width: d, height: d)
                         .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
                         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
                         .animation(.interactiveSpring, value: spotRadius)
@@ -171,7 +203,7 @@ struct ContentView: View {
 
                 VStack {
                     HStack {
-                        EVBadge(damp: evDamp, frozen: frozenEV != nil)
+                        EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
                         Spacer()
                         Button {
                             showSettings = true
@@ -204,24 +236,28 @@ struct ContentView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 22))
         }
-        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .layoutPriority(1)
     }
 
     private var modeChips: some View {
         HStack(spacing: 4) {
-            ForEach(MeterMode.allCases, id: \.self) { m in
+            ForEach([MeterMode.matrix, MeterMode.highlight], id: \.self) { m in
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) { mode = m }
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                        mode = m
+                        spotActive = false
+                    }
                     unfreeze()
                 } label: {
                     Text(m.title)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(mode == m ? Color.white : Color.white.opacity(0.9))
-                        .padding(.horizontal, 12)
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 7)
                         .background {
-                            if mode == m {
+                            if !spotActive && baseMode == m {
                                 Capsule()
                                     .fill(Color.black)
                                     .matchedGeometryEffect(id: "chip", in: chipNS)

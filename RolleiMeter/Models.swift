@@ -58,10 +58,16 @@ enum EVComp {
     }
 }
 
+enum ShutterStatus { case ok, tooFast, tooSlow }
+
 struct ShutterResult {
     let label: String
-    /// 0 = in range. Positive = overexposed by this many stops, negative = underexposed.
-    let error: Double
+    /// Seconds. For out-of-range results this is the nearest limit.
+    let t: Double
+    let status: ShutterStatus
+
+    /// Slower than 1/60 s: too slow to hand-hold with confidence. Drives the red aperture.
+    var isSlow: Bool { status == .tooSlow || t > 1.0 / 60.0 + 1e-6 }
 }
 
 enum Exposure {
@@ -72,16 +78,13 @@ enum Exposure {
     }
 
     static func result(for t: Double) -> ShutterResult {
-        let fastLabel = Rollei.speeds.first!.label
-        let slowLabel = Rollei.speeds.last!.label
+        let third = pow(2.0, 1.0 / 6.0)   // half a third-stop, for rounding to the limits
 
-        if t < Rollei.fastest {
-            let e = (log2(Rollei.fastest / t) * 3).rounded() / 3
-            return ShutterResult(label: fastLabel, error: e)
+        if t < Rollei.fastest / third {
+            return ShutterResult(label: "500+", t: Rollei.fastest, status: .tooFast)
         }
-        if t > Rollei.slowest {
-            let e = (log2(t / Rollei.slowest) * 3).rounded() / 3
-            return ShutterResult(label: slowLabel, error: e == 0 ? 0 : -e)
+        if t > Rollei.slowest * third {
+            return ShutterResult(label: "<2", t: Rollei.slowest, status: .tooSlow)
         }
         var best = Rollei.speeds[0]
         var bestDist = Double.greatestFiniteMagnitude
@@ -92,7 +95,7 @@ enum Exposure {
                 best = s
             }
         }
-        return ShutterResult(label: best.label, error: 0)
+        return ShutterResult(label: best.label, t: best.t, status: .ok)
     }
 }
 
