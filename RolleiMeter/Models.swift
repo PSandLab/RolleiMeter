@@ -22,16 +22,13 @@ enum Rollei {
     static let fastest = 1.0 / 500.0
     static let slowest = 0.5
 
-    /// Third-stop shutter speeds from 1/500 to 1/2, fastest first.
-    static let speeds: [(label: String, t: Double)] = {
-        let dens: [Double] = [500, 400, 320, 250, 200, 160, 125, 100, 80, 60, 50, 40, 30, 25, 20, 15, 13, 10, 8, 6, 5, 4, 3, 2.5, 2]
-        var out: [(label: String, t: Double)] = []
-        for d in dens {
-            let label = d.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(d)) : String(format: "%.1f", d)
-            out.append((label: label, t: 1.0 / d))
-        }
-        return out
-    }()
+    /// Native Rollei 35 shutter speeds from 1/500 to 1/2, fastest first.
+    /// The displayed denominator is the engraved dial marking (e.g. 125 for 1/125 s).
+    static let speeds: [(label: String, t: Double)] = [
+        ("500", 1.0 / 500), ("250", 1.0 / 250), ("125", 1.0 / 125),
+        ("60", 1.0 / 60), ("30", 1.0 / 30), ("15", 1.0 / 15),
+        ("8", 1.0 / 8), ("4", 1.0 / 4), ("2", 1.0 / 2)
+    ]
 }
 
 enum ISOScale {
