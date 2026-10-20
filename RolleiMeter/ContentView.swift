@@ -3,16 +3,6 @@ import UIKit
 
 private let viewfinderPaper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
 private let viewfinderInk = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
-private let viewfinderAccent = Color(red: Double(0xB3) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x31) / 255.0)
-private let viewfinderHairline = Color(red: Double(0xD4) / 255.0, green: Double(0xD0) / 255.0, blue: Double(0xC7) / 255.0)
-
-private struct TactileModeStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.93 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.62), value: configuration.isPressed)
-    }
-}
 
 struct ContentView: View {
     @StateObject private var meter = CameraMeter()
@@ -365,35 +355,36 @@ struct ContentView: View {
     }
 
     private var modeChips: some View {
-        HStack(spacing: 8) {
-            ForEach([MeterMode.matrix, MeterMode.highlight], id: \.self) { m in
-                Button {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                        mode = m
-                        spotActive = false
-                    }
-                    unfreeze()
-                } label: {
-                    let isSelected = !spotActive && baseMode == m
-                    ZStack {
-                        Circle().fill(viewfinderInk.opacity(0.55))
-                        Circle().fill(viewfinderPaper).padding(3)
-                        Circle().stroke(isSelected ? viewfinderAccent : viewfinderHairline, lineWidth: isSelected ? 2 : 1).padding(4)
-                        Text(m == .matrix ? "M" : "H")
-                            .font(.system(size: 15, weight: .medium, design: .monospaced))
-                            .foregroundStyle(isSelected ? viewfinderAccent : viewfinderInk)
-                    }
-                    .frame(width: 42, height: 42)
-                    .background(Circle().stroke(viewfinderPaper.opacity(0.72), lineWidth: 1).padding(-3))
-                    .contentShape(Circle())
-                    .accessibilityLabel(m.title)
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                }
-                .buttonStyle(TactileModeStyle())
-            }
+        HStack(spacing: 0) {
+            modeButton(.matrix)
+            Rectangle().fill(viewfinderPaper.opacity(0.34)).frame(width: 1, height: 17)
+                .padding(.horizontal, 2)
+            modeButton(.highlight)
         }
-        .padding(4)
+        .padding(.horizontal, 4)
+        .background(viewfinderInk.opacity(0.48), in: Capsule())
+    }
+
+    private func modeButton(_ meterMode: MeterMode) -> some View {
+        let isSelected = !spotActive && baseMode == meterMode
+        return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                mode = meterMode
+                spotActive = false
+            }
+            unfreeze()
+        } label: {
+            Text(meterMode.title.uppercased())
+                .font(.system(size: 11, weight: isSelected ? .semibold : .regular, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(isSelected ? viewfinderPaper : viewfinderPaper.opacity(0.68))
+                .frame(minWidth: 82, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(meterMode.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Controls

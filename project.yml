@@ -13,11 +13,15 @@ targets:
     platform: iOS
     sources:
       - RolleiMeter
+    resources:
+      - path: RolleiMeter/Fonts
     info:
       path: RolleiMeter/Info.plist
       properties:
         CFBundleDisplayName: RolleiMeter
         NSCameraUsageDescription: The camera is used to measure light.
+        UIAppFonts:
+          - Fonts/AppleGaramond-Bold.ttf
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

@@ -162,7 +162,7 @@ struct RulerView: View {
     }
 }
 
-// MARK: - Simple exposure pair
+// MARK: - Simple exposure and focus
 
 private struct SimpleApertureColumn: View {
     let damp: Damper
@@ -176,61 +176,34 @@ private struct SimpleApertureColumn: View {
         Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
     }
     private var reading: ShutterResult { Exposure.result(for: idealTime) }
-    private var rulerPosition: Double {
-        let boundedTime = max(idealTime, Rollei.fastest)
-        return min(max(log2(Rollei.slowest / boundedTime), 0), log2(Rollei.slowest / Rollei.fastest))
-    }
-
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .regular))
-                    .frame(width: 16, height: 18)
+                    .font(.system(size: 16, weight: .regular))
                 Text("f/" + aperture.label)
-                    .font(.system(size: 16, weight: .medium, design: .default))
+                    .font(.system(size: 15, weight: .medium, design: .monospaced))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(paper)
-            .padding(.horizontal, 9)
-            .frame(height: 34)
-            GeometryReader { geo in
-                let center = geo.size.width / 2
-                ZStack(alignment: .topLeading) {
-                    Rectangle().fill(paper.opacity(0.55)).frame(height: 1).offset(y: 14)
-                    ForEach(Rollei.speeds.indices.reversed(), id: \.self) { i in
-                        let speed = Rollei.speeds[i]
-                        let coordinate = log2(Rollei.slowest / speed.t)
-                        let x = center + CGFloat(coordinate - rulerPosition) * 38
-                        VStack(spacing: 3) {
-                            Rectangle().fill(paper.opacity(0.75)).frame(width: 1, height: i == 0 || i == Rollei.speeds.count - 1 ? 10 : 6)
-                            Text(speed.label)
-                                .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                .foregroundStyle(paper.opacity(0.9))
-                        }
-                        .fixedSize()
-                        .position(x: x, y: 23)
-                    }
-                    Rectangle().fill(paper).frame(width: 1.5, height: 20)
-                        .position(x: center, y: 9)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-            }
-            .frame(height: 43)
-
+            Spacer(minLength: 0)
             Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
-                .font(.system(size: 24, weight: .medium, design: .monospaced))
+                .font(.custom("AppleGaramond-Bold", size: 70))
                 .foregroundStyle(paper)
                 .contentTransition(.numericText())
-                .frame(height: 30)
-                .frame(maxWidth: .infinity)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .animation(.smooth(duration: 0.18), value: reading.label)
+            Text(reading.deviation == nil ? "SHUTTER" : "LIMIT · EV")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(1.1)
+                .foregroundStyle(paper.opacity(0.86))
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(minHeight: 174, maxHeight: 174)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .background(outOfRange ? accentOrange : inRangeGreen)
@@ -268,41 +241,46 @@ private struct SimpleFocusColumn: View {
     let tooClose: Bool
     let feet: Bool
 
-    private var unit: String { feet ? "ft" : "m" }
+    private var unit: String { feet ? "FT" : "M" }
+    private var isBetweenMarks: Bool { !tooClose && advice != nil && advice?.sharp == false }
     private var mainText: String {
-        guard !tooClose, let advice else { return tooClose ? "TOO CLOSE" : "—" }
-        return advice.label == "∞" ? "∞" : advice.label + " " + unit
+        if tooClose { return "<" + (feet ? "3" : "0.9") }
+        guard let advice else { return "—" }
+        return isBetweenMarks ? advice.lo + "–" + advice.hi : advice.label
     }
     private var detailText: String {
-        if tooClose { return "MIN " + (feet ? "3 FT" : "0.9 M") }
+        if tooClose { return "MINIMUM FOCUS · " + unit }
         guard let distance, let advice else { return "NO LIDAR" }
-        if advice.sharp { return Fmt.distance(distance, feet: feet) + " · SHARP" }
-        return "BETWEEN " + advice.lo + "–" + advice.hi + " " + unit.uppercased()
+        let measured = Fmt.distance(distance, feet: feet).uppercased()
+        if isBetweenMarks { return "SET BETWEEN · " + measured }
+        return measured + " · SHARP"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "scope").font(.system(size: 13, weight: .regular))
+                Image(systemName: "scope").font(.system(size: 16, weight: .regular))
                 Text("FOCUS").font(.system(size: 12, weight: .medium, design: .monospaced))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(mutedInk)
             Spacer(minLength: 0)
             Text(mainText)
-                .font(.system(size: tooClose ? 14 : 21, weight: .medium, design: .monospaced))
+                .font(.custom("AppleGaramond-Bold", size: isBetweenMarks ? 54 : 68))
                 .foregroundStyle(tooClose ? warnRed : inkColor)
-                .lineLimit(1).minimumScaleFactor(0.72)
+                .lineLimit(1).minimumScaleFactor(0.58)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentTransition(.numericText())
             Text(detailText)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(0.7)
                 .foregroundStyle(tooClose ? warnRed : (advice?.sharp == true ? goldenGreen : mutedInk))
                 .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 9)
-        .frame(minHeight: 134, maxHeight: 134)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(minHeight: 174, maxHeight: 174)
         .background(paper)
         .accessibilityElement(children: .combine)
     }
@@ -457,6 +435,7 @@ struct FocusPanel: View {
 
     private var bigText: String {
         guard let a = advice else { return "—" }
+        if !a.sharp { return "BETWEEN " + a.lo + "–" + a.hi + " " + unit.uppercased() }
         return a.label == "∞" ? "∞" : a.label + " " + unit
     }
 
@@ -466,7 +445,7 @@ struct FocusPanel: View {
         }
         guard let d = distance, let advice else { return "—" }
         if advice.sharp { return Fmt.distance(d, feet: feet) + " · SHARP" }
-        return "BETWEEN " + advice.lo + "–" + advice.hi + " " + unit.uppercased()
+        return "SUBJECT " + Fmt.distance(d, feet: feet).uppercased()
     }
 
     private var detailColor: Color {
@@ -481,7 +460,7 @@ struct FocusPanel: View {
                 .font(.system(size: 9, weight: .medium, design: .default))
                 .foregroundStyle(mutedInk)
             Text(tooClose ? "TOO CLOSE" : bigText)
-                .font(.system(size: tooClose ? 14 : 20, weight: .medium, design: .monospaced))
+                .font(.system(size: tooClose ? 14 : (advice?.sharp == false ? 17 : 20), weight: .medium, design: .monospaced))
                 .foregroundStyle(tooClose ? warnRed : (advice == nil ? mutedInk : inkColor))
                 .contentTransition(.numericText())
                 .lineLimit(1)
