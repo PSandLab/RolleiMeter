@@ -7,16 +7,21 @@ private let paper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0
 private let inkColor = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
 private let mutedInk = Color(red: Double(0x8B) / 255.0, green: Double(0x89) / 255.0, blue: Double(0x82) / 255.0)
 private let hairline = Color(red: Double(0xD4) / 255.0, green: Double(0xD0) / 255.0, blue: Double(0xC7) / 255.0)
-private let accentOrange = Color(red: Double(0xC4) / 255.0, green: Double(0x2B) / 255.0, blue: Double(0x34) / 255.0)
-private let goldenGreen = Color(red: Double(0x25) / 255.0, green: Double(0x70) / 255.0, blue: Double(0x35) / 255.0)
+private let accentOrange = Color(red: Double(0xB3) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x31) / 255.0)
+private let goldenGreen = Color(red: Double(0x4C) / 255.0, green: Double(0x6B) / 255.0, blue: Double(0x52) / 255.0)
 private let warnRed = accentOrange
+private let inRangeGreen = goldenGreen
 
 private struct Panel: ViewModifier {
     var stroke: Color = hairline
     var lineWidth: CGFloat = 1
 
     func body(content: Content) -> some View {
-        content.background(Rectangle().fill(paper).overlay(Rectangle().stroke(stroke, lineWidth: lineWidth)))
+        content.background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(paper)
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+        }
     }
 }
 
@@ -187,33 +192,30 @@ private struct SimpleApertureColumn: View {
                     .font(.system(size: 16, weight: .medium, design: .default))
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(outOfRange ? paper : inkColor)
+            .foregroundStyle(paper)
             .padding(.horizontal, 9)
             .frame(height: 34)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(selected ? (outOfRange ? paper : inkColor) : Color.clear).frame(height: 1)
+                Rectangle().fill(selected ? paper : Color.clear).frame(height: 1)
             }
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onSelect)
-
             GeometryReader { geo in
                 let center = geo.size.width / 2
                 ZStack(alignment: .topLeading) {
-                    Rectangle().fill(outOfRange ? paper.opacity(0.55) : hairline).frame(height: 1).offset(y: 14)
+                    Rectangle().fill(paper.opacity(0.55)).frame(height: 1).offset(y: 14)
                     ForEach(Rollei.speeds.indices.reversed(), id: \.self) { i in
                         let speed = Rollei.speeds[i]
                         let coordinate = log2(Rollei.slowest / speed.t)
                         let x = center + CGFloat(coordinate - rulerPosition) * 38
                         VStack(spacing: 3) {
-                            Rectangle().fill(outOfRange ? paper.opacity(0.75) : mutedInk).frame(width: 1, height: i == 0 || i == Rollei.speeds.count - 1 ? 10 : 6)
+                            Rectangle().fill(paper.opacity(0.75)).frame(width: 1, height: i == 0 || i == Rollei.speeds.count - 1 ? 10 : 6)
                             Text(speed.label)
                                 .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                .foregroundStyle(outOfRange ? paper.opacity(0.9) : mutedInk)
+                                .foregroundStyle(paper.opacity(0.9))
                         }
                         .fixedSize()
                         .position(x: x, y: 23)
                     }
-                    Rectangle().fill(outOfRange ? paper : inkColor).frame(width: 1.5, height: 20)
+                    Rectangle().fill(paper).frame(width: 1.5, height: 20)
                         .position(x: center, y: 9)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -223,7 +225,7 @@ private struct SimpleApertureColumn: View {
 
             Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
                 .font(.system(size: 24, weight: .medium, design: .monospaced))
-                .foregroundStyle(outOfRange ? paper : inkColor)
+                .foregroundStyle(paper)
                 .contentTransition(.numericText())
                 .frame(height: 30)
                 .frame(maxWidth: .infinity)
@@ -233,7 +235,9 @@ private struct SimpleApertureColumn: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(outOfRange ? accentOrange : paper)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .background(outOfRange ? accentOrange : inRangeGreen)
     }
 
     private var outOfRange: Bool { reading.deviation != nil }
@@ -245,13 +249,57 @@ struct SimpleExposurePair: View {
     let comp: Double
     let selected: Int
     let onSelect: (Int) -> Void
+    @State private var recoveryAperture: Int?
+
+    private var bothOverexposed: Bool {
+        [Rollei.stops[0], Rollei.stops[3]].allSatisfy { stop in
+            Exposure.result(for: Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: stop.n)).status == .tooFast
+        }
+    }
+
+    private func result(at index: Int) -> ShutterResult {
+        let stop = Rollei.stops[index]
+        return Exposure.result(for: Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: stop.n))
+    }
+
+    private var firstUsableRecoveryAperture: Int {
+        let candidates = Array(4..<Rollei.stops.count)
+        return candidates.first { result(at: $0).status == .ok } ?? candidates.first ?? Rollei.stops.count - 1
+    }
+
+    private func selectFromPair(_ index: Int) {
+        guard bothOverexposed else { onSelect(index); return }
+        let recovery = firstUsableRecoveryAperture
+        recoveryAperture = recovery
+        onSelect(recovery)
+    }
+
+    private func advanceRecovery(from index: Int) {
+        guard result(at: index).status == .tooFast, index < Rollei.stops.count - 1 else {
+            recoveryAperture = nil
+            return
+        }
+        let next = ((index + 1)..<Rollei.stops.count).first { result(at: $0).status == .ok } ?? index + 1
+        recoveryAperture = next
+        onSelect(next)
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[0], symbol: "figure.stand", selected: selected == 0, onSelect: { onSelect(0) })
-            Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[3], symbol: "sun.horizon", selected: selected == 3, onSelect: { onSelect(3) })
+        Group {
+            if let recoveryAperture {
+                SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[recoveryAperture], symbol: "sun.max", selected: selected == recoveryAperture, onSelect: { advanceRecovery(from: recoveryAperture) })
+                    .frame(maxWidth: .infinity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            } else {
+                HStack(spacing: 0) {
+                    SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[0], symbol: "figure.stand", selected: selected == 0, onSelect: { selectFromPair(0) })
+                    Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
+                    SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[3], symbol: "sun.horizon", selected: selected == 3, onSelect: { selectFromPair(3) })
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
         }
+        .animation(.easeInOut(duration: 0.22), value: recoveryAperture)
         .background(paper)
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -414,8 +462,9 @@ struct FocusPanel: View {
         if tooClose {
             return "MIN " + (feet ? "3 FT" : "0.9 M")
         }
-        guard let d = distance else { return "—" }
-        return Fmt.distance(d, feet: feet)
+        guard let d = distance, let advice else { return "—" }
+        if advice.sharp { return Fmt.distance(d, feet: feet) + " · SHARP" }
+        return "BETWEEN " + advice.lo + "–" + advice.hi + " " + unit.uppercased()
     }
 
     private var detailColor: Color {
@@ -425,9 +474,9 @@ struct FocusPanel: View {
     }
 
     private var summary: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Text("FOCUS")
-                .font(.system(size: 10, weight: .medium, design: .default))
+                .font(.system(size: 9, weight: .medium, design: .default))
                 .foregroundStyle(mutedInk)
             Text(tooClose ? "TOO CLOSE" : bigText)
                 .font(.system(size: tooClose ? 14 : 20, weight: .medium, design: .monospaced))
@@ -456,10 +505,10 @@ struct FocusPanel: View {
                 .accessibilityLabel("Focus aperture, f/\(aperture)")
             }
             Text(detailText)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundStyle(detailColor)
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.65)
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(mutedInk)
