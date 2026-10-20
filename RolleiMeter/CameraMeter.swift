@@ -1,7 +1,9 @@
 import AVFoundation
 import Combine
+import CoreImage
 import ImageIO
 import QuartzCore
+import UIKit
 
 /// Runs the back camera and turns each frame into a scene EV (ISO 100).
 /// On LiDAR phones it also reads distance at the metered point.
@@ -37,6 +39,8 @@ final class CameraMeter: NSObject, ObservableObject,
     private var focus = CGPoint(x: 0.5, y: 0.5)
     private var smoothed: Double?
     private var distSmoothed: Double?
+    private var latestPreviewPixelBuffer: CVPixelBuffer?
+    private let previewImageContext = CIContext()
     private var lastPublish: CFTimeInterval = 0
     private var lastDepthPublish: CFTimeInterval = 0
 
@@ -317,8 +321,28 @@ final class CameraMeter: NSObject, ObservableObject,
         return (t, iso, n)
     }
 
+    /// Copy the most recent camera frame for the held viewfinder image.
+    /// Rendering happens only when the user presses the shutter control.
+    func previewSnapshot() -> UIImage? {
+        lock.lock()
+        let pixelBuffer = latestPreviewPixelBuffer
+        lock.unlock()
+        guard let pixelBuffer else { return nil }
+
+        let sensorImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let image = sensorImage.extent.width > sensorImage.extent.height
+            ? sensorImage.oriented(.right)
+            : sensorImage
+        guard let cgImage = previewImageContext.createCGImage(image, from: image.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let dev = device, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        lock.lock()
+        latestPreviewPixelBuffer = pb
+        lock.unlock()
 
         let e = frameExposure(sampleBuffer, dev)
         guard e.t > 0, e.iso > 0, e.n > 0 else { return }

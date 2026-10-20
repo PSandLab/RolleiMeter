@@ -24,6 +24,8 @@ struct ContentView: View {
 
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
+    @State private var frozenPreviewImage: UIImage?
+    @State private var controlsExpanded = false
     @State private var meterPrimed = false
     @State private var distPrimed = false
     /// Spot metering only happens after a tap in the viewfinder. Tapping a mode chip goes back.
@@ -189,6 +191,7 @@ struct ContentView: View {
     private func toggleFreeze() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if frozenEV == nil {
+            frozenPreviewImage = meter.previewSnapshot()
             frozenEV = liveEV
             frozenDist = meter.distance
         } else {
@@ -203,6 +206,7 @@ struct ContentView: View {
     private func unfreeze() {
         frozenEV = nil
         frozenDist = nil
+        frozenPreviewImage = nil
     }
 
     private func resetFocusToCenter() {
@@ -236,6 +240,17 @@ struct ContentView: View {
         GeometryReader { geo in
             ZStack {
                 CameraPreview(session: meter.session, onVolumePress: { toggleFreeze() })
+
+                if let frozenPreviewImage {
+                    Image(uiImage: frozenPreviewImage)
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(0.9)
+                        .overlay(viewfinderPaper.opacity(0.04))
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
 
                 // Tap = measure distance there (the crosshair).
                 // Press, hold and drag = spot meter there. Pinch = resize the spot.
@@ -398,20 +413,90 @@ struct ContentView: View {
     // MARK: - Controls
 
     private var controls: some View {
-        HStack {
-            WheelBox(title: "EV", selection: $evIndex, labels: EVComp.labels)
-            Spacer()
-            FreezeButton(frozen: frozenEV != nil) {
-                toggleFreeze()
+        VStack(spacing: 8) {
+            if controlsExpanded {
+                VStack(spacing: 4) {
+                    HStack {
+                        Spacer()
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                controlsExpanded = false
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(viewfinderInk.opacity(0.65))
+                                .frame(width: 32, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Hide exposure controls")
+                    }
+                    HStack(spacing: 12) {
+                        WheelBox(title: "EV", selection: $evIndex, labels: EVComp.labels)
+                        WheelBox(
+                            title: useDIN ? "DIN" : "ISO",
+                            selection: $isoIndex,
+                            labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) }
+                        )
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            Spacer()
-            WheelBox(
-                title: useDIN ? "DIN" : "ISO",
-                selection: $isoIndex,
-                labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) }
-            )
+
+            HStack {
+                if controlsExpanded {
+                    Spacer(minLength: 0)
+                } else {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            controlsExpanded = true
+                        }
+                    } label: {
+                        compactSettingLabel("EV", value: EVComp.labels[safeEVIndex])
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Adjust exposure compensation")
+                }
+
+                Spacer()
+
+                FreezeButton(frozen: frozenEV != nil) {
+                    toggleFreeze()
+                }
+
+                Spacer()
+
+                if controlsExpanded {
+                    Spacer(minLength: 0)
+                } else {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            controlsExpanded = true
+                        }
+                    } label: {
+                        compactSettingLabel(useDIN ? "DIN" : "ISO", value: ISOScale.label(ISOScale.values[safeISOIndex], din: useDIN))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Adjust film speed")
+                }
+            }
         }
         .padding(.horizontal, 4)
+
+    }
+
+    private func compactSettingLabel(_ title: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(AppTypography.next(size: 9, weight: .medium))
+                .tracking(0.8)
+            Text(value)
+                .font(AppTypography.mono(size: 12, weight: .medium))
+        }
+        .foregroundStyle(viewfinderInk.opacity(0.78))
+        .frame(minWidth: 58, minHeight: 48)
+        .contentShape(Rectangle())
     }
 }
 
