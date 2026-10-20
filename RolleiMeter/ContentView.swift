@@ -3,6 +3,7 @@ import UIKit
 
 private let viewfinderPaper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
 private let viewfinderInk = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
+private let viewfinderAccent = Color(red: Double(0xB3) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x31) / 255.0)
 
 struct ContentView: View {
     @StateObject private var meter = CameraMeter()
@@ -23,6 +24,7 @@ struct ContentView: View {
 
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
+    @State private var meterPrimed = false
     @State private var distPrimed = false
     /// Spot metering only happens after a tap in the viewfinder. Tapping a mode chip goes back.
     @State private var spotActive = false
@@ -38,7 +40,6 @@ struct ContentView: View {
     @State private var spotRadius: CGFloat = 0.05
     @State private var pinchBase: CGFloat = 0.05
     @State private var showSettings = false
-    @Namespace private var chipNS
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
@@ -147,7 +148,10 @@ struct ContentView: View {
         .onChange(of: spotBuf) { pushConfig() }
         .onChange(of: focusBuf) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
-        .onChange(of: meter.sceneEV) { evDamp.set([ev]) }
+        .onChange(of: meter.sceneEV) {
+            evDamp.set([ev], snap: !meterPrimed)
+            meterPrimed = true
+        }
         .onChange(of: calibration) { evDamp.set([ev]) }
         .onChange(of: frozenEV) { evDamp.set([ev]) }
         .onChange(of: shownDistance) { syncDistance() }
@@ -334,7 +338,7 @@ struct ContentView: View {
     }
 
     private var modeChips: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach([MeterMode.matrix, MeterMode.highlight], id: \.self) { m in
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -344,23 +348,23 @@ struct ContentView: View {
                     }
                     unfreeze()
                 } label: {
-                    Text(m.title)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(viewfinderPaper)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background {
-                            if !spotActive && baseMode == m {
-                                Capsule()
-                                    .fill(viewfinderInk)
-                                    .matchedGeometryEffect(id: "chip", in: chipNS)
-                            }
-                        }
+                    VStack(spacing: 3) {
+                        Text(m.title.uppercased())
+                            .font(.system(size: 10, weight: .medium, design: .default))
+                            .foregroundStyle(viewfinderPaper.opacity(!spotActive && baseMode == m ? 1 : 0.72))
+                        Capsule()
+                            .fill(!spotActive && baseMode == m ? viewfinderAccent : Color.clear)
+                            .frame(height: 1.5)
+                    }
+                    .frame(width: 74, height: 30)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
         }
-        .padding(4)
-        .background(viewfinderInk.opacity(0.35), in: Capsule())
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(viewfinderInk.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     // MARK: - Controls
