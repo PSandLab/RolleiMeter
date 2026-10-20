@@ -76,10 +76,10 @@ struct EVBadge: View {
             Text("EV " + String(format: "%.1f", damp.values[0]))
         }
         .font(.system(size: 13, weight: .medium, design: .monospaced))
-        .foregroundStyle(.white)
+        .foregroundStyle(paper)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Color.black.opacity(0.55), in: Capsule())
+        .background(inkColor.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
     }
@@ -181,7 +181,8 @@ private struct SimpleApertureColumn: View {
     }
     private var reading: ShutterResult { Exposure.result(for: idealTime) }
     private var rulerPosition: Double {
-        min(max(log2(max(idealTime, Rollei.fastest) / Rollei.fastest), 0), log2(Rollei.slowest / Rollei.fastest))
+        let boundedTime = max(idealTime, Rollei.fastest)
+        return min(max(log2(Rollei.slowest / boundedTime), 0), log2(Rollei.slowest / Rollei.fastest))
     }
 
     var body: some View {
@@ -189,6 +190,7 @@ private struct SimpleApertureColumn: View {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 13, weight: .regular))
+                    .frame(width: 16, height: 18)
                 Text("f/" + aperture.label)
                     .font(.system(size: 17, weight: .medium, design: .monospaced))
                 Spacer(minLength: 0)
@@ -255,12 +257,13 @@ struct SimpleExposurePair: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[0], symbol: "person.crop.portrait", selected: selected == 0, onSelect: { onSelect(0) })
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[0], symbol: "figure.stand", selected: selected == 0, onSelect: { onSelect(0) })
             Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[3], symbol: "mountain.2", selected: selected == 3, onSelect: { onSelect(3) })
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[3], symbol: "sun.horizon", selected: selected == 3, onSelect: { onSelect(3) })
         }
         .background(paper)
-        .overlay(Rectangle().stroke(hairline, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -295,7 +298,7 @@ struct WheelBox: View {
                     .allowsHitTesting(false)
             }
             .modifier(Panel())
-            .clipShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .onChange(of: selection) {
                 UISelectionFeedbackGenerator().selectionChanged()
             }
@@ -350,32 +353,17 @@ private struct FocusBrackets: Shape {
     }
 }
 
-/// Shows exactly where LiDAR is measuring, with the distance next to it.
+/// Shows the LiDAR focus point as a clean cursor on the viewfinder.
 struct FocusMarker: View {
-    let text: String?
     let tooClose: Bool
-    let labelAbove: Bool
 
     var body: some View {
-        ZStack {
-            FocusBrackets()
-                .stroke(tooClose ? warnRed : Color.white,
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                .frame(width: 34, height: 34)
-            if let text {
-                Text(text)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background((tooClose ? warnRed : Color.black).opacity(0.65), in: Capsule())
-                    .offset(y: labelAbove ? -32 : 32)
-                    .contentTransition(.numericText())
-            }
-        }
-        .frame(width: 34, height: 34)
-        .animation(.smooth(duration: 0.2), value: text)
-        .animation(.smooth(duration: 0.2), value: tooClose)
+        FocusBrackets()
+            .stroke(tooClose ? warnRed : paper,
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .frame(width: 30, height: 30)
+            .animation(.smooth(duration: 0.2), value: tooClose)
+            .allowsHitTesting(false)
     }
 }
 
@@ -417,7 +405,8 @@ struct FocusPanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 2 : 1))
+        .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .animation(.smooth(duration: 0.25), value: tooClose)
     }
 
@@ -428,56 +417,41 @@ struct FocusPanel: View {
         return a.label == "∞" ? "∞" : a.label + " " + unit
     }
 
+    private var detailText: String {
+        if tooClose {
+            return "NOW " + Fmt.distance(distance, feet: feet) + " · MIN " + (feet ? "3 FT" : "0.9 M")
+        }
+        guard let d = distance, let advice else { return "NO LIDAR READING" }
+        let recommendation = advice.sharp ? "✓ ƒ" + aperture : advice.lo + "–" + advice.hi
+        return Fmt.distance(d, feet: feet) + "  " + recommendation
+    }
+
+    private var detailColor: Color {
+        if tooClose { return warnRed }
+        guard let advice else { return mutedInk }
+        return advice.sharp ? goldenGreen : accentOrange
+    }
+
     private var summary: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("FOCUS")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                if tooClose {
-                    TimelineView(.animation) { ctx in
-                        Text("TOO CLOSE")
-                            .font(.system(size: 22, weight: .bold, design: .monospaced))
-                            .foregroundStyle(warnRed)
-                            .opacity(0.65 + 0.35 * sin(ctx.date.timeIntervalSinceReferenceDate * 7))
-                    }
-                } else {
-                    Text(bigText)
-                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(advice == nil ? mutedInk : inkColor)
-                        .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.2), value: bigText)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            VStack(alignment: .trailing, spacing: 2) {
-                if tooClose {
-                    Text("now " + Fmt.distance(distance, feet: feet))
-                        .foregroundStyle(warnRed)
-                    Text("min " + (feet ? "3 ft" : "0.9 m"))
-                        .foregroundStyle(warnRed)
-                } else if let d = distance, let a = advice {
-                    Text(Fmt.distance(d, feet: feet) + " measured")
-                        .foregroundStyle(inkColor)
-                    if a.sharp {
-                        Text("✓ sharp at ƒ" + aperture)
-                            .foregroundStyle(goldenGreen)
-                    } else {
-                        Text("set between \(a.lo) and \(a.hi)")
-                            .foregroundStyle(accentOrange)
-                    }
-                } else {
-                    Text("no LiDAR reading")
-                        .foregroundStyle(mutedInk)
-                }
-            }
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-
+        HStack(spacing: 8) {
+            Text("FOCUS")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(mutedInk)
+            Text(tooClose ? "TOO CLOSE" : bigText)
+                .font(.system(size: tooClose ? 14 : 20, weight: .medium, design: .monospaced))
+                .foregroundStyle(tooClose ? warnRed : (advice == nil ? mutedInk : inkColor))
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 2)
+            Text(detailText)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(detailColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(mutedInk)
                 .rotationEffect(.degrees(expanded ? 180 : 0))
         }
         .contentShape(Rectangle())
@@ -558,7 +532,7 @@ struct FocusPanel: View {
                         .foregroundStyle(inkColor)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3)
-                        .background(Color.black.opacity(0.08), in: Capsule())
+                        .background(inkColor.opacity(0.08), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 Text(far.map { Fmt.distance($0, feet: feet) } ?? "")
