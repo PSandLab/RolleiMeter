@@ -195,7 +195,7 @@ private struct SimpleApertureColumn: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.62)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .animation(.smooth(duration: 0.18), value: reading.label)
+                .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
