@@ -15,9 +15,9 @@ targets:
       - path: RolleiMeter
         excludes:
           - Fonts/**
-      - path: RolleiMeter/Fonts/AppleGaramond.ttf
+      - path: RolleiMeter/Fonts/AtkinsonHyperlegibleMono.ttf
         buildPhase: resources
-      - path: RolleiMeter/Fonts/AppleGaramond-Bold.ttf
+      - path: RolleiMeter/Fonts/AtkinsonHyperlegibleNext.ttf
         buildPhase: resources
     info:
       path: RolleiMeter/Info.plist
@@ -25,8 +25,8 @@ targets:
         CFBundleDisplayName: RolleiMeter
         NSCameraUsageDescription: The camera is used to measure light.
         UIAppFonts:
-          - AppleGaramond.ttf
-          - AppleGaramond-Bold.ttf
+          - AtkinsonHyperlegibleMono.ttf
+          - AtkinsonHyperlegibleNext.ttf
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

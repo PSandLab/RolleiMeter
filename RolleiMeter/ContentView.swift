@@ -305,7 +305,7 @@ struct ContentView: View {
 
                 if showHint {
                     Text("Tap: distance   ·   Hold: spot meter")
-                        .font(AppTypography.font(size: 12, weight: .medium))
+                        .font(AppTypography.next(size: 12, weight: .medium))
                         .foregroundStyle(viewfinderPaper)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -337,7 +337,7 @@ struct ContentView: View {
                 if meter.denied {
                     VStack(spacing: 10) {
                         Text("Camera access is off")
-                            .font(AppTypography.font(size: 16, weight: .semibold))
+                            .font(AppTypography.next(size: 16, weight: .semibold))
                         Button("Open Settings") {
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 UIApplication.shared.open(url)
@@ -376,7 +376,7 @@ struct ContentView: View {
             unfreeze()
         } label: {
             Text(meterMode.title.uppercased())
-                .font(AppTypography.font(size: 11, weight: isSelected ? .semibold : .regular))
+                .font(AppTypography.next(size: 11, weight: isSelected ? .semibold : .regular))
                 .tracking(0.8)
                 .foregroundStyle(isSelected ? viewfinderPaper : viewfinderPaper.opacity(0.68))
                 .frame(minWidth: 82, minHeight: 44)
