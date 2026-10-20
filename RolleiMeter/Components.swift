@@ -121,7 +121,7 @@ struct RulerView: View {
                         .contentTransition(.numericText())
                         .frame(maxWidth: .infinity)
                         .minimumScaleFactor(0.7)
-                        .animation(.smooth(duration: 0.2), value: r.deviation ?? 0)
+                        .animation(.smooth(duration: 0.2), value: r.deviation.map(Fmt.exposureAmount) ?? r.label)
                 }
             }
 
@@ -243,14 +243,12 @@ private struct SimpleFocusColumn: View {
     private var mainText: String {
         if tooClose { return "0" }
         guard let advice else { return "—" }
-        return isBetweenMarks ? advice.lo + "–" + advice.hi : advice.label
+        return advice.label
     }
     private var detailText: String {
         if tooClose { return "" }
-        guard let distance, let advice else { return "NO LIDAR" }
-        let measured = Fmt.distance(distance, feet: feet).uppercased()
-        if isBetweenMarks { return "SET BETWEEN · " + measured }
-        return measured + " · SHARP"
+        guard let distance, advice != nil else { return "NO LIDAR" }
+        return Fmt.distance(distance, feet: feet).uppercased()
     }
 
     var body: some View {
@@ -263,12 +261,23 @@ private struct SimpleFocusColumn: View {
             }
             .foregroundStyle(mutedInk)
             Spacer(minLength: 10)
-            Text(mainText)
-                .font(AppTypography.bold(size: tooClose ? 80 : (isBetweenMarks ? 54 : 68)))
-                .foregroundStyle(tooClose ? warnRed : inkColor)
-                .lineLimit(1).minimumScaleFactor(0.58)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .contentTransition(.numericText())
+            Group {
+                if tooClose {
+                    Text("0")
+                        .font(AppTypography.bold(size: 80))
+                        .foregroundStyle(warnRed)
+                } else if isBetweenMarks, let advice {
+                    FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 34)
+                } else {
+                    Text(mainText)
+                        .font(AppTypography.bold(size: 68))
+                        .foregroundStyle(inkColor)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.58)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .contentTransition(.numericText())
             if !detailText.isEmpty {
                 Text(detailText)
                     .font(AppTypography.next(size: 10, weight: .medium))
@@ -284,6 +293,31 @@ private struct SimpleFocusColumn: View {
         .frame(minHeight: 174, maxHeight: 174)
         .background(paper)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Lens marks with a small downward index showing the interval to set between.
+private struct FocusRangeIndicator: View {
+    let lo: String
+    let hi: String
+    let fontSize: CGFloat
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Text(lo)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.system(size: max(9, fontSize * 0.32), weight: .semibold))
+                .foregroundStyle(accentOrange)
+                .frame(width: max(13, fontSize * 0.42))
+            Text(hi)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(AppTypography.bold(size: fontSize))
+        .foregroundStyle(inkColor)
+        .minimumScaleFactor(0.65)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Focus between \(lo) and \(hi)")
     }
 }
 
@@ -460,12 +494,16 @@ struct FocusPanel: View {
             Text("FOCUS")
                 .font(AppTypography.next(size: 9, weight: .medium))
                 .foregroundStyle(mutedInk)
-            Text(tooClose ? "TOO CLOSE" : bigText)
-                .font(AppTypography.font(size: tooClose ? 14 : (advice?.sharp == false ? 17 : 20), weight: .medium))
-                .foregroundStyle(tooClose ? warnRed : (advice == nil ? mutedInk : inkColor))
-                .contentTransition(.numericText())
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if !tooClose, let advice, !advice.sharp {
+                FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 17)
+            } else {
+                Text(tooClose ? "TOO CLOSE" : bigText)
+                    .font(AppTypography.font(size: tooClose ? 14 : 20, weight: .medium))
+                    .foregroundStyle(tooClose ? warnRed : (advice == nil ? mutedInk : inkColor))
+                    .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
             Spacer(minLength: 2)
             if showsAperturePicker {
                 Menu {
