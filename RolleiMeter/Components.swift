@@ -7,7 +7,7 @@ private let paper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0
 private let inkColor = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
 private let mutedInk = Color(red: Double(0x8B) / 255.0, green: Double(0x89) / 255.0, blue: Double(0x82) / 255.0)
 private let hairline = Color(red: Double(0xD4) / 255.0, green: Double(0xD0) / 255.0, blue: Double(0xC7) / 255.0)
-private let accentOrange = Color(red: Double(0xB6) / 255.0, green: Double(0x5B) / 255.0, blue: Double(0x4B) / 255.0)
+private let accentOrange = Color(red: Double(0xC4) / 255.0, green: Double(0x2B) / 255.0, blue: Double(0x34) / 255.0)
 private let goldenGreen = Color(red: Double(0x25) / 255.0, green: Double(0x70) / 255.0, blue: Double(0x35) / 255.0)
 private let warnRed = accentOrange
 
@@ -110,12 +110,13 @@ struct RulerView: View {
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
                     let r = res[i]
-                    Text(r.label)
-                        .font(.system(size: 16, weight: i == golden ? .semibold : .regular, design: .monospaced))
-                        .foregroundStyle(r.status == .ok ? (i == golden ? goldenGreen : inkColor) : accentOrange)
+                    Text(r.deviation.map(Fmt.exposureAmount) ?? r.label)
+                        .font(.system(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium, design: .monospaced))
+                        .foregroundStyle(r.deviation == nil ? (i == golden ? goldenGreen : inkColor) : accentOrange)
                         .contentTransition(.numericText())
                         .frame(maxWidth: .infinity)
-                        .animation(.smooth(duration: 0.2), value: r.label)
+                        .minimumScaleFactor(0.7)
+                        .animation(.smooth(duration: 0.2), value: r.deviation ?? 0)
                 }
             }
 
@@ -132,29 +133,20 @@ struct RulerView: View {
             // Apertures. Tap selects (drives the depth-of-field band), long-press sets the golden one.
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
-                    let reading = res[i]
-                    VStack(spacing: 1) {
-                        Text("f/" + Rollei.stops[i].label)
-                            .font(.system(size: 11, weight: i == golden ? .semibold : .regular, design: .monospaced))
-                            .foregroundStyle(reading.deviation == nil ? (i == golden ? goldenGreen : inkColor) : paper)
-                            .frame(height: 14)
-                        Text(reading.deviation.map(Fmt.exposureDeviation) ?? "")
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(paper)
-                            .frame(height: 10)
-                    }
-                    .frame(height: 30)
-                    .background(reading.deviation == nil ? Color.clear : accentOrange)
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(selected == i ? inkColor : Color.clear).frame(height: 1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onSelect(i) }
-                    .onLongPressGesture(minimumDuration: 0.5) {
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        onToggleGolden(i)
-                    }
+                    Text("f/" + Rollei.stops[i].label)
+                        .font(.system(size: 11, weight: i == golden ? .semibold : .regular, design: .monospaced))
+                        .foregroundStyle(i == golden ? goldenGreen : inkColor)
+                        .frame(height: 22)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(selected == i ? inkColor : Color.clear).frame(height: 1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onSelect(i) }
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            onToggleGolden(i)
+                        }
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
@@ -186,25 +178,20 @@ private struct SimpleApertureColumn: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 13, weight: .regular))
                     .frame(width: 16, height: 18)
                 Text("f/" + aperture.label)
-                    .font(.system(size: 17, weight: .medium, design: .monospaced))
+                    .font(.system(size: 16, weight: .medium, design: .default))
                 Spacer(minLength: 0)
-                if let deviation = reading.deviation {
-                    Text(Fmt.exposureDeviation(deviation))
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                }
             }
-            .foregroundStyle(reading.deviation == nil ? inkColor : paper)
+            .foregroundStyle(outOfRange ? paper : inkColor)
             .padding(.horizontal, 9)
-            .frame(height: 42)
-            .background(reading.deviation == nil ? Color.clear : accentOrange)
+            .frame(height: 34)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(selected ? inkColor : Color.clear).frame(height: 1)
+                Rectangle().fill(selected ? (outOfRange ? paper : inkColor) : Color.clear).frame(height: 1)
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onSelect)
@@ -212,21 +199,21 @@ private struct SimpleApertureColumn: View {
             GeometryReader { geo in
                 let center = geo.size.width / 2
                 ZStack(alignment: .topLeading) {
-                    Rectangle().fill(hairline).frame(height: 1).offset(y: 14)
+                    Rectangle().fill(outOfRange ? paper.opacity(0.55) : hairline).frame(height: 1).offset(y: 14)
                     ForEach(Rollei.speeds.indices.reversed(), id: \.self) { i in
                         let speed = Rollei.speeds[i]
                         let coordinate = log2(Rollei.slowest / speed.t)
                         let x = center + CGFloat(coordinate - rulerPosition) * 38
                         VStack(spacing: 3) {
-                            Rectangle().fill(hairline).frame(width: 1, height: i == 0 || i == Rollei.speeds.count - 1 ? 10 : 6)
+                            Rectangle().fill(outOfRange ? paper.opacity(0.75) : mutedInk).frame(width: 1, height: i == 0 || i == Rollei.speeds.count - 1 ? 10 : 6)
                             Text(speed.label)
                                 .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                .foregroundStyle(mutedInk)
+                                .foregroundStyle(outOfRange ? paper.opacity(0.9) : mutedInk)
                         }
                         .fixedSize()
                         .position(x: x, y: 23)
                     }
-                    Rectangle().fill(inkColor).frame(width: 1.5, height: 20)
+                    Rectangle().fill(outOfRange ? paper : inkColor).frame(width: 1.5, height: 20)
                         .position(x: center, y: 9)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -234,18 +221,22 @@ private struct SimpleApertureColumn: View {
             }
             .frame(height: 43)
 
-            Text(reading.label)
+            Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
                 .font(.system(size: 24, weight: .medium, design: .monospaced))
-                .foregroundStyle(inkColor)
+                .foregroundStyle(outOfRange ? paper : inkColor)
                 .contentTransition(.numericText())
                 .frame(height: 30)
                 .frame(maxWidth: .infinity)
                 .animation(.smooth(duration: 0.18), value: reading.label)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(outOfRange ? accentOrange : paper)
     }
+
+    private var outOfRange: Bool { reading.deviation != nil }
 }
 
 struct SimpleExposurePair: View {
@@ -381,8 +372,10 @@ struct FocusPanel: View {
     let tooClose: Bool
     let feet: Bool
     let aperture: String
+    let showsAperturePicker: Bool
     @Binding var expanded: Bool
     let onToggleUnits: () -> Void
+    let onSelectAperture: (Int) -> Void
 
     private var marks: [(label: String, m: Double)] { feet ? Focus.feetMarks : Focus.meterMarks }
     private var unit: String { feet ? "ft" : "m" }
@@ -402,8 +395,8 @@ struct FocusPanel: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity)
         .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -419,11 +412,10 @@ struct FocusPanel: View {
 
     private var detailText: String {
         if tooClose {
-            return "NOW " + Fmt.distance(distance, feet: feet) + " · MIN " + (feet ? "3 FT" : "0.9 M")
+            return "MIN " + (feet ? "3 FT" : "0.9 M")
         }
-        guard let d = distance, let advice else { return "NO LIDAR READING" }
-        let recommendation = advice.sharp ? "✓ ƒ" + aperture : advice.lo + "–" + advice.hi
-        return Fmt.distance(d, feet: feet) + "  " + recommendation
+        guard let d = distance else { return "—" }
+        return Fmt.distance(d, feet: feet)
     }
 
     private var detailColor: Color {
@@ -433,9 +425,9 @@ struct FocusPanel: View {
     }
 
     private var summary: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text("FOCUS")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .default))
                 .foregroundStyle(mutedInk)
             Text(tooClose ? "TOO CLOSE" : bigText)
                 .font(.system(size: tooClose ? 14 : 20, weight: .medium, design: .monospaced))
@@ -444,13 +436,32 @@ struct FocusPanel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 2)
+            if showsAperturePicker {
+                Menu {
+                    ForEach(Rollei.stops.indices, id: \.self) { index in
+                        Button("f/" + Rollei.stops[index].label) { onSelectAperture(index) }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("f/" + aperture)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    .foregroundStyle(inkColor)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(hairline.opacity(0.45), in: Capsule())
+                }
+                .accessibilityLabel("Focus aperture, f/\(aperture)")
+            }
             Text(detailText)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(detailColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
             Image(systemName: "chevron.down")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(mutedInk)
                 .rotationEffect(.degrees(expanded ? 180 : 0))
         }
@@ -466,7 +477,7 @@ struct FocusPanel: View {
 
         return VStack(spacing: 0) {
             GeometryReader { geo in
-                let inset: CGFloat = 12
+                let inset: CGFloat = 8
                 let w = geo.size.width - inset * 2
                 let subjectX = inset + CGFloat(damp.values[0]) * w
                 let nearX = inset + CGFloat(damp.values[1]) * w
