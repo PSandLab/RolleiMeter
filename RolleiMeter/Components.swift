@@ -271,7 +271,6 @@ private struct SimpleFocusColumn: View {
             }
             .foregroundStyle(mutedInk)
 
-            Spacer(minLength: 2)
             if tooClose {
                 Text("0")
                     .font(AppTypography.bold(size: 68))
@@ -279,8 +278,7 @@ private struct SimpleFocusColumn: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let distance {
                 FocusRingScale(distance: distance, aperture: aperture, feet: feet)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 128)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Text("NO LIDAR")
                     .font(AppTypography.next(size: 11, weight: .medium))
@@ -288,7 +286,6 @@ private struct SimpleFocusColumn: View {
                     .foregroundStyle(mutedInk)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Spacer(minLength: 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 6)
@@ -299,8 +296,8 @@ private struct SimpleFocusColumn: View {
     }
 }
 
-/// A large lens-style focus scale. The red index remains fixed while the engraved
-/// distance marks and aperture-specific depth-of-field arc rotate underneath it.
+/// One big lens-style focus dial. The red pointer is fixed at the top; the scale
+/// turns beneath it. Only the marks near the pointer are numbered (left / middle / right).
 private struct FocusRingScale: View {
     let distance: Double
     let aperture: (label: String, n: Double)
@@ -320,102 +317,108 @@ private struct FocusRingScale: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let size = geometry.size
-            let diameter = min(size.width, size.height)
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let radius = diameter * 0.34
-            let labelRadius = diameter * 0.445
-            let rotation = 90 - 180 * Focus.position(distance)
-            let ringMarks = marks
-            let markPositions = ringMarks.map { Focus.position($0.m) }
-            let nearPosition = Focus.position(depthRange.near)
-            let farPosition = Focus.position(depthRange.far)
-
-            ZStack {
-                ZStack {
-                    Canvas { context, canvasSize in
-                        let c = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                        func point(_ p: Double, radius: CGFloat) -> CGPoint {
-                            let angle = Double.pi + Double.pi * p
-                            return CGPoint(
-                                x: c.x + CGFloat(cos(angle)) * radius,
-                                y: c.y + CGFloat(sin(angle)) * radius
-                            )
-                        }
-                        func arc(_ start: Double, _ end: Double) -> Path {
-                            var path = Path()
-                            let steps = max(2, Int(abs(end - start) * 100))
-                            for step in 0...steps {
-                                let p = start + (end - start) * Double(step) / Double(steps)
-                                let value = point(p, radius: radius)
-                                if step == 0 { path.move(to: value) } else { path.addLine(to: value) }
-                            }
-                            return path
-                        }
-
-                        context.stroke(
-                            arc(0, 1),
-                            with: .color(hairline),
-                            style: StrokeStyle(lineWidth: 1, lineCap: .round)
-                        )
-                        context.stroke(
-                            arc(nearPosition, farPosition),
-                            with: .color(goldenGreen.opacity(0.9)),
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                        )
-
-                        var ticks = Path()
-                        for step in 0...100 {
-                            let p = Double(step) / 100
-                            let isLensMark = markPositions.contains { abs($0 - p) < 0.005 }
-                            let isMedium = step.isMultiple(of: 5)
-                            let length: CGFloat = isLensMark ? 8 : (isMedium ? 5 : 2.5)
-                            let inner = point(p, radius: radius - length / 2)
-                            let outer = point(p, radius: radius + length / 2)
-                            ticks.move(to: inner)
-                            ticks.addLine(to: outer)
-                        }
-                        context.stroke(ticks, with: .color(mutedInk), lineWidth: 1)
-                    }
-                    .frame(width: diameter, height: diameter)
-
-                    ForEach(ringMarks.indices, id: \.self) { index in
-                        let mark = ringMarks[index]
-                        let p = markPositions[index]
-                        let angle = Double.pi + Double.pi * p
-                        Text(mark.label)
-                            .font(AppTypography.mono(size: 10, weight: .medium))
-                            .foregroundStyle(inkColor)
-                            .fixedSize()
-                            .position(
-                                x: center.x + CGFloat(cos(angle)) * labelRadius,
-                                y: center.y + CGFloat(sin(angle)) * labelRadius
-                            )
-                    }
-                }
-                .frame(width: diameter, height: diameter)
-                .rotationEffect(.degrees(rotation))
-                .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
-
-                // Fixed index: the rotating lens scale turns behind this point.
-                Path { path in
-                    path.move(to: CGPoint(x: center.x, y: center.y - radius - 10))
-                    path.addLine(to: CGPoint(x: center.x, y: center.y - radius - 1))
-                }
-                .stroke(accentOrange, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-
-                Image(systemName: "arrowtriangle.down.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(accentOrange)
-                    .position(x: center.x, y: center.y - radius - 1)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        FocusDialFace(
+            position: Focus.position(distance),
+            near: Focus.position(depthRange.near),
+            far: Focus.position(depthRange.far),
+            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
+        )
+        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
 }
+
+private struct FocusDialFace: View, Animatable {
+    var position: Double
+    var near: Double
+    var far: Double
+    let marks: [(label: String, p: Double)]
+
+    var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
+        get { AnimatablePair(position, AnimatablePair(near, far)) }
+        set {
+            position = newValue.first
+            near = newValue.second.first
+            far = newValue.second.second
+        }
+    }
+
+    /// Degrees of dial rotation per full focus travel.
+    private let degreesPerUnit = 260.0
+
+    var body: some View {
+        Canvas { context, size in
+            let top: CGFloat = 16
+            let radius = min(size.width * 0.6, size.height - 34)
+            let cx = size.width / 2
+            let cy = top + radius
+            let maxA = min(asin(min(1, Double((size.width / 2 - 8) / radius))), 1.0)
+
+            func angle(_ p: Double) -> Double { (p - position) * degreesPerUnit * .pi / 180 }
+            func point(_ a: Double, _ r: CGFloat) -> CGPoint {
+                CGPoint(x: cx + CGFloat(sin(a)) * r, y: cy - CGFloat(cos(a)) * r)
+            }
+            func fade(_ a: Double) -> Double {
+                let edge = 0.18
+                return min(1, max(0, (maxA - abs(a)) / edge))
+            }
+
+            // Depth-of-field band, just inside the ticks.
+            var band = Path()
+            let lo = max(near, position - maxA / (degreesPerUnit * .pi / 180))
+            let hi = min(far, position + maxA / (degreesPerUnit * .pi / 180))
+            if hi > lo {
+                let steps = 40
+                for s in 0...steps {
+                    let p = lo + (hi - lo) * Double(s) / Double(steps)
+                    let pt = point(angle(p), radius - 8)
+                    if s == 0 { band.move(to: pt) } else { band.addLine(to: pt) }
+                }
+                context.stroke(band, with: .color(goldenGreen.opacity(0.9)),
+                               style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            }
+
+            // Ticks
+            let markPositions = marks.map { $0.p }
+            for i in 0...100 {
+                let p = Double(i) / 100
+                let a = angle(p)
+                let f = fade(a)
+                if f <= 0 { continue }
+                let isMark = markPositions.contains { abs($0 - p) < 0.005 }
+                let length: CGFloat = isMark ? 12 : (i.isMultiple(of: 5) ? 8 : 5)
+                var tick = Path()
+                tick.move(to: point(a, radius))
+                tick.addLine(to: point(a, radius - length))
+                context.stroke(tick, with: .color((isMark ? inkColor : mutedInk).opacity(f)),
+                               lineWidth: isMark ? 1.5 : 1)
+            }
+
+            // Numbers, upright, only for marks inside the window.
+            for (index, mark) in marks.enumerated() {
+                let a = angle(mark.p)
+                let f = fade(a)
+                if f <= 0 { continue }
+                let color: Color = index == 0 ? goldenGreen : inkColor
+                let text = context.resolve(
+                    Text(mark.label).font(AppTypography.bold(size: 17)).foregroundColor(color.opacity(f))
+                )
+                context.draw(text, at: point(a, radius - 30), anchor: .center)
+            }
+
+            // Fixed pointer
+            var tri = Path()
+            tri.move(to: CGPoint(x: cx - 6, y: 1))
+            tri.addLine(to: CGPoint(x: cx + 6, y: 1))
+            tri.addLine(to: CGPoint(x: cx, y: top - 1))
+            tri.closeSubpath()
+            context.fill(tri, with: .color(accentOrange))
+        }
+        .clipped()
+    }
+}
+
 
 /// Lens marks with a small downward index showing the interval to set between.
 private struct FocusRangeIndicator: View {
