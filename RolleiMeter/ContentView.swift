@@ -245,7 +245,7 @@ struct ContentView: View {
                     Image(uiImage: frozenPreviewImage)
                         .resizable()
                         .scaledToFill()
-                        .opacity(0.9)
+                        .opacity(1)
                         .overlay(viewfinderPaper.opacity(0.04))
                         .transition(.opacity)
                         .allowsHitTesting(false)
@@ -415,88 +415,49 @@ struct ContentView: View {
     private var controls: some View {
         VStack(spacing: 8) {
             if controlsExpanded {
-                VStack(spacing: 4) {
-                    HStack {
-                        Spacer()
-                        Button {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                                controlsExpanded = false
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(viewfinderInk.opacity(0.65))
-                                .frame(width: 32, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Hide exposure controls")
-                    }
-                    HStack(spacing: 12) {
-                        WheelBox(title: "EV", selection: $evIndex, labels: EVComp.labels)
-                        WheelBox(
-                            title: useDIN ? "DIN" : "ISO",
-                            selection: $isoIndex,
-                            labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) }
-                        )
-                    }
+                HStack(spacing: 12) {
+                    WheelBox(title: "EV", selection: $evIndex, labels: EVComp.labels)
+                    WheelBox(
+                        title: useDIN ? "DIN" : "ISO",
+                        selection: $isoIndex,
+                        labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) }
+                    )
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            HStack {
-                if controlsExpanded {
-                    Spacer(minLength: 0)
-                } else {
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                            controlsExpanded = true
-                        }
-                    } label: {
-                        compactSettingLabel("EV", value: EVComp.labels[safeEVIndex])
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Adjust exposure compensation")
-                }
-
-                Spacer()
-
+            ZStack {
                 FreezeButton(frozen: frozenEV != nil) {
                     toggleFreeze()
                 }
 
-                Spacer()
-
-                if controlsExpanded {
-                    Spacer(minLength: 0)
-                } else {
+                HStack {
                     Button {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                            controlsExpanded = true
+                            controlsExpanded.toggle()
                         }
                     } label: {
-                        compactSettingLabel(useDIN ? "DIN" : "ISO", value: ISOScale.label(ISOScale.values[safeISOIndex], din: useDIN))
+                        Image(systemName: controlsExpanded ? "chevron.down" : "slider.horizontal.3")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(viewfinderInk.opacity(0.78))
+                            .frame(width: 46, height: 46)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(viewfinderPaper)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .stroke(viewfinderInk.opacity(0.16), lineWidth: 1)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Adjust film speed")
+                    .accessibilityLabel(controlsExpanded ? "Hide exposure controls" : "Show exposure controls")
+                    Spacer(minLength: 0)
                 }
             }
         }
         .padding(.horizontal, 4)
-
-    }
-
-    private func compactSettingLabel(_ title: String, value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(title)
-                .font(AppTypography.next(size: 9, weight: .medium))
-                .tracking(0.8)
-            Text(value)
-                .font(AppTypography.mono(size: 12, weight: .medium))
-        }
-        .foregroundStyle(viewfinderInk.opacity(0.78))
-        .frame(minWidth: 58, minHeight: 48)
-        .contentShape(Rectangle())
     }
 }
 

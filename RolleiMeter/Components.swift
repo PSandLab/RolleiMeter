@@ -267,7 +267,7 @@ private struct SimpleFocusColumn: View {
                         .font(AppTypography.bold(size: 80))
                         .foregroundStyle(warnRed)
                 } else if isBetweenMarks, let advice {
-                    FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 34)
+                    FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 36)
                 } else {
                     Text(mainText)
                         .font(AppTypography.bold(size: 68))
@@ -275,7 +275,6 @@ private struct SimpleFocusColumn: View {
                 }
             }
             .lineLimit(1)
-            .minimumScaleFactor(0.58)
             .frame(maxWidth: .infinity, alignment: .center)
             .contentTransition(.numericText())
             if !detailText.isEmpty {
@@ -288,7 +287,7 @@ private struct SimpleFocusColumn: View {
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 8)
         .padding(.vertical, 14)
         .frame(minHeight: 174, maxHeight: 174)
         .background(paper)
@@ -305,17 +304,20 @@ private struct FocusRangeIndicator: View {
     var body: some View {
         HStack(spacing: 2) {
             Text(lo)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             Image(systemName: "arrowtriangle.down.fill")
                 .font(.system(size: max(9, fontSize * 0.32), weight: .semibold))
                 .foregroundStyle(accentOrange)
                 .frame(width: max(13, fontSize * 0.42))
             Text(hi)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(AppTypography.bold(size: fontSize))
         .foregroundStyle(inkColor)
-        .minimumScaleFactor(0.65)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus between \(lo) and \(hi)")
     }
