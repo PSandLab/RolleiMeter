@@ -196,7 +196,7 @@ private struct SimpleApertureColumn: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .animation(.smooth(duration: 0.18), value: reading.label)
             Text(reading.deviation == nil ? "SHUTTER" : "LIMIT · EV")
-                .font(AppTypography.font(size: 10, weight: .medium))
+                .font(AppTypography.next(size: 10, weight: .medium))
                 .tracking(1.1)
                 .foregroundStyle(paper.opacity(0.86))
         }
@@ -260,7 +260,7 @@ private struct SimpleFocusColumn: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "scope").font(.system(size: 16, weight: .regular))
-                Text("FOCUS").font(AppTypography.font(size: 12, weight: .medium))
+                Text("FOCUS").font(AppTypography.next(size: 12, weight: .medium))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(mutedInk)
@@ -272,7 +272,7 @@ private struct SimpleFocusColumn: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentTransition(.numericText())
             Text(detailText)
-                .font(AppTypography.font(size: 10, weight: .medium))
+                .font(AppTypography.next(size: 10, weight: .medium))
                 .tracking(0.7)
                 .foregroundStyle(tooClose ? warnRed : (advice?.sharp == true ? goldenGreen : mutedInk))
                 .lineLimit(1).minimumScaleFactor(0.7)
@@ -296,13 +296,13 @@ struct WheelBox: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(title)
-                .font(AppTypography.regular(size: 12))
+                .font(AppTypography.next(size: 12))
                 .foregroundStyle(.secondary)
             ZStack(alignment: .trailing) {
                 Picker(title, selection: $selection) {
                     ForEach(labels.indices, id: \.self) { i in
                         Text(labels[i])
-                            .font(AppTypography.regular(size: 16))
+                            .font(AppTypography.mono(size: 16))
                             .tag(i)
                     }
                 }
@@ -457,7 +457,7 @@ struct FocusPanel: View {
     private var summary: some View {
         HStack(spacing: 5) {
             Text("FOCUS")
-                .font(AppTypography.font(size: 9, weight: .medium))
+                .font(AppTypography.next(size: 9, weight: .medium))
                 .foregroundStyle(mutedInk)
             Text(tooClose ? "TOO CLOSE" : bigText)
                 .font(AppTypography.font(size: tooClose ? 14 : (advice?.sharp == false ? 17 : 20), weight: .medium))
@@ -486,7 +486,7 @@ struct FocusPanel: View {
                 .accessibilityLabel("Focus aperture, f/\(aperture)")
             }
             Text(detailText)
-                .font(AppTypography.font(size: 9, weight: .medium))
+                .font(AppTypography.next(size: 9, weight: .medium))
                 .foregroundStyle(detailColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
@@ -580,7 +580,7 @@ struct FocusPanel: View {
                     .foregroundStyle(accentOrange)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .font(AppTypography.font(size: 13, weight: .semibold))
+            .font(AppTypography.mono(size: 13, weight: .semibold))
             .contentTransition(.numericText())
             .animation(.smooth(duration: 0.2), value: distance)
             .padding(.top, 2)
