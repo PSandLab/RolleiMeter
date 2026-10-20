@@ -98,6 +98,7 @@ final class CameraMeter: NSObject, ObservableObject,
         }
         if configured {
             currentBias = 0
+            lastBiasUpdate = 0
             setBias(0)
             if !session.isRunning { session.startRunning() }
         }
@@ -206,8 +207,7 @@ final class CameraMeter: NSObject, ObservableObject,
         }
     }
 
-    /// Slow servo on the camera's exposure bias: nudge it until the metered reference
-    /// (matrix average, the spot, or the protected highlight) sits at middle grey in the preview.
+    /// Steer camera exposure toward the metered reference quickly at startup, then settle gently.
     ///
     /// Two reasons:
     /// 1. The preview becomes the picture the film would get. Tap a bright spot and the whole view
@@ -217,14 +217,18 @@ final class CameraMeter: NSObject, ObservableObject,
     ///    does the least damage. Errors in the curve cancel out.
     private func steerExposure(refY: Double) {
         let now = CACurrentMediaTime()
-        guard now - lastBiasUpdate > 0.2 else { return }
+        let isFirstCorrection = lastBiasUpdate == 0
+        guard now - lastBiasUpdate > (isFirstCorrection ? 0 : 0.15) else { return }
         lastBiasUpdate = now
 
         let err = log2(refY / 0.18)           // stops above mid-grey
         guard abs(err) > 0.1 else { return }
-        // Gain kept low on purpose: the camera takes a few frames to act on a bias change, and a
-        // higher gain makes the preview breathe. The reading itself doesn't wait for this to settle.
-        let next = min(max(currentBias - Float(err) * 0.15, -6), 6)
+        // Correct most of the startup error immediately to avoid a long white/black preview.
+        // Later updates have a smaller gain and step cap so the image doesn't visibly breathe.
+        let gain: Float = isFirstCorrection ? 0.9 : 0.35
+        let maxStep: Float = isFirstCorrection ? 4 : 1.25
+        let step = min(max(Float(err) * gain, -maxStep), maxStep)
+        let next = min(max(currentBias - step, -6), 6)
         guard abs(next - currentBias) > 0.02 else { return }
         currentBias = next
         setBias(next)
