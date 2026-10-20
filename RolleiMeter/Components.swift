@@ -238,18 +238,12 @@ struct SimpleExposurePair: View {
         Rollei.stops[apertureIndex]
     }
 
-    private var focusAdvice: FocusAdvice? {
-        guard let distance, distance >= Focus.nearest else { return nil }
-        return Focus.advice(subject: distance, aperture: activeAperture.n, feet: feet)
-    }
-
     var body: some View {
         HStack(spacing: 0) {
             SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: activeAperture, symbol: "camera.aperture", onSelect: onToggleAperture)
             Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
             SimpleFocusColumn(
                 distance: distance,
-                advice: focusAdvice,
                 aperture: activeAperture,
                 tooClose: tooClose,
                 feet: feet
@@ -263,41 +257,9 @@ struct SimpleExposurePair: View {
 
 private struct SimpleFocusColumn: View {
     let distance: Double?
-    let advice: FocusAdvice?
     let aperture: (label: String, n: Double)
     let tooClose: Bool
     let feet: Bool
-
-    private var distanceNumber: String {
-        guard let distance else { return "—" }
-        if distance.isInfinite { return "∞" }
-        if feet {
-            let value = distance * 3.28084
-            return value < 10 ? String(format: "%.1f", value) : String(format: "%.0f", value)
-        }
-        if distance < 1 { return String(format: "%.2f", distance) }
-        return distance < 10 ? String(format: "%.1f", distance) : String(format: "%.0f", distance)
-    }
-
-    private var distanceUnit: String { feet ? "FT" : "M" }
-
-    private var depthOfFieldText: String? {
-        guard let distance, distance >= Focus.nearest else { return nil }
-        let range = DepthOfField.range(subject: distance, n: aperture.n)
-        let near = formatDistanceValue(range.near)
-        let far = formatDistanceValue(range.far)
-        return "f/\(aperture.label) · DOF \(near)–\(far) \(distanceUnit)"
-    }
-
-    private func formatDistanceValue(_ metres: Double) -> String {
-        if metres.isInfinite { return "∞" }
-        if feet {
-            let value = metres * 3.28084
-            return value < 10 ? String(format: "%.1f", value) : String(format: "%.0f", value)
-        }
-        if metres < 1 { return String(format: "%.2f", metres) }
-        return metres < 10 ? String(format: "%.1f", metres) : String(format: "%.0f", metres)
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -308,84 +270,140 @@ private struct SimpleFocusColumn: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(mutedInk)
-            Spacer(minLength: 10)
 
-            Group {
-                if tooClose {
-                    Text("0")
-                        .font(AppTypography.bold(size: 80))
-                        .foregroundStyle(warnRed)
-                } else {
-                    if distance == nil {
-                        Text("—")
-                            .font(AppTypography.bold(size: 64))
-                            .foregroundStyle(inkColor)
-                    } else if distance?.isInfinite == true {
-                        Text("∞")
-                            .font(AppTypography.bold(size: 64))
-                            .foregroundStyle(inkColor)
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text(distanceNumber)
-                                .font(AppTypography.bold(size: 56))
-                                .contentTransition(.numericText())
-                            Text(distanceUnit)
-                                .font(AppTypography.next(size: 11, weight: .medium))
-                                .foregroundStyle(mutedInk)
-                        }
-                        .foregroundStyle(inkColor)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-
+            Spacer(minLength: 4)
             if tooClose {
-                Text("")
-                    .frame(height: 30)
-            } else if let advice {
-                VStack(spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text("SET")
-                            .font(AppTypography.next(size: 9, weight: .medium))
-                            .tracking(0.6)
-                            .foregroundStyle(mutedInk)
-                        if advice.sharp {
-                            Text(advice.label)
-                                .font(AppTypography.bold(size: 14))
-                                .foregroundStyle(inkColor)
-                        } else {
-                            FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 15)
-                                .frame(maxWidth: 108)
-                        }
-                    }
-                    if let depthOfFieldText {
-                        Text(depthOfFieldText)
-                            .font(AppTypography.next(size: 9, weight: .medium))
-                            .foregroundStyle(mutedInk)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 30)
+                Text("0")
+                    .font(AppTypography.bold(size: 68))
+                    .foregroundStyle(warnRed)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let distance {
+                FocusRingScale(distance: distance, aperture: aperture, feet: feet)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 112)
             } else {
                 Text("NO LIDAR")
-                    .font(AppTypography.next(size: 10, weight: .medium))
+                    .font(AppTypography.next(size: 11, weight: .medium))
                     .tracking(0.7)
                     .foregroundStyle(mutedInk)
-                    .frame(height: 30)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            Spacer(minLength: 10)
+            Spacer(minLength: 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 14)
         .frame(minHeight: 174, maxHeight: 174)
         .background(paper)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A miniature Rollei focus ring: real lens marks follow the ring curve, the red index
+/// points at the measured distance, and the green arc shows depth of field at the active aperture.
+private struct FocusRingScale: View {
+    let distance: Double
+    let aperture: (label: String, n: Double)
+    let feet: Bool
+
+    private var marks: [(label: String, m: Double)] {
+        feet ? Focus.feetMarks : Focus.meterMarks
+    }
+
+    private var depthRange: (near: Double, far: Double) {
+        DepthOfField.range(subject: distance, n: aperture.n)
+    }
+
+    private var recommendedFocus: String {
+        let advice = Focus.advice(subject: distance, aperture: aperture.n, feet: feet)
+        return advice.sharp ? advice.label : "between \(advice.lo) and \(advice.hi)"
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size
+            let target = point(at: Focus.position(distance), in: size)
+
+            ZStack {
+                Canvas { context, canvasSize in
+                    let baseline = canvasSize.height - 22
+                    let radiusX = canvasSize.width * 0.42
+                    let radiusY = canvasSize.height * 0.48
+                    let center = CGPoint(x: canvasSize.width / 2, y: baseline)
+
+                    func scalePoint(_ position: Double) -> CGPoint {
+                        let angle = .pi * (1 - min(max(position, 0), 1))
+                        return CGPoint(
+                            x: center.x + cos(angle) * radiusX,
+                            y: center.y - sin(angle) * radiusY
+                        )
+                    }
+
+                    func arc(_ start: Double, _ end: Double) -> Path {
+                        var path = Path()
+                        let steps = max(2, Int(abs(end - start) * 48))
+                        for step in 0...steps {
+                            let position = start + (end - start) * Double(step) / Double(steps)
+                            let p = scalePoint(position)
+                            if step == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                        }
+                        return path
+                    }
+
+                    context.stroke(
+                        arc(0, 1),
+                        with: .color(hairline),
+                        style: StrokeStyle(lineWidth: 1, lineCap: .round)
+                    )
+                    context.stroke(
+                        arc(Focus.position(depthRange.near), Focus.position(depthRange.far)),
+                        with: .color(goldenGreen.opacity(0.9)),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+
+                    var ticks = Path()
+                    for mark in marks {
+                        let p = scalePoint(Focus.position(mark.m))
+                        ticks.move(to: CGPoint(x: p.x, y: p.y - 3))
+                        ticks.addLine(to: CGPoint(x: p.x, y: p.y + 3))
+                    }
+                    context.stroke(ticks, with: .color(mutedInk), lineWidth: 1)
+                }
+
+                ForEach(marks.indices, id: \.self) { index in
+                    let mark = marks[index]
+                    let p = point(at: Focus.position(mark.m), in: size)
+                    Text(mark.label)
+                        .font(AppTypography.mono(size: 10, weight: .medium))
+                        .foregroundStyle(inkColor)
+                        .fixedSize()
+                        .position(x: p.x, y: p.y + 9)
+                }
+
+                Path { path in
+                    path.move(to: CGPoint(x: target.x, y: 3))
+                    path.addLine(to: CGPoint(x: target.x, y: max(3, target.y - 10)))
+                }
+                .stroke(accentOrange, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(accentOrange)
+                    .position(x: target.x, y: target.y - 5)
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: distance)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
+    }
+
+    private func point(at position: Double, in size: CGSize) -> CGPoint {
+        let angle = Double.pi * (1 - min(max(position, 0), 1))
+        let center = CGPoint(x: size.width / 2, y: size.height - 22)
+        return CGPoint(
+            x: center.x + cos(angle) * size.width * 0.42,
+            y: center.y - sin(angle) * size.height * 0.48
+        )
     }
 }
 
