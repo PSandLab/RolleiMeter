@@ -71,6 +71,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            topBar
             preview
 
             if simpleMode {
@@ -316,19 +317,6 @@ struct ContentView: View {
                 }
 
                 VStack {
-                    HStack {
-                        EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
-                        Spacer()
-                        Button {
-                            showSettings = true
-                        } label: {
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(viewfinderPaper)
-                                .frame(width: 32, height: 32)
-                                .background(viewfinderInk.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        }
-                    }
                     Spacer()
                     modeChips
                 }
@@ -352,6 +340,26 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
+    }
+
+    private var topBar: some View {
+        HStack {
+            EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
+            Spacer(minLength: 12)
+            Button {
+                showSettings = true
+            } label: {
+                Text("SETTINGS")
+                    .font(AppTypography.next(size: 12, weight: .semibold))
+                    .tracking(1.1)
+                    .foregroundStyle(viewfinderInk)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .contain)
     }
 
     private var modeChips: some View {
