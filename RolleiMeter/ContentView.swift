@@ -80,7 +80,7 @@ struct ContentView: View {
                 SimpleExposurePair(
                     damp: evDamp, iso: iso, comp: comp,
                     apertureIndex: simpleAperture == 3 ? 3 : 0,
-                    distance: shownDistance, advice: advice, tooClose: tooClose, feet: useFeet,
+                    distance: shownDistance, tooClose: tooClose, feet: useFeet,
                     onToggleAperture: toggleSimpleAperture
                 )
             } else {

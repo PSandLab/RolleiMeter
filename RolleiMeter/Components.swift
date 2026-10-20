@@ -176,6 +176,11 @@ private struct SimpleApertureColumn: View {
         Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
     }
     private var reading: ShutterResult { Exposure.result(for: idealTime) }
+    private var exposureStatus: String {
+        guard let deviation = reading.deviation else { return "" }
+        return deviation > 0 ? "OVEREXPOSED" : "UNDEREXPOSED"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -196,6 +201,15 @@ private struct SimpleApertureColumn: View {
                 .minimumScaleFactor(0.62)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
+            Text(exposureStatus)
+                .font(AppTypography.next(size: 10, weight: .medium))
+                .tracking(0.7)
+                .foregroundStyle(paper)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+                .frame(height: 12)
+                .accessibilityHidden(exposureStatus.isEmpty)
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,16 +230,30 @@ struct SimpleExposurePair: View {
     let comp: Double
     let apertureIndex: Int
     let distance: Double?
-    let advice: FocusAdvice?
     let tooClose: Bool
     let feet: Bool
     let onToggleAperture: () -> Void
 
+    private var activeAperture: (label: String, n: Double) {
+        Rollei.stops[apertureIndex]
+    }
+
+    private var focusAdvice: FocusAdvice? {
+        guard let distance, distance >= Focus.nearest else { return nil }
+        return Focus.advice(subject: distance, aperture: activeAperture.n, feet: feet)
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: Rollei.stops[apertureIndex], symbol: "camera.aperture", onSelect: onToggleAperture)
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: activeAperture, symbol: "camera.aperture", onSelect: onToggleAperture)
             Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
-            SimpleFocusColumn(distance: distance, advice: advice, tooClose: tooClose, feet: feet)
+            SimpleFocusColumn(
+                distance: distance,
+                advice: focusAdvice,
+                aperture: activeAperture,
+                tooClose: tooClose,
+                feet: feet
+            )
         }
         .background(paper)
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
@@ -236,19 +264,39 @@ struct SimpleExposurePair: View {
 private struct SimpleFocusColumn: View {
     let distance: Double?
     let advice: FocusAdvice?
+    let aperture: (label: String, n: Double)
     let tooClose: Bool
     let feet: Bool
 
-    private var isBetweenMarks: Bool { !tooClose && advice != nil && advice?.sharp == false }
-    private var mainText: String {
-        if tooClose { return "0" }
-        guard let advice else { return "—" }
-        return advice.label
+    private var distanceNumber: String {
+        guard let distance else { return "—" }
+        if distance.isInfinite { return "∞" }
+        if feet {
+            let value = distance * 3.28084
+            return value < 10 ? String(format: "%.1f", value) : String(format: "%.0f", value)
+        }
+        if distance < 1 { return String(format: "%.2f", distance) }
+        return distance < 10 ? String(format: "%.1f", distance) : String(format: "%.0f", distance)
     }
-    private var detailText: String {
-        if tooClose { return "" }
-        guard let distance, advice != nil else { return "NO LIDAR" }
-        return Fmt.distance(distance, feet: feet).uppercased()
+
+    private var distanceUnit: String { feet ? "FT" : "M" }
+
+    private var depthOfFieldText: String? {
+        guard let distance, distance >= Focus.nearest else { return nil }
+        let range = DepthOfField.range(subject: distance, n: aperture.n)
+        let near = formatDistanceValue(range.near)
+        let far = formatDistanceValue(range.far)
+        return "f/\(aperture.label) · DOF \(near)–\(far) \(distanceUnit)"
+    }
+
+    private func formatDistanceValue(_ metres: Double) -> String {
+        if metres.isInfinite { return "∞" }
+        if feet {
+            let value = metres * 3.28084
+            return value < 10 ? String(format: "%.1f", value) : String(format: "%.0f", value)
+        }
+        if metres < 1 { return String(format: "%.2f", metres) }
+        return metres < 10 ? String(format: "%.1f", metres) : String(format: "%.0f", metres)
     }
 
     var body: some View {
@@ -261,29 +309,75 @@ private struct SimpleFocusColumn: View {
             }
             .foregroundStyle(mutedInk)
             Spacer(minLength: 10)
+
             Group {
                 if tooClose {
                     Text("0")
                         .font(AppTypography.bold(size: 80))
                         .foregroundStyle(warnRed)
-                } else if isBetweenMarks, let advice {
-                    FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 36)
                 } else {
-                    Text(mainText)
-                        .font(AppTypography.bold(size: 68))
+                    if distance == nil {
+                        Text("—")
+                            .font(AppTypography.bold(size: 64))
+                            .foregroundStyle(inkColor)
+                    } else if distance?.isInfinite == true {
+                        Text("∞")
+                            .font(AppTypography.bold(size: 64))
+                            .foregroundStyle(inkColor)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(distanceNumber)
+                                .font(AppTypography.bold(size: 56))
+                                .contentTransition(.numericText())
+                            Text(distanceUnit)
+                                .font(AppTypography.next(size: 11, weight: .medium))
+                                .foregroundStyle(mutedInk)
+                        }
                         .foregroundStyle(inkColor)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
                 }
             }
-            .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .center)
-            .contentTransition(.numericText())
-            if !detailText.isEmpty {
-                Text(detailText)
+
+            if tooClose {
+                Text("")
+                    .frame(height: 30)
+            } else if let advice {
+                VStack(spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text("SET")
+                            .font(AppTypography.next(size: 9, weight: .medium))
+                            .tracking(0.6)
+                            .foregroundStyle(mutedInk)
+                        if advice.sharp {
+                            Text(advice.label)
+                                .font(AppTypography.bold(size: 14))
+                                .foregroundStyle(inkColor)
+                        } else {
+                            FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 15)
+                                .frame(maxWidth: 108)
+                        }
+                    }
+                    if let depthOfFieldText {
+                        Text(depthOfFieldText)
+                            .font(AppTypography.next(size: 9, weight: .medium))
+                            .foregroundStyle(mutedInk)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+            } else {
+                Text("NO LIDAR")
                     .font(AppTypography.next(size: 10, weight: .medium))
                     .tracking(0.7)
-                    .foregroundStyle(advice?.sharp == true ? goldenGreen : mutedInk)
-                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .foregroundStyle(mutedInk)
+                    .frame(height: 30)
             }
+
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
