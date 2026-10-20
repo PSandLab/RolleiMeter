@@ -80,7 +80,7 @@ struct EVBadge: View {
             }
             Text("EV " + String(format: "%.1f", damp.values[0]))
         }
-        .font(.system(size: 13, weight: .medium, design: .monospaced))
+        .font(AppTypography.font(size: 13, weight: .medium))
         .foregroundStyle(paper)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
@@ -116,7 +116,7 @@ struct RulerView: View {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
                     let r = res[i]
                     Text(r.deviation.map(Fmt.exposureAmount) ?? r.label)
-                        .font(.system(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium, design: .monospaced))
+                        .font(AppTypography.font(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium))
                         .foregroundStyle(r.deviation == nil ? (i == golden ? goldenGreen : inkColor) : accentOrange)
                         .contentTransition(.numericText())
                         .frame(maxWidth: .infinity)
@@ -139,7 +139,7 @@ struct RulerView: View {
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
                     Text("f/" + Rollei.stops[i].label)
-                        .font(.system(size: 11, weight: i == golden ? .semibold : .regular, design: .monospaced))
+                        .font(AppTypography.font(size: 11, weight: i == golden ? .semibold : .regular))
                         .foregroundStyle(i == golden ? goldenGreen : inkColor)
                         .frame(height: 22)
                         .overlay(alignment: .bottom) {
@@ -182,13 +182,13 @@ private struct SimpleApertureColumn: View {
                 Image(systemName: symbol)
                     .font(.system(size: 16, weight: .regular))
                 Text("f/" + aperture.label)
-                    .font(.system(size: 15, weight: .medium, design: .monospaced))
+                    .font(AppTypography.font(size: 15, weight: .medium))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(paper)
             Spacer(minLength: 0)
             Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
-                .font(.custom("AppleGaramond-Bold", size: 70))
+                .font(AppTypography.bold(size: 70))
                 .foregroundStyle(paper)
                 .contentTransition(.numericText())
                 .lineLimit(1)
@@ -196,7 +196,7 @@ private struct SimpleApertureColumn: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .animation(.smooth(duration: 0.18), value: reading.label)
             Text(reading.deviation == nil ? "SHUTTER" : "LIMIT · EV")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(AppTypography.font(size: 10, weight: .medium))
                 .tracking(1.1)
                 .foregroundStyle(paper.opacity(0.86))
         }
@@ -260,19 +260,19 @@ private struct SimpleFocusColumn: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "scope").font(.system(size: 16, weight: .regular))
-                Text("FOCUS").font(.system(size: 12, weight: .medium, design: .monospaced))
+                Text("FOCUS").font(AppTypography.font(size: 12, weight: .medium))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(mutedInk)
             Spacer(minLength: 0)
             Text(mainText)
-                .font(.custom("AppleGaramond-Bold", size: isBetweenMarks ? 54 : 68))
+                .font(AppTypography.bold(size: isBetweenMarks ? 54 : 68))
                 .foregroundStyle(tooClose ? warnRed : inkColor)
                 .lineLimit(1).minimumScaleFactor(0.58)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentTransition(.numericText())
             Text(detailText)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(AppTypography.font(size: 10, weight: .medium))
                 .tracking(0.7)
                 .foregroundStyle(tooClose ? warnRed : (advice?.sharp == true ? goldenGreen : mutedInk))
                 .lineLimit(1).minimumScaleFactor(0.7)
@@ -296,13 +296,13 @@ struct WheelBox: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(title)
-                .font(.system(size: 12, design: .monospaced))
+                .font(AppTypography.regular(size: 12))
                 .foregroundStyle(.secondary)
             ZStack(alignment: .trailing) {
                 Picker(title, selection: $selection) {
                     ForEach(labels.indices, id: \.self) { i in
                         Text(labels[i])
-                            .font(.system(size: 16, design: .monospaced))
+                            .font(AppTypography.regular(size: 16))
                             .tag(i)
                     }
                 }
@@ -457,10 +457,10 @@ struct FocusPanel: View {
     private var summary: some View {
         HStack(spacing: 5) {
             Text("FOCUS")
-                .font(.system(size: 9, weight: .medium, design: .default))
+                .font(AppTypography.font(size: 9, weight: .medium))
                 .foregroundStyle(mutedInk)
             Text(tooClose ? "TOO CLOSE" : bigText)
-                .font(.system(size: tooClose ? 14 : (advice?.sharp == false ? 17 : 20), weight: .medium, design: .monospaced))
+                .font(AppTypography.font(size: tooClose ? 14 : (advice?.sharp == false ? 17 : 20), weight: .medium))
                 .foregroundStyle(tooClose ? warnRed : (advice == nil ? mutedInk : inkColor))
                 .contentTransition(.numericText())
                 .lineLimit(1)
@@ -474,7 +474,7 @@ struct FocusPanel: View {
                 } label: {
                     HStack(spacing: 3) {
                         Text("f/" + aperture)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(AppTypography.font(size: 11, weight: .medium))
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .semibold))
                     }
@@ -486,7 +486,7 @@ struct FocusPanel: View {
                 .accessibilityLabel("Focus aperture, f/\(aperture)")
             }
             Text(detailText)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(AppTypography.font(size: 9, weight: .medium))
                 .foregroundStyle(detailColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
@@ -544,7 +544,7 @@ struct FocusPanel: View {
                             .frame(width: 1.5, height: 12)
                             .position(x: x, y: 17)
                         Text(marks[i].label)
-                            .font(.system(size: 14, weight: i == 0 ? .semibold : .regular, design: .monospaced))
+                            .font(AppTypography.font(size: 14, weight: i == 0 ? .semibold : .regular))
                             .foregroundStyle(i == 0 ? goldenGreen : inkColor)
                             .position(x: x, y: 36)
                     }
@@ -569,7 +569,7 @@ struct FocusPanel: View {
                     onToggleUnits()
                 } label: {
                     Text(unit.uppercased())
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(AppTypography.bold(size: 11))
                         .foregroundStyle(inkColor)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3)
@@ -580,7 +580,7 @@ struct FocusPanel: View {
                     .foregroundStyle(accentOrange)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .font(AppTypography.font(size: 13, weight: .semibold))
             .contentTransition(.numericText())
             .animation(.smooth(duration: 0.2), value: distance)
             .padding(.top, 2)
