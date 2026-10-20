@@ -329,7 +329,10 @@ final class CameraMeter: NSObject, ObservableObject,
         lock.unlock()
         guard let pixelBuffer else { return nil }
 
-        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
+        let sensorImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let image = sensorImage.extent.width > sensorImage.extent.height
+            ? sensorImage.oriented(.right)
+            : sensorImage
         guard let cgImage = previewImageContext.createCGImage(image, from: image.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
