@@ -4,6 +4,15 @@ import UIKit
 private let viewfinderPaper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
 private let viewfinderInk = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
 private let viewfinderAccent = Color(red: Double(0xB3) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x31) / 255.0)
+private let viewfinderHairline = Color(red: Double(0xD4) / 255.0, green: Double(0xD0) / 255.0, blue: Double(0xC7) / 255.0)
+
+private struct TactileModeStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.62), value: configuration.isPressed)
+    }
+}
 
 struct ContentView: View {
     @StateObject private var meter = CameraMeter()
@@ -20,6 +29,7 @@ struct ContentView: View {
     @AppStorage("useFeet") private var useFeet = false
     @AppStorage("golden") private var golden = 2          // f/5.6, -1 = none
     @AppStorage("aperture") private var selected = 2      // aperture used for depth of field
+    @AppStorage("simpleAperture") private var simpleAperture = 0
     @AppStorage("calibration") private var calibration = 0.0
 
     @State private var frozenEV: Double?
@@ -74,10 +84,12 @@ struct ContentView: View {
             preview
 
             if simpleMode {
-                SimpleExposurePair(damp: evDamp, iso: iso, comp: comp, selected: safeSelected, onSelect: { i in
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    selected = i
-                })
+                SimpleExposurePair(
+                    damp: evDamp, iso: iso, comp: comp,
+                    apertureIndex: simpleAperture == 3 ? 3 : 0,
+                    distance: shownDistance, advice: advice, tooClose: tooClose, feet: useFeet,
+                    onToggleAperture: toggleSimpleAperture
+                )
             } else {
                 RulerView(
                     damp: evDamp,
@@ -88,6 +100,7 @@ struct ContentView: View {
                     onSelect: { i in
                         UISelectionFeedbackGenerator().selectionChanged()
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = i }
+                        resetFocusToCenter()
                     },
                     onToggleGolden: { i in
                         golden = (golden == i) ? -1 : i
@@ -95,7 +108,7 @@ struct ContentView: View {
                 )
             }
 
-            if meter.hasLiDAR {
+            if meter.hasLiDAR && !simpleMode {
                 FocusPanel(
                     damp: distDamp,
                     distance: shownDistance,
@@ -105,7 +118,7 @@ struct ContentView: View {
                     tooClose: tooClose,
                     feet: useFeet,
                     aperture: Rollei.stops[safeSelected].label,
-                    showsAperturePicker: simpleMode,
+                    showsAperturePicker: false,
                     expanded: $focusExpanded,
                     onToggleUnits: { useFeet.toggle() },
                     onSelectAperture: { index in
@@ -199,6 +212,20 @@ struct ContentView: View {
     private func unfreeze() {
         frozenEV = nil
         frozenDist = nil
+    }
+
+    private func resetFocusToCenter() {
+        focusBuf = CGPoint(x: 0.5, y: 0.5)
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
+            focus = CGPoint(x: 0.5, y: 0.5)
+        }
+    }
+
+    private func toggleSimpleAperture() {
+        simpleAperture = simpleAperture == 0 ? 3 : 0
+        selected = simpleAperture
+        UISelectionFeedbackGenerator().selectionChanged()
+        resetFocusToCenter()
     }
 
     /// The camera frame is 3:4 and the viewfinder fills its box, cropping whatever overflows.
@@ -338,7 +365,7 @@ struct ContentView: View {
     }
 
     private var modeChips: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 8) {
             ForEach([MeterMode.matrix, MeterMode.highlight], id: \.self) { m in
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -348,23 +375,25 @@ struct ContentView: View {
                     }
                     unfreeze()
                 } label: {
-                    VStack(spacing: 3) {
-                        Text(m.title.uppercased())
-                            .font(.system(size: 10, weight: .medium, design: .default))
-                            .foregroundStyle(viewfinderPaper.opacity(!spotActive && baseMode == m ? 1 : 0.72))
-                        Capsule()
-                            .fill(!spotActive && baseMode == m ? viewfinderAccent : Color.clear)
-                            .frame(height: 1.5)
+                    let isSelected = !spotActive && baseMode == m
+                    ZStack {
+                        Circle().fill(viewfinderInk.opacity(0.55))
+                        Circle().fill(viewfinderPaper).padding(3)
+                        Circle().stroke(isSelected ? viewfinderAccent : viewfinderHairline, lineWidth: isSelected ? 2 : 1).padding(4)
+                        Text(m == .matrix ? "M" : "H")
+                            .font(.system(size: 15, weight: .medium, design: .monospaced))
+                            .foregroundStyle(isSelected ? viewfinderAccent : viewfinderInk)
                     }
-                    .frame(width: 74, height: 30)
-                    .contentShape(Rectangle())
+                    .frame(width: 42, height: 42)
+                    .background(Circle().stroke(viewfinderPaper.opacity(0.72), lineWidth: 1).padding(-3))
+                    .contentShape(Circle())
+                    .accessibilityLabel(m.title)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TactileModeStyle())
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(viewfinderInk.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(4)
     }
 
     // MARK: - Controls
