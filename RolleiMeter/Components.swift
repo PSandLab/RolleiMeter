@@ -87,8 +87,7 @@ struct EVBadge: View {
 
 // MARK: - Aperture / shutter ruler
 
-/// Thin bar: shutter speeds on top, ticks, apertures below.
-/// An aperture turns red when its shutter speed is slower than 1/60.
+/// Full aperture range with shutter readings, fine index ticks, and a fixed-height aperture label row.
 struct RulerView: View {
     @ObservedObject var damp: Damper
     let iso: Double
@@ -97,8 +96,6 @@ struct RulerView: View {
     let selected: Int
     let onSelect: (Int) -> Void
     let onToggleGolden: (Int) -> Void
-
-    @Namespace private var selectionNS
 
     private var results: [ShutterResult] {
         Rollei.stops.map {
@@ -109,13 +106,13 @@ struct RulerView: View {
     var body: some View {
         let res = results
         VStack(spacing: 2) {
-            // Shutter speed. "500+" means even 1/500 is too slow to hold back the light.
+            // Shutter speed readings use only native Rollei markings.
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
                     let r = res[i]
                     Text(r.label)
                         .font(.system(size: 16, weight: i == golden ? .semibold : .regular, design: .monospaced))
-                        .foregroundStyle(r.status == .tooFast ? accentOrange : (i == golden ? goldenGreen : inkColor))
+                        .foregroundStyle(r.status == .ok ? (i == golden ? goldenGreen : inkColor) : accentOrange)
                         .contentTransition(.numericText())
                         .frame(maxWidth: .infinity)
                         .animation(.smooth(duration: 0.2), value: r.label)
@@ -135,27 +132,29 @@ struct RulerView: View {
             // Apertures. Tap selects (drives the depth-of-field band), long-press sets the golden one.
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
-                    let slow = res[i].isSlow
-                    Text("ƒ" + Rollei.stops[i].label)
-                        .font(.system(size: 16, weight: i == golden ? .semibold : .regular, design: .monospaced))
-                        .foregroundStyle(slow ? warnRed : (i == golden ? goldenGreen : inkColor))
-                        .animation(.smooth(duration: 0.25), value: slow)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background {
-                            if selected == i {
-                                Capsule()
-                                    .fill(Color.black.opacity(0.08))
-                                    .matchedGeometryEffect(id: "selection", in: selectionNS)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelect(i) }
-                        .onLongPressGesture(minimumDuration: 0.5) {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                            onToggleGolden(i)
-                        }
+                    let reading = res[i]
+                    VStack(spacing: 1) {
+                        Text("f/" + Rollei.stops[i].label)
+                            .font(.system(size: 11, weight: i == golden ? .semibold : .regular, design: .monospaced))
+                            .foregroundStyle(reading.deviation == nil ? (i == golden ? goldenGreen : inkColor) : paper)
+                            .frame(height: 14)
+                        Text(reading.deviation.map(Fmt.exposureDeviation) ?? "")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(paper)
+                            .frame(height: 10)
+                    }
+                    .frame(height: 30)
+                    .background(reading.deviation == nil ? Color.clear : accentOrange)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(selected == i ? inkColor : Color.clear).frame(height: 1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onSelect(i) }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        onToggleGolden(i)
+                    }
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
