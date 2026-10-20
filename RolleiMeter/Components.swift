@@ -348,14 +348,17 @@ private struct FocusDialFace: View, Animatable {
     }
 
     /// Points of horizontal travel for the full near-to-infinity focus range.
-    private let pointsPerUnit: CGFloat = 420
+    private let pointsPerUnit: CGFloat = 520
 
     var body: some View {
         Canvas { context, size in
             let cx = size.width / 2
-            let baseline = size.height - 10
-            let numberY: CGFloat = 27
-            let markTop: CGFloat = 42
+            // Pointer, number and ticks stacked as one group, centred in the tile.
+            let groupHeight: CGFloat = 104
+            let y0 = max(0, (size.height - groupHeight) / 2)
+            let numberY = y0 + 30
+            let markTop = y0 + 50
+            let baseline = y0 + 92
             let fadeWidth: CGFloat = 44
 
             func x(_ p: Double) -> CGFloat { cx + CGFloat(p - position) * pointsPerUnit }
@@ -368,26 +371,26 @@ private struct FocusDialFace: View, Animatable {
             let bandL = max(x(near), 0), bandR = min(x(far), size.width)
             if bandR > bandL {
                 var band = Path()
-                band.move(to: CGPoint(x: bandL, y: baseline + 5))
-                band.addLine(to: CGPoint(x: bandR, y: baseline + 5))
+                band.move(to: CGPoint(x: bandL, y: baseline + 7))
+                band.addLine(to: CGPoint(x: bandR, y: baseline + 7))
                 context.stroke(band, with: .color(sharpLabel != nil ? goldenGreen : accentOrange.opacity(0.55)),
                                style: StrokeStyle(lineWidth: 3, lineCap: .round))
             }
 
             // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
             let markPositions = marks.map { $0.p }
-            let n = 150
+            let n = 60
             for i in 0...n {
                 let p = Double(i) / Double(n)
                 if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
                 let px = x(p)
                 let f = fade(px)
                 if f <= 0 { continue }
-                let h: CGFloat = i.isMultiple(of: 5) ? 24 : 13
+                let h: CGFloat = i.isMultiple(of: 5) ? 28 : 18
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: baseline - h))
-                context.stroke(tick, with: .color(mutedInk.opacity(f)), lineWidth: 1)
+                context.stroke(tick, with: .color(mutedInk.opacity(f)), lineWidth: 1.5)
             }
             for mark in marks {
                 let px = x(mark.p)
@@ -398,18 +401,18 @@ private struct FocusDialFace: View, Animatable {
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: markTop))
-                context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 2.5 : 1.5)
+                context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
                 let text = context.resolve(
-                    Text(mark.label).font(AppTypography.bold(size: 20)).foregroundColor(color.opacity(f))
+                    Text(mark.label).font(AppTypography.bold(size: 24)).foregroundColor(color.opacity(f))
                 )
                 context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
             }
 
             // Fixed pointer
             var tri = Path()
-            tri.move(to: CGPoint(x: cx - 7, y: 0))
-            tri.addLine(to: CGPoint(x: cx + 7, y: 0))
-            tri.addLine(to: CGPoint(x: cx, y: 11))
+            tri.move(to: CGPoint(x: cx - 7, y: y0))
+            tri.addLine(to: CGPoint(x: cx + 7, y: y0))
+            tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
             tri.closeSubpath()
             context.fill(tri, with: .color(accentOrange))
         }
