@@ -70,6 +70,9 @@ struct EVBadge: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            Image(systemName: "sun.max.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(accentOrange)
             if frozen {
                 Text("HOLD")
                     .transition(.move(edge: .leading).combined(with: .opacity))
@@ -81,10 +84,7 @@ struct EVBadge: View {
             Text("EV " + String(format: "%.1f", damp.values[0]))
         }
         .font(AppTypography.font(size: 13, weight: .medium))
-        .foregroundStyle(paper)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(inkColor.opacity(0.88), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .foregroundStyle(inkColor)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
     }
@@ -177,8 +177,9 @@ private struct SimpleApertureColumn: View {
     }
     private var reading: ShutterResult { Exposure.result(for: idealTime) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 0) {
             HStack(spacing: 6) {
+                Spacer(minLength: 0)
                 Image(systemName: symbol)
                     .font(.system(size: 16, weight: .regular))
                 Text("f/" + aperture.label)
@@ -186,19 +187,16 @@ private struct SimpleApertureColumn: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(paper)
-            Spacer(minLength: 0)
+            Spacer(minLength: 10)
             Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
-                .font(AppTypography.bold(size: 70))
+                .font(AppTypography.bold(size: 80))
                 .foregroundStyle(paper)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.62)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .animation(.smooth(duration: 0.18), value: reading.label)
-            Text(reading.deviation == nil ? "SHUTTER" : "LIMIT · EV")
-                .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(1.1)
-                .foregroundStyle(paper.opacity(0.86))
+            Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -241,15 +239,14 @@ private struct SimpleFocusColumn: View {
     let tooClose: Bool
     let feet: Bool
 
-    private var unit: String { feet ? "FT" : "M" }
     private var isBetweenMarks: Bool { !tooClose && advice != nil && advice?.sharp == false }
     private var mainText: String {
-        if tooClose { return "<" + (feet ? "3" : "0.9") }
+        if tooClose { return "0" }
         guard let advice else { return "—" }
         return isBetweenMarks ? advice.lo + "–" + advice.hi : advice.label
     }
     private var detailText: String {
-        if tooClose { return "MINIMUM FOCUS · " + unit }
+        if tooClose { return "" }
         guard let distance, let advice else { return "NO LIDAR" }
         let measured = Fmt.distance(distance, feet: feet).uppercased()
         if isBetweenMarks { return "SET BETWEEN · " + measured }
@@ -257,25 +254,29 @@ private struct SimpleFocusColumn: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 0) {
             HStack(spacing: 6) {
+                Spacer(minLength: 0)
                 Image(systemName: "scope").font(.system(size: 16, weight: .regular))
                 Text("FOCUS").font(AppTypography.next(size: 12, weight: .medium))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(mutedInk)
-            Spacer(minLength: 0)
+            Spacer(minLength: 10)
             Text(mainText)
-                .font(AppTypography.bold(size: isBetweenMarks ? 54 : 68))
+                .font(AppTypography.bold(size: tooClose ? 80 : (isBetweenMarks ? 54 : 68)))
                 .foregroundStyle(tooClose ? warnRed : inkColor)
                 .lineLimit(1).minimumScaleFactor(0.58)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .contentTransition(.numericText())
-            Text(detailText)
-                .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(0.7)
-                .foregroundStyle(tooClose ? warnRed : (advice?.sharp == true ? goldenGreen : mutedInk))
-                .lineLimit(1).minimumScaleFactor(0.7)
+            if !detailText.isEmpty {
+                Text(detailText)
+                    .font(AppTypography.next(size: 10, weight: .medium))
+                    .tracking(0.7)
+                    .foregroundStyle(advice?.sharp == true ? goldenGreen : mutedInk)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
