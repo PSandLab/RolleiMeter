@@ -271,7 +271,7 @@ private struct SimpleFocusColumn: View {
             }
             .foregroundStyle(mutedInk)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             if tooClose {
                 Text("0")
                     .font(AppTypography.bold(size: 68))
@@ -280,7 +280,7 @@ private struct SimpleFocusColumn: View {
             } else if let distance {
                 FocusRingScale(distance: distance, aperture: aperture, feet: feet)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 112)
+                    .frame(height: 128)
             } else {
                 Text("NO LIDAR")
                     .font(AppTypography.next(size: 11, weight: .medium))
@@ -288,19 +288,19 @@ private struct SimpleFocusColumn: View {
                     .foregroundStyle(mutedInk)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
         .frame(minHeight: 174, maxHeight: 174)
         .background(paper)
         .accessibilityElement(children: .contain)
     }
 }
 
-/// A miniature Rollei focus ring: real lens marks follow the ring curve, the red index
-/// points at the measured distance, and the green arc shows depth of field at the active aperture.
+/// A large lens-style focus scale. The red index remains fixed while the engraved
+/// distance marks and aperture-specific depth-of-field arc rotate underneath it.
 private struct FocusRingScale: View {
     let distance: Double
     let aperture: (label: String, n: Double)
@@ -322,88 +322,98 @@ private struct FocusRingScale: View {
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
-            let target = point(at: Focus.position(distance), in: size)
+            let diameter = min(size.width, size.height)
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = diameter * 0.34
+            let labelRadius = diameter * 0.445
+            let rotation = 90 - 180 * Focus.position(distance)
+            let ringMarks = marks
+            let markPositions = ringMarks.map { Focus.position($0.m) }
+            let nearPosition = Focus.position(depthRange.near)
+            let farPosition = Focus.position(depthRange.far)
 
             ZStack {
-                Canvas { context, canvasSize in
-                    let baseline = canvasSize.height - 22
-                    let radiusX = canvasSize.width * 0.42
-                    let radiusY = canvasSize.height * 0.48
-                    let center = CGPoint(x: canvasSize.width / 2, y: baseline)
-
-                    func scalePoint(_ position: Double) -> CGPoint {
-                        let angle = .pi * (1 - min(max(position, 0), 1))
-                        return CGPoint(
-                            x: center.x + cos(angle) * radiusX,
-                            y: center.y - sin(angle) * radiusY
-                        )
-                    }
-
-                    func arc(_ start: Double, _ end: Double) -> Path {
-                        var path = Path()
-                        let steps = max(2, Int(abs(end - start) * 48))
-                        for step in 0...steps {
-                            let position = start + (end - start) * Double(step) / Double(steps)
-                            let p = scalePoint(position)
-                            if step == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                ZStack {
+                    Canvas { context, canvasSize in
+                        let c = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                        func point(_ p: Double, radius: CGFloat) -> CGPoint {
+                            let angle = Double.pi + Double.pi * p
+                            return CGPoint(
+                                x: c.x + CGFloat(cos(angle)) * radius,
+                                y: c.y + CGFloat(sin(angle)) * radius
+                            )
                         }
-                        return path
+                        func arc(_ start: Double, _ end: Double) -> Path {
+                            var path = Path()
+                            let steps = max(2, Int(abs(end - start) * 100))
+                            for step in 0...steps {
+                                let p = start + (end - start) * Double(step) / Double(steps)
+                                let value = point(p, radius: radius)
+                                if step == 0 { path.move(to: value) } else { path.addLine(to: value) }
+                            }
+                            return path
+                        }
+
+                        context.stroke(
+                            arc(0, 1),
+                            with: .color(hairline),
+                            style: StrokeStyle(lineWidth: 1, lineCap: .round)
+                        )
+                        context.stroke(
+                            arc(nearPosition, farPosition),
+                            with: .color(goldenGreen.opacity(0.9)),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                        )
+
+                        var ticks = Path()
+                        for step in 0...100 {
+                            let p = Double(step) / 100
+                            let isLensMark = markPositions.contains { abs($0 - p) < 0.005 }
+                            let isMedium = step.isMultiple(of: 5)
+                            let length: CGFloat = isLensMark ? 8 : (isMedium ? 5 : 2.5)
+                            let inner = point(p, radius: radius - length / 2)
+                            let outer = point(p, radius: radius + length / 2)
+                            ticks.move(to: inner)
+                            ticks.addLine(to: outer)
+                        }
+                        context.stroke(ticks, with: .color(mutedInk), lineWidth: 1)
                     }
+                    .frame(width: diameter, height: diameter)
 
-                    context.stroke(
-                        arc(0, 1),
-                        with: .color(hairline),
-                        style: StrokeStyle(lineWidth: 1, lineCap: .round)
-                    )
-                    context.stroke(
-                        arc(Focus.position(depthRange.near), Focus.position(depthRange.far)),
-                        with: .color(goldenGreen.opacity(0.9)),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                    )
-
-                    var ticks = Path()
-                    for mark in marks {
-                        let p = scalePoint(Focus.position(mark.m))
-                        ticks.move(to: CGPoint(x: p.x, y: p.y - 3))
-                        ticks.addLine(to: CGPoint(x: p.x, y: p.y + 3))
+                    ForEach(ringMarks.indices, id: \.self) { index in
+                        let mark = ringMarks[index]
+                        let p = markPositions[index]
+                        let angle = Double.pi + Double.pi * p
+                        Text(mark.label)
+                            .font(AppTypography.mono(size: 10, weight: .medium))
+                            .foregroundStyle(inkColor)
+                            .fixedSize()
+                            .position(
+                                x: center.x + CGFloat(cos(angle)) * labelRadius,
+                                y: center.y + CGFloat(sin(angle)) * labelRadius
+                            )
                     }
-                    context.stroke(ticks, with: .color(mutedInk), lineWidth: 1)
                 }
+                .frame(width: diameter, height: diameter)
+                .rotationEffect(.degrees(rotation))
+                .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
 
-                ForEach(marks.indices, id: \.self) { index in
-                    let mark = marks[index]
-                    let p = point(at: Focus.position(mark.m), in: size)
-                    Text(mark.label)
-                        .font(AppTypography.mono(size: 10, weight: .medium))
-                        .foregroundStyle(inkColor)
-                        .fixedSize()
-                        .position(x: p.x, y: p.y + 9)
-                }
-
+                // Fixed index: the rotating lens scale turns behind this point.
                 Path { path in
-                    path.move(to: CGPoint(x: target.x, y: 3))
-                    path.addLine(to: CGPoint(x: target.x, y: max(3, target.y - 10)))
+                    path.move(to: CGPoint(x: center.x, y: center.y - radius - 10))
+                    path.addLine(to: CGPoint(x: center.x, y: center.y - radius - 1))
                 }
                 .stroke(accentOrange, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
 
                 Image(systemName: "arrowtriangle.down.fill")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(accentOrange)
-                    .position(x: target.x, y: target.y - 5)
+                    .position(x: center.x, y: center.y - radius - 1)
             }
-            .animation(.spring(response: 0.3, dampingFraction: 0.82), value: distance)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
-    }
-
-    private func point(at position: Double, in size: CGSize) -> CGPoint {
-        let angle = Double.pi * (1 - min(max(position, 0), 1))
-        let center = CGPoint(x: size.width / 2, y: size.height - 22)
-        return CGPoint(
-            x: center.x + cos(angle) * size.width * 0.42,
-            y: center.y - sin(angle) * size.height * 0.48
-        )
     }
 }
 
