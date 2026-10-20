@@ -104,8 +104,13 @@ struct ContentView: View {
                     tooClose: tooClose,
                     feet: useFeet,
                     aperture: Rollei.stops[safeSelected].label,
+                    showsAperturePicker: simpleMode,
                     expanded: $focusExpanded,
-                    onToggleUnits: { useFeet.toggle() }
+                    onToggleUnits: { useFeet.toggle() },
+                    onSelectAperture: { index in
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = index }
+                    }
                 )
             }
 

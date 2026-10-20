@@ -113,11 +113,16 @@ enum Fmt {
 
     /// Signed exposure error in stops, rounded to one decimal only when needed.
     static func exposureDeviation(_ stops: Double) -> String {
+        exposureAmount(stops) + " EV"
+    }
+
+    /// Signed stop amount without a unit, for compact exposure-limit readouts.
+    static func exposureAmount(_ stops: Double) -> String {
         let rounded = (abs(stops) * 10).rounded() / 10
         let amount = abs(rounded - rounded.rounded()) < 0.001
             ? String(Int(rounded))
             : String(format: "%.1f", rounded)
-        return (stops < 0 ? "−" : "+") + amount + " EV"
+        return (stops < 0 ? "−" : "+") + amount
     }
 
     /// LiDAR distance. `m` is metres; nil shows a dash.
