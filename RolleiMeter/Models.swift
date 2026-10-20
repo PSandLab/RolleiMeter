@@ -62,6 +62,8 @@ struct ShutterResult {
     /// Seconds. For out-of-range results this is the nearest limit.
     let t: Double
     let status: ShutterStatus
+    /// Signed exposure error at the camera's nearest physical shutter limit, in stops.
+    let deviation: Double?
 
     /// Slower than 1/60 s: too slow to hand-hold with confidence. Drives the red aperture.
     var isSlow: Bool { status == .tooSlow || t > 1.0 / 60.0 + 1e-6 }
@@ -75,13 +77,13 @@ enum Exposure {
     }
 
     static func result(for t: Double) -> ShutterResult {
-        let third = pow(2.0, 1.0 / 6.0)   // half a third-stop, for rounding to the limits
-
-        if t < Rollei.fastest / third {
-            return ShutterResult(label: "500+", t: Rollei.fastest, status: .tooFast)
+        if t < Rollei.fastest {
+            return ShutterResult(label: "500", t: Rollei.fastest, status: .tooFast,
+                                 deviation: log2(Rollei.fastest / t))
         }
-        if t > Rollei.slowest * third {
-            return ShutterResult(label: "<2", t: Rollei.slowest, status: .tooSlow)
+        if t > Rollei.slowest {
+            return ShutterResult(label: "2", t: Rollei.slowest, status: .tooSlow,
+                                 deviation: -log2(t / Rollei.slowest))
         }
         var best = Rollei.speeds[0]
         var bestDist = Double.greatestFiniteMagnitude
@@ -92,7 +94,7 @@ enum Exposure {
                 best = s
             }
         }
-        return ShutterResult(label: best.label, t: best.t, status: .ok)
+        return ShutterResult(label: best.label, t: best.t, status: .ok, deviation: nil)
     }
 }
 
@@ -107,6 +109,15 @@ enum Fmt {
         if rem == 1 { s += "⅓" }
         if rem == 2 { s += "⅔" }
         return (v > 0 ? "+" : "−") + s
+    }
+
+    /// Signed exposure error in stops, rounded to one decimal only when needed.
+    static func exposureDeviation(_ stops: Double) -> String {
+        let rounded = (abs(stops) * 10).rounded() / 10
+        let amount = abs(rounded - rounded.rounded()) < 0.001
+            ? String(Int(rounded))
+            : String(format: "%.1f", rounded)
+        return (stops < 0 ? "−" : "+") + amount + " EV"
     }
 
     /// LiDAR distance. `m` is metres; nil shows a dash.

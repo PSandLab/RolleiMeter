@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var evDamp = Damper(count: 1, initial: 12, stiffness: 70, damping: 12)
     @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 110, damping: 17)
 
+    @AppStorage("simpleMode") private var simpleMode = false
     @AppStorage("mode") private var mode: MeterMode = .matrix   // matrix or highlight
     @AppStorage("isoIndex") private var isoIndex = 6      // ISO 100
     @AppStorage("evIndex") private var evIndex = 6        // 0 compensation
@@ -68,20 +69,27 @@ struct ContentView: View {
         VStack(spacing: 10) {
             preview
 
-            RulerView(
-                damp: evDamp,
-                iso: iso,
-                comp: comp,
-                golden: golden,
-                selected: safeSelected,
-                onSelect: { i in
+            if simpleMode {
+                SimpleExposurePair(damp: evDamp, iso: iso, comp: comp, selected: safeSelected, onSelect: { i in
                     UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = i }
-                },
-                onToggleGolden: { i in
-                    golden = (golden == i) ? -1 : i
-                }
-            )
+                    selected = i
+                })
+            } else {
+                RulerView(
+                    damp: evDamp,
+                    iso: iso,
+                    comp: comp,
+                    golden: golden,
+                    selected: safeSelected,
+                    onSelect: { i in
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = i }
+                    },
+                    onToggleGolden: { i in
+                        golden = (golden == i) ? -1 : i
+                    }
+                )
+            }
 
             if meter.hasLiDAR {
                 FocusPanel(
@@ -103,7 +111,7 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(white: 0.93).ignoresSafeArea())
+        .background(Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0).ignoresSafeArea())
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear {
@@ -139,7 +147,7 @@ struct ContentView: View {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView(useDIN: $useDIN, useFeet: $useFeet, golden: $golden, calibration: $calibration)
+            SettingsView(simpleMode: $simpleMode, useDIN: $useDIN, useFeet: $useFeet, golden: $golden, calibration: $calibration)
                 .presentationDetents([.medium, .large])
         }
     }
@@ -313,7 +321,7 @@ struct ContentView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .clipShape(Rectangle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
@@ -372,6 +380,7 @@ struct ContentView: View {
 // MARK: - Settings
 
 struct SettingsView: View {
+    @Binding var simpleMode: Bool
     @Binding var useDIN: Bool
     @Binding var useFeet: Bool
     @Binding var golden: Int
@@ -382,6 +391,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    Toggle("Simple exposure pair", isOn: $simpleMode)
                     Toggle("Show film speed as DIN", isOn: $useDIN)
                     Picker("Distance units", selection: $useFeet) {
                         Text("Meters").tag(false)
