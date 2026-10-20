@@ -111,17 +111,20 @@ enum Fmt {
         return (v > 0 ? "+" : "−") + s
     }
 
-    /// Signed exposure error in stops, rounded to one decimal only when needed.
+    /// Signed exposure error in stops, quantized to the nearest third for a calm readout.
     static func exposureDeviation(_ stops: Double) -> String {
         exposureAmount(stops) + " EV"
     }
 
-    /// Signed stop amount without a unit, for compact exposure-limit readouts.
+    /// Signed stop amount without a unit, rounded in 1/3-stop steps.
     static func exposureAmount(_ stops: Double) -> String {
-        let rounded = (abs(stops) * 10).rounded() / 10
-        let amount = abs(rounded - rounded.rounded()) < 0.001
-            ? String(Int(rounded))
-            : String(format: "%.1f", rounded)
+        guard stops != 0 else { return "0" }
+        let thirds = max(1, Int((abs(stops) * 3).rounded()))
+        let whole = thirds / 3
+        let remainder = thirds % 3
+        var amount = whole > 0 ? "\(whole)" : ""
+        if remainder == 1 { amount += "⅓" }
+        if remainder == 2 { amount += "⅔" }
         return (stops < 0 ? "−" : "+") + amount
     }
 
