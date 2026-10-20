@@ -33,6 +33,8 @@ final class CameraMeter: NSObject, ObservableObject,
     private var mode: MeterMode = .matrix
     private var spot = CGPoint(x: 0.5, y: 0.5)
     private var spotRadius: CGFloat = 0.05
+    /// Where LiDAR measures distance. Separate from the spot meter.
+    private var focus = CGPoint(x: 0.5, y: 0.5)
     private var smoothed: Double?
     private var distSmoothed: Double?
     private var lastPublish: CFTimeInterval = 0
@@ -52,13 +54,14 @@ final class CameraMeter: NSObject, ObservableObject,
         return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat) {
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint) {
         lock.lock()
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
         self.smoothed = nil
-        self.distSmoothed = nil
+        if focus != self.focus { self.distSmoothed = nil }
+        self.focus = focus
         lock.unlock()
     }
 
@@ -231,14 +234,11 @@ final class CameraMeter: NSObject, ObservableObject,
 
     func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
         lock.lock()
-        let m = mode
-        let sp = spot
-        let rad = spotRadius
+        let pt = focus
         lock.unlock()
 
-        // Same point the exposure is read from: the spot, otherwise the frame centre.
-        let pt = (m == .spot) ? sp : CGPoint(x: 0.5, y: 0.5)
-        let r = (m == .spot) ? Double(rad) : 0.03
+        // Distance is read at the focus point (the crosshair), independent of the spot meter.
+        let r = 0.03
 
         let converted = depthData.depthDataType == kCVPixelFormatType_DepthFloat32
             ? depthData

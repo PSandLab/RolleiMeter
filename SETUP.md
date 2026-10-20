@@ -7,11 +7,14 @@ Actions tab > Build IPA > Run workflow. Download the `RolleiMeter-ipa` artifact,
 
 ## Using it
 - Opens straight to the camera. The viewfinder takes all the space the controls don't.
-- **Matrix / Highlight** chips switch the metering. **Tap the viewfinder** to spot meter that point (the badge shows SPOT, pinch resizes the circle). Tap a chip to leave spot.
+- **Tap the viewfinder** to measure distance there. A white bracket marks exactly where LiDAR is reading, with the distance next to it.
+- **Press, hold and drag** to spot meter that point (circle, badge shows SPOT; pinch resizes). The two points are independent: meter the face, focus on the eyes.
+- **Matrix / Highlight** chips leave spot and switch the metering.
 - Aperture bar: shutter speed above each aperture. An aperture turns **red when its shutter speed is slower than 1/60**. `500+` (orange) means even 1/500 can't hold back enough light. `<2` means slower than 1/2.
 - Tap an aperture to select it for depth of field. Long-press to set the golden aperture (green).
-- Distance dial (LiDAR iPhones): Rollei 35 focusing scale. Triangle = distance to the metered point. Orange band = depth of field at the selected aperture. Closest focus (0.9 m / 3 ft) is green. Closer than that, the dial goes red and flashes TOO CLOSE. Tap the dial to switch meters/feet.
-- Round button freezes exposure and distance. Tap again to release.
+- **Focus panel** (LiDAR iPhones): by default one line. The nearest mark on the Rollei's focus ring for the measured distance, plus `✓ sharp at ƒ5.6` if the subject is still inside the depth of field with the lens on that mark, or `set between 2 and 3` if not. The ring is continuous, so between marks is fine. Tap the panel to open the full scale with the depth-of-field band and a m/ft switch. Closest focus (0.9 m / 3 ft) is green. Closer than that, the panel goes red and flashes TOO CLOSE.
+- Round button, or a **volume button**, freezes exposure and distance. Press again to release.
+- Full-screen: status bar and home indicator are hidden (swipe up from the bottom edge to reach the home bar).
 - Gear: ISO/DIN, meters/feet, golden aperture, calibration.
 
 ## Metering

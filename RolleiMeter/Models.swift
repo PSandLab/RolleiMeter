@@ -166,10 +166,52 @@ enum DepthOfField {
     /// Near and far limits of acceptable sharpness, metres. Far is infinity past the hyperfocal distance.
     static func range(subject s: Double, n: Double) -> (near: Double, far: Double) {
         let f = Focus.focalMM
-        let sMM = s * 1000.0
         let h = f * f / (n * coc) + f
+        // Focused at infinity: sharp from half the hyperfocal distance outwards.
+        if s.isInfinite { return ((h - f) / 1000.0, Double.infinity) }
+        let sMM = s * 1000.0
         let near = sMM * (h - f) / (h + sMM - 2 * f)
         let far = sMM >= h ? Double.infinity : sMM * (h - f) / (h - sMM)
         return (near / 1000.0, far / 1000.0)
+    }
+}
+
+// MARK: - Focus advice
+
+/// What to set on the lens for a measured distance.
+struct FocusAdvice {
+    /// Nearest mark on the lens, e.g. "2".
+    let label: String
+    /// True when the subject is still inside the depth of field with the lens set to that mark.
+    let sharp: Bool
+    /// When it isn't, the two marks to set between.
+    let lo: String
+    let hi: String
+}
+
+extension Focus {
+    /// Nearest mark on the ring (by position, the way you'd eyeball it), then a check against the
+    /// depth of field at `aperture`: if the subject is still sharp with the lens on that mark, say so,
+    /// otherwise say which two marks to set between.
+    static func advice(subject s: Double, aperture n: Double, feet: Bool) -> FocusAdvice {
+        let marks = feet ? feetMarks : meterMarks
+        let ps = position(s)
+
+        var best = marks[0]
+        var bestGap = Double.greatestFiniteMagnitude
+        for m in marks {
+            let gap = abs(position(m.m) - ps)
+            if gap < bestGap {
+                bestGap = gap
+                best = m
+            }
+        }
+
+        let r = DepthOfField.range(subject: best.m, n: n)
+        let sharp = s >= r.near && s <= r.far
+
+        let lo = marks.last { $0.m <= s } ?? marks[0]
+        let hi = marks.first { $0.m > s } ?? marks[marks.count - 1]
+        return FocusAdvice(label: best.label, sharp: sharp, lo: lo.label, hi: hi.label)
     }
 }

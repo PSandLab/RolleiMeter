@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 import UIKit
 
 private let accentOrange = Color(red: 0.88, green: 0.42, blue: 0.22)
@@ -25,20 +26,35 @@ private struct Panel: ViewModifier {
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    /// Called when a volume button is released.
+    var onPress: () -> Void = {}
 }
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    var onVolumePress: () -> Void = {}
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspectFill
         v.backgroundColor = .black
+        v.onPress = onVolumePress
+
+        // Volume buttons act like the shutter button. The system routes them to us while the camera is in use.
+        if #available(iOS 17.2, *) {
+            let interaction = AVCaptureEventInteraction { [weak v] event in
+                if event.phase == .ended { v?.onPress() }
+            }
+            interaction.isEnabled = true
+            v.addInteraction(interaction)
+        }
         return v
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        uiView.onPress = onVolumePress
+    }
 }
 
 // MARK: - EV badge
@@ -223,31 +239,164 @@ struct FreezeButton: View {
     }
 }
 
-// MARK: - Distance dial
+// MARK: - LiDAR marker (on the viewfinder)
 
-/// Rollei 35 focusing scale. Marks are spaced by lens extension, like the real ring.
-/// The triangle is the LiDAR distance; the orange band is the depth of field at the selected aperture.
-/// Closer than the lens can focus (0.9 m / 3 ft): the dial goes red and says so.
-struct DistanceDial: View {
+private struct FocusBrackets: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let l = r.width * 0.3
+        p.move(to: CGPoint(x: r.minX, y: r.minY + l)); p.addLine(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.minX + l, y: r.minY))
+        p.move(to: CGPoint(x: r.maxX - l, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY + l))
+        p.move(to: CGPoint(x: r.maxX, y: r.maxY - l)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.maxX - l, y: r.maxY))
+        p.move(to: CGPoint(x: r.minX + l, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY - l))
+        return p
+    }
+}
+
+/// Shows exactly where LiDAR is measuring, with the distance next to it.
+struct FocusMarker: View {
+    let text: String?
+    let tooClose: Bool
+    let labelAbove: Bool
+
+    var body: some View {
+        ZStack {
+            FocusBrackets()
+                .stroke(tooClose ? warnRed : Color.white,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .frame(width: 34, height: 34)
+                .shadow(color: .black.opacity(0.55), radius: 2)
+            if let text {
+                Text(text)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background((tooClose ? warnRed : Color.black).opacity(0.65), in: Capsule())
+                    .offset(y: labelAbove ? -32 : 32)
+                    .contentTransition(.numericText())
+            }
+        }
+        .frame(width: 34, height: 34)
+        .animation(.smooth(duration: 0.2), value: text)
+        .animation(.smooth(duration: 0.2), value: tooClose)
+    }
+}
+
+// MARK: - Focus panel
+
+/// Compact by default: the nearest mark on the Rollei's focus ring for the measured distance.
+/// Tap it to open the full scale with the depth-of-field band.
+struct FocusPanel: View {
     /// Channels: subject, near limit, far limit. All are 0...1 positions on the scale.
     @ObservedObject var damp: Damper
     let distance: Double?
     let near: Double?
     let far: Double?
+    let advice: FocusAdvice?
     let tooClose: Bool
     let feet: Bool
-    let onTap: () -> Void
+    let aperture: String
+    @Binding var expanded: Bool
+    let onToggleUnits: () -> Void
 
     private var marks: [(label: String, m: Double)] { feet ? Focus.feetMarks : Focus.meterMarks }
+    private var unit: String { feet ? "ft" : "m" }
 
     var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                UISelectionFeedbackGenerator().selectionChanged()
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded.toggle() }
+            } label: {
+                summary
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                scale
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .modifier(Panel(stroke: tooClose ? warnRed : Color(white: 0.8), lineWidth: tooClose ? 2 : 1))
+        .animation(.smooth(duration: 0.25), value: tooClose)
+    }
+
+    // MARK: summary row
+
+    private var bigText: String {
+        guard let a = advice else { return "—" }
+        return a.label == "∞" ? "∞" : a.label + " " + unit
+    }
+
+    private var summary: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("FOCUS")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if tooClose {
+                    TimelineView(.animation) { ctx in
+                        Text("TOO CLOSE")
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .foregroundStyle(warnRed)
+                            .opacity(0.65 + 0.35 * sin(ctx.date.timeIntervalSinceReferenceDate * 7))
+                    }
+                } else {
+                    Text(bigText)
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(advice == nil ? Color(white: 0.55) : inkColor)
+                        .contentTransition(.numericText())
+                        .animation(.smooth(duration: 0.2), value: bigText)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                if tooClose {
+                    Text("now " + Fmt.distance(distance, feet: feet))
+                        .foregroundStyle(warnRed)
+                    Text("min " + (feet ? "3 ft" : "0.9 m"))
+                        .foregroundStyle(warnRed)
+                } else if let d = distance, let a = advice {
+                    Text(Fmt.distance(d, feet: feet) + " measured")
+                        .foregroundStyle(inkColor)
+                    if a.sharp {
+                        Text("✓ sharp at ƒ" + aperture)
+                            .foregroundStyle(goldenGreen)
+                    } else {
+                        Text("set between \(a.lo) and \(a.hi)")
+                            .foregroundStyle(accentOrange)
+                    }
+                } else {
+                    Text("no LiDAR reading")
+                        .foregroundStyle(Color(white: 0.55))
+                }
+            }
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(expanded ? 180 : 0))
+        }
+        .contentShape(Rectangle())
+    }
+
+    // MARK: full scale
+
+    private var scale: some View {
         let visible = distance != nil
         let showBand = visible && !tooClose
         let tint = tooClose ? warnRed : accentOrange
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             GeometryReader { geo in
-                let inset: CGFloat = 22
+                let inset: CGFloat = 12
                 let w = geo.size.width - inset * 2
                 let subjectX = inset + CGFloat(damp.values[0]) * w
                 let nearX = inset + CGFloat(damp.values[1]) * w
@@ -300,41 +449,22 @@ struct DistanceDial: View {
             }
             .frame(height: 44)
 
-            readout
-        }
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity)
-        .modifier(Panel(stroke: tooClose ? warnRed : Color(white: 0.8), lineWidth: tooClose ? 2 : 1))
-        .animation(.smooth(duration: 0.25), value: tooClose)
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
-    }
-
-    @ViewBuilder private var readout: some View {
-        if tooClose {
-            TimelineView(.animation) { ctx in
-                let pulse = 0.65 + 0.35 * sin(ctx.date.timeIntervalSinceReferenceDate * 7)
-                HStack {
-                    Text(Fmt.distance(distance, feet: feet))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("TOO CLOSE")
-                        .opacity(pulse)
-                        .frame(maxWidth: .infinity)
-                    Text("min " + (feet ? "3 ft" : "0.9 m"))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(warnRed)
-                .padding(.horizontal, 20)
-            }
-        } else {
             HStack {
                 Text(near.map { Fmt.distance($0, feet: feet) } ?? "")
                     .foregroundStyle(accentOrange)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(Fmt.distance(distance, feet: feet))
-                    .foregroundStyle(distance == nil ? Color(white: 0.55) : inkColor)
-                    .frame(maxWidth: .infinity)
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    onToggleUnits()
+                } label: {
+                    Text(unit.uppercased())
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(inkColor)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(.plain)
                 Text(far.map { Fmt.distance($0, feet: feet) } ?? "")
                     .foregroundStyle(accentOrange)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -342,7 +472,9 @@ struct DistanceDial: View {
             .font(.system(size: 13, weight: .semibold, design: .monospaced))
             .contentTransition(.numericText())
             .animation(.smooth(duration: 0.2), value: distance)
-            .padding(.horizontal, 20)
+            .padding(.top, 2)
+            .padding(.horizontal, 6)
         }
+        .padding(.top, 6)
     }
 }

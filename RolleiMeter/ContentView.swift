@@ -22,8 +22,15 @@ struct ContentView: View {
     @State private var distPrimed = false
     /// Spot metering only happens after a tap in the viewfinder. Tapping a mode chip goes back.
     @State private var spotActive = false
-    @State private var spot = CGPoint(x: 0.5, y: 0.5)      // where you tapped, in viewfinder coordinates
+    @State private var spot = CGPoint(x: 0.5, y: 0.5)      // spot meter point (press and hold), viewfinder coordinates
     @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)   // the same point in camera-frame coordinates
+    @State private var focus = CGPoint(x: 0.5, y: 0.5)     // LiDAR distance point (tap), viewfinder coordinates
+    @State private var focusBuf = CGPoint(x: 0.5, y: 0.5)  // the same point in camera-frame coordinates
+    @State private var focusExpanded = false
+    @State private var spotGestureLive = false
+    @State private var suppressTap = false
+    @State private var showHint = false
+    @AppStorage("hintCount") private var hintCount = 0
     @State private var spotRadius: CGFloat = 0.05
     @State private var pinchBase: CGFloat = 0.05
     @State private var showSettings = false
@@ -52,6 +59,11 @@ struct ContentView: View {
         return DepthOfField.range(subject: d, n: DepthOfField.apertures[safeSelected])
     }
 
+    private var advice: FocusAdvice? {
+        guard let d = shownDistance, d >= Focus.nearest else { return nil }
+        return Focus.advice(subject: d, aperture: DepthOfField.apertures[safeSelected], feet: useFeet)
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             preview
@@ -72,17 +84,17 @@ struct ContentView: View {
             )
 
             if meter.hasLiDAR {
-                DistanceDial(
+                FocusPanel(
                     damp: distDamp,
                     distance: shownDistance,
                     near: dof?.near,
                     far: dof?.far,
+                    advice: advice,
                     tooClose: tooClose,
                     feet: useFeet,
-                    onTap: {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        useFeet.toggle()
-                    }
+                    aperture: Rollei.stops[safeSelected].label,
+                    expanded: $focusExpanded,
+                    onToggleUnits: { useFeet.toggle() }
                 )
             }
 
@@ -92,6 +104,8 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(white: 0.93).ignoresSafeArea())
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             if mode == .spot { mode = .matrix }   // older versions could save spot as the mode
@@ -99,6 +113,13 @@ struct ContentView: View {
             evDamp.set([ev], snap: true)
             syncDistance()
             meter.start()
+            hintCount += 1
+            if hintCount <= 3 {
+                showHint = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                    withAnimation(.easeOut(duration: 0.4)) { showHint = false }
+                }
+            }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -107,6 +128,7 @@ struct ContentView: View {
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
         .onChange(of: spotBuf) { pushConfig() }
+        .onChange(of: focusBuf) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
         .onChange(of: meter.sceneEV) { evDamp.set([ev]) }
         .onChange(of: calibration) { evDamp.set([ev]) }
@@ -123,7 +145,7 @@ struct ContentView: View {
     }
 
     private func pushConfig() {
-        meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius)
+        meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf)
     }
 
     private func syncDistance() {
@@ -136,6 +158,20 @@ struct ContentView: View {
         // First reading after nothing: jump there instead of sweeping in from the left.
         distDamp.set(target, snap: !distPrimed)
         distPrimed = true
+    }
+
+    private func toggleFreeze() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if frozenEV == nil {
+            frozenEV = liveEV
+            frozenDist = meter.distance
+        } else {
+            unfreeze()
+        }
+    }
+
+    private func normalized(_ p: CGPoint, _ size: CGSize) -> CGPoint {
+        CGPoint(x: min(max(p.x / max(size.width, 1), 0), 1), y: min(max(p.y / max(size.height, 1), 0), 1))
     }
 
     private func unfreeze() {
@@ -159,24 +195,44 @@ struct ContentView: View {
     private var preview: some View {
         GeometryReader { geo in
             ZStack {
-                CameraPreview(session: meter.session)
+                CameraPreview(session: meter.session, onVolumePress: { toggleFreeze() })
 
-                // Tap = spot meter that point. Pinch = resize the spot.
+                // Tap = measure distance there (the crosshair).
+                // Press, hold and drag = spot meter there. Pinch = resize the spot.
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(
                         SpatialTapGesture().onEnded { value in
-                            let x = min(max(value.location.x / geo.size.width, 0), 1)
-                            let y = min(max(value.location.y / geo.size.height, 0), 1)
-                            let p = CGPoint(x: x, y: y)
-                            spotBuf = bufferPoint(p, in: geo.size)
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
-                                spot = p
-                                spotActive = true
-                            }
+                            if suppressTap { return }
+                            let p = normalized(value.location, geo.size)
+                            focusBuf = bufferPoint(p, in: geo.size)
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
                             unfreeze()
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         }
+                    )
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.4)
+                            .sequenced(before: DragGesture(minimumDistance: 0))
+                            .onChanged { value in
+                                guard case .second(true, let drag?) = value else { return }
+                                if !spotGestureLive {
+                                    spotGestureLive = true
+                                    suppressTap = true
+                                    unfreeze()
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                }
+                                let p = normalized(drag.location, geo.size)
+                                spotBuf = bufferPoint(p, in: geo.size)
+                                withAnimation(.interactiveSpring) {
+                                    spot = p
+                                    spotActive = true
+                                }
+                            }
+                            .onEnded { _ in
+                                spotGestureLive = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { suppressTap = false }
+                            }
                     )
                     .simultaneousGesture(
                         MagnifyGesture()
@@ -198,6 +254,29 @@ struct ContentView: View {
                         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
                         .animation(.interactiveSpring, value: spotRadius)
                         .transition(.scale(scale: 1.6).combined(with: .opacity))
+                        .allowsHitTesting(false)
+                }
+
+                if meter.hasLiDAR {
+                    FocusMarker(
+                        text: shownDistance.map { Fmt.distance($0, feet: useFeet) },
+                        tooClose: tooClose,
+                        labelAbove: focus.y > 0.75
+                    )
+                    .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
+                    .allowsHitTesting(false)
+                }
+
+                if showHint {
+                    Text("Tap: distance   ·   Hold: spot meter")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.55), in: Capsule())
+                        .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
+                        .transition(.opacity)
                         .allowsHitTesting(false)
                 }
 
@@ -277,13 +356,7 @@ struct ContentView: View {
             WheelBox(title: "EV", selection: $evIndex, labels: EVComp.labels)
             Spacer()
             FreezeButton(frozen: frozenEV != nil) {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                if frozenEV == nil {
-                    frozenEV = liveEV
-                    frozenDist = meter.distance
-                } else {
-                    unfreeze()
-                }
+                toggleFreeze()
             }
             Spacer()
             WheelBox(
@@ -316,7 +389,7 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                 } footer: {
-                    Text("You can also tap the distance dial to switch units.")
+                    Text("You can also tap m / ft on the open focus scale.")
                 }
                 Section {
                     Picker("Golden aperture", selection: $golden) {
