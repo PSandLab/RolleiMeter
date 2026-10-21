@@ -104,6 +104,20 @@ struct ContentView: View {
             topBar
             preview
 
+            if trayOpen {
+                ControlTray(
+                    evIndex: $evIndex,
+                    isoIndex: $isoIndex,
+                    useDIN: $useDIN,
+                    useFeet: $useFeet,
+                    simpleMode: $simpleMode,
+                    calibration: $calibration,
+                    armOffset: $armOffset,
+                    rawDistance: { meter.distance }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if simpleMode {
                 SimpleExposurePair(
                     damp: evDamp, iso: iso, comp: comp,
@@ -138,25 +152,6 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .bottom) {
-            if trayOpen {
-                ControlTray(
-                    evIndex: $evIndex,
-                    isoIndex: $isoIndex,
-                    useDIN: $useDIN,
-                    useFeet: $useFeet,
-                    simpleMode: $simpleMode,
-                    calibration: $calibration,
-                    armOffset: $armOffset,
-                    rawDistance: { meter.distance }
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 102)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .zIndex(2)
-            }
-        }
-        .animation(.spring(response: 0.5, dampingFraction: 0.88), value: trayOpen)
         .background(PaperBackground().ignoresSafeArea())
         .preferredColorScheme(night ? .dark : .light)
         .statusBarHidden(true)
