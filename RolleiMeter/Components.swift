@@ -114,7 +114,7 @@ struct EVBadge: View {
     private var evText: String { String(format: "%.1f", damp.values[0]) }
 
     var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 6) {
+        HStack(spacing: 6) {
             NeedleGauge(ev: damp.values[0])
             if frozen {
                 Text("HOLD")
@@ -398,6 +398,7 @@ private struct FocusRingScale: View {
             marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
         .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
+        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: aperture.n)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
@@ -431,9 +432,6 @@ private struct FocusDialFace: View, Animatable {
         }
     }
 
-    /// Points of horizontal travel for the full near-to-infinity focus range.
-    private let pointsPerUnit: CGFloat = 520
-
     var body: some View {
         Canvas { context, size in
             let cx = size.width / 2
@@ -444,6 +442,13 @@ private struct FocusDialFace: View, Animatable {
             let markTop = y0 + 50
             let baseline = y0 + 92
             let fadeWidth: CGFloat = 44
+
+            // Depth of field is shown by zoom. The window covers about 1.8x the depth of field, so a wide
+            // aperture zooms in on a few ticks around one number and a small one pulls out to show more of the ring.
+            let window = min(max((far - near) * 1.8, 0.16), 0.5)
+            let pointsPerUnit = size.width / CGFloat(window)
+            // Fine ticks thin out as they get crowded; the longer ones always stay.
+            let fine = Double(min(1, max(0, (pointsPerUnit / 60 - 4) / 3)))
 
             func x(_ p: Double) -> CGFloat { cx + CGFloat(p - position) * pointsPerUnit }
             func fade(_ x: CGFloat) -> Double {
@@ -457,15 +462,17 @@ private struct FocusDialFace: View, Animatable {
             for i in 0...n {
                 let p = Double(i) / Double(n)
                 if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
+                let major = i.isMultiple(of: 5)
+                let strength = major ? 1.0 : fine
+                if strength <= 0 { continue }
                 let px = x(p)
                 let f = fade(px)
                 if f <= 0 { continue }
-                let h: CGFloat = i.isMultiple(of: 5) ? 28 : 18
+                let h: CGFloat = major ? 28 : 18
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: baseline - h))
-                let shade = DepthShade.weight(p, near: near, far: far)
-                context.stroke(tick, with: .color(inkColor.opacity(f * (0.26 + 0.74 * shade))), lineWidth: 1.5)
+                context.stroke(tick, with: .color(mutedInk.opacity(f * strength)), lineWidth: 1.5)
             }
             for mark in marks {
                 let px = x(mark.p)
@@ -473,19 +480,16 @@ private struct FocusDialFace: View, Animatable {
                 if f <= 0 { continue }
                 let green = mark.label == sharpLabel
                 let color: Color = green ? goldenGreen : inkColor
-                // Marks you could set the lens to and still be sharp stay dark; the rest recede.
-                let shade = DepthShade.weight(mark.p, near: near, far: far)
-                let a = f * (0.4 + 0.6 * shade)
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: markTop))
-                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: green ? 3 : 2.5)
+                context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
                 // The mark under the pointer grows a little, like a detent.
                 let underPointer = abs(mark.p - position) < 0.012
                 let text = context.resolve(
                     Text(mark.label)
                         .font(AppTypography.bold(size: underPointer ? 29 : 24))
-                        .foregroundColor(color.opacity(a))
+                        .foregroundColor(color.opacity(f))
                 )
                 context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
             }
@@ -554,20 +558,22 @@ struct ScrubDial: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(title)
-                .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(1)
-                .foregroundStyle(mutedInk)
-            Text(labels.isEmpty ? "" : labels[safeSelection])
-                .font(AppTypography.bold(size: 28))
-                .foregroundStyle(inkColor)
-                .contentTransition(.numericText())
-                .animation(.smooth(duration: 0.15), value: selection)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title)
+                    .font(AppTypography.next(size: 10, weight: .medium))
+                    .tracking(1)
+                    .foregroundStyle(mutedInk)
+                Text(labels.isEmpty ? "" : labels[safeSelection])
+                    .font(AppTypography.bold(size: 22))
+                    .foregroundStyle(inkColor)
+                    .contentTransition(.numericText())
+                    .animation(.smooth(duration: 0.15), value: selection)
+            }
             DialFace(position: position, count: labels.count, spacing: spacing, home: resetIndex)
-                .frame(height: 30)
+                .frame(height: 22)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -633,15 +639,15 @@ private struct DialFace: View, Animatable {
                 let major = i % 3 == 0
                 var tick = Path()
                 tick.move(to: CGPoint(x: x, y: size.height))
-                tick.addLine(to: CGPoint(x: x, y: size.height - (major ? 17 : 9)))
+                tick.addLine(to: CGPoint(x: x, y: size.height - (major ? 12 : 7)))
                 let isHome = i == home
                 context.stroke(tick, with: .color((isHome ? inkColor : mutedInk).opacity(fade)),
                                lineWidth: isHome ? 2.4 : (major ? 1.8 : 1.2))
             }
             var pointer = Path()
-            pointer.move(to: CGPoint(x: cx - 5, y: 0))
-            pointer.addLine(to: CGPoint(x: cx + 5, y: 0))
-            pointer.addLine(to: CGPoint(x: cx, y: 8))
+            pointer.move(to: CGPoint(x: cx - 4.5, y: 0))
+            pointer.addLine(to: CGPoint(x: cx + 4.5, y: 0))
+            pointer.addLine(to: CGPoint(x: cx, y: 6))
             pointer.closeSubpath()
             context.fill(pointer, with: .color(accentRed))
         }
@@ -707,6 +713,44 @@ struct ModeGlyph: View {
             }
         }
         .frame(width: 46, height: 46)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Spot reticle
+
+/// The spot meter's circle: a thin ring with four small inward ticks and a centre dot, the way a camera
+/// marks its spot area. A soft dark edge under the light line keeps it readable on any scene.
+struct SpotReticle: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            let r = min(size.width, size.height) / 2 - 2
+            guard r > 3 else { return }
+            let tick = min(6, r * 0.32)
+
+            func draw(_ color: Color, _ width: CGFloat) {
+                var ring = Path()
+                ring.addEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+                ctx.stroke(ring, with: .color(color), lineWidth: width)
+                var ticks = Path()
+                for k in 0..<4 {
+                    let a = Double(k) * .pi / 2
+                    let dx = CGFloat(cos(a)), dy = CGFloat(sin(a))
+                    ticks.move(to: CGPoint(x: c.x + dx * r, y: c.y + dy * r))
+                    ticks.addLine(to: CGPoint(x: c.x + dx * (r - tick), y: c.y + dy * (r - tick)))
+                }
+                ctx.stroke(ticks, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
+            }
+            draw(Palette.lensDark.opacity(0.3), 3.6)
+            draw(Palette.lensLight, 1.4)
+
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2.6, y: c.y - 2.6, width: 5.2, height: 5.2)),
+                     with: .color(Palette.lensDark.opacity(0.3)))
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 1.5, y: c.y - 1.5, width: 3, height: 3)),
+                     with: .color(Palette.lensLight))
+        }
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 }
@@ -790,26 +834,12 @@ struct FocusPanel: View {
     @Binding var expanded: Bool
     let onToggleUnits: () -> Void
     let onSelectAperture: (Int) -> Void
-    /// False: the compact summary row that sits in the layout.
-    /// True: the full scale as a card, shown floating over the viewfinder so the layout never moves.
-    var card: Bool = false
 
     private var marks: [(label: String, m: Double)] { feet ? Focus.feetMarks : Focus.meterMarks }
     private var unit: String { feet ? "ft" : "m" }
 
     var body: some View {
-        if card {
-            scale
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .frame(maxWidth: .infinity)
-                .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .onTapGesture {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded = false }
-                }
-        } else {
+        VStack(spacing: 0) {
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded.toggle() }
@@ -817,13 +847,18 @@ struct FocusPanel: View {
                 summary
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity)
-            .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .animation(.smooth(duration: 0.25), value: tooClose)
+
+            if expanded {
+                scale
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .animation(.smooth(duration: 0.25), value: tooClose)
     }
 
     // MARK: summary row
