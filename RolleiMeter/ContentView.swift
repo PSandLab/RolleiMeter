@@ -44,7 +44,9 @@ struct ContentView: View {
     @State private var blink = false
     @State private var night = false
     @State private var nightSince: Date?
-    @Namespace private var chipNamespace
+    /// Brief name of the metering mode, shown beside its button after a change.
+    @State private var modeCaption: String?
+    @State private var captionToken = 0
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
@@ -110,23 +112,7 @@ struct ContentView: View {
             }
 
             if meter.hasLiDAR && !simpleMode {
-                FocusPanel(
-                    damp: distDamp,
-                    distance: shownDistance,
-                    near: dof?.near,
-                    far: dof?.far,
-                    advice: advice,
-                    tooClose: tooClose,
-                    feet: useFeet,
-                    aperture: Rollei.stops[safeSelected].label,
-                    showsAperturePicker: false,
-                    expanded: $focusExpanded,
-                    onToggleUnits: { useFeet.toggle() },
-                    onSelectAperture: { index in
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = index }
-                    }
-                )
+                focusPanel(card: false)
             }
 
             controls
@@ -170,6 +156,10 @@ struct ContentView: View {
         .onChange(of: frozenEV) { evDamp.set([ev]) }
         .onChange(of: shownDistance) { syncDistance() }
         .onChange(of: selected) { syncDistance() }
+        .onChange(of: focusExpanded) {
+            if focusExpanded && trayOpen { withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { trayOpen = false } }
+        }
+        .onChange(of: simpleMode) { focusExpanded = false }
         .onChange(of: tooClose) {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
@@ -280,7 +270,8 @@ struct ContentView: View {
                     Image(uiImage: frozenPreviewImage)
                         .resizable()
                         .scaledToFill()
-                        .opacity(1)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
                         .overlay(Palette.lensLight.opacity(0.04))
                         .transition(.opacity)
                         .allowsHitTesting(false)
@@ -381,11 +372,28 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
 
+                // Tray and focus scale float over the bottom of the viewfinder. Nothing in the layout moves,
+                // so the live camera layer never resizes while they open and close.
                 VStack {
                     Spacer()
-                    modeChips
+                    if trayOpen {
+                        ControlTray(
+                            evIndex: $evIndex,
+                            isoIndex: $isoIndex,
+                            useDIN: $useDIN,
+                            useFeet: $useFeet,
+                            simpleMode: $simpleMode,
+                            calibration: $calibration,
+                            armOffset: $armOffset,
+                            rawDistance: { meter.distance }
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    } else if focusExpanded && meter.hasLiDAR && !simpleMode {
+                        focusPanel(card: true)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-                .padding(12)
+                .padding(10)
 
                 if meter.denied {
                     VStack(spacing: 10) {
@@ -415,6 +423,7 @@ struct ContentView: View {
                     .opacity(blink ? 0.9 : 0)
                     .allowsHitTesting(false)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -430,129 +439,124 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var modeChips: some View {
-        HStack(spacing: 0) {
-            modeButton(.matrix)
-            modeButton(.highlight)
-            if spotActive {
-                // Tap to leave spot metering and go back to the last mode.
-                Button {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) { spotActive = false }
-                    unfreeze()
-                } label: {
-                    Text("SPOT")
-                        .font(AppTypography.next(size: 11, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundStyle(Palette.lensLight)
-                        .frame(minWidth: 62, minHeight: 38)
-                        .background {
-                            Capsule()
-                                .fill(Palette.lensLight.opacity(0.22))
-                                .matchedGeometryEffect(id: "chipPill", in: chipNamespace)
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .transition(.scale(scale: 0.8).combined(with: .opacity))
-                .accessibilityLabel("Spot metering. Tap to turn off.")
-                .accessibilityAddTraits(.isSelected)
-            }
-        }
-        .padding(3)
-        .background(Palette.lensDark.opacity(0.48), in: Capsule())
-        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: spotActive)
+    private func focusPanel(card: Bool) -> some View {
+        FocusPanel(
+            damp: distDamp,
+            distance: shownDistance,
+            near: dof?.near,
+            far: dof?.far,
+            advice: advice,
+            tooClose: tooClose,
+            feet: useFeet,
+            aperture: Rollei.stops[safeSelected].label,
+            showsAperturePicker: false,
+            expanded: $focusExpanded,
+            onToggleUnits: { useFeet.toggle() },
+            onSelectAperture: { index in
+                UISelectionFeedbackGenerator().selectionChanged()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = index }
+            },
+            card: card
+        )
     }
 
-    private func modeButton(_ meterMode: MeterMode) -> some View {
-        let isSelected = !spotActive && baseMode == meterMode
-        return Button {
-            UISelectionFeedbackGenerator().selectionChanged()
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                mode = meterMode
+    // MARK: - Metering mode
+
+    /// What the metering key shows: spot wins while a spot is placed, otherwise matrix or highlight.
+    private var meterChoice: MeterMode { spotActive ? .spot : baseMode }
+
+    /// Matrix, then highlight, then spot, then round again.
+    private func cycleMeterMode() {
+        UISelectionFeedbackGenerator().selectionChanged()
+        let next: MeterMode
+        switch meterChoice {
+        case .matrix: next = .highlight
+        case .highlight: next = .spot
+        case .spot: next = .matrix
+        }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+            if next == .spot {
+                spotActive = true
+            } else {
+                mode = next
                 spotActive = false
             }
-            unfreeze()
-        } label: {
-            Text(meterMode.title.uppercased())
-                .font(AppTypography.next(size: 11, weight: isSelected ? .semibold : .regular))
-                .tracking(0.8)
-                .foregroundStyle(isSelected ? Palette.lensLight : Palette.lensLight.opacity(0.68))
-                .frame(minWidth: 82, minHeight: 38)
-                .background {
-                    if isSelected {
-                        Capsule()
-                            .fill(Palette.lensLight.opacity(0.22))
-                            .matchedGeometryEffect(id: "chipPill", in: chipNamespace)
-                    }
-                }
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(meterMode.title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        unfreeze()
+        showCaption(next.title.uppercased())
+    }
+
+    private func showCaption(_ text: String) {
+        captionToken += 1
+        let token = captionToken
+        withAnimation(.easeOut(duration: 0.2)) { modeCaption = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            guard token == captionToken else { return }
+            withAnimation(.easeOut(duration: 0.35)) { modeCaption = nil }
+        }
     }
 
     // MARK: - Controls
 
     private var controls: some View {
-        VStack(spacing: 8) {
-            if trayOpen {
-                ControlTray(
-                    evIndex: $evIndex,
-                    isoIndex: $isoIndex,
-                    useDIN: $useDIN,
-                    useFeet: $useFeet,
-                    simpleMode: $simpleMode,
-                    calibration: $calibration,
-                    armOffset: $armOffset,
-                    rawDistance: { meter.distance }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        ZStack {
+            FreezeButton(frozen: frozenEV != nil) {
+                toggleFreeze()
             }
 
-            ZStack {
-                FreezeButton(frozen: frozenEV != nil) {
-                    toggleFreeze()
+            HStack(spacing: 0) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                        trayOpen.toggle()
+                        if trayOpen { focusExpanded = false }
+                    }
+                } label: {
+                    Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Palette.ink.opacity(0.78))
+                        .frame(width: 46, height: 46)
+                        .overlay(alignment: .topTrailing) {
+                            // A small red dot while exposure compensation is on, so it can't be forgotten.
+                            if safeEVIndex != EVComp.zeroIndex && !trayOpen {
+                                Circle()
+                                    .fill(Palette.accent)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: -5, y: 5)
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                        }
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
+                }
+                .buttonStyle(PaperKeyStyle())
+                .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
+                .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
+
+                Spacer(minLength: 0)
+
+                if let modeCaption {
+                    Text(modeCaption)
+                        .font(AppTypography.next(size: 11, weight: .medium))
+                        .tracking(1)
+                        .foregroundStyle(Palette.mutedInk)
+                        .padding(.trailing, 10)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
                 }
 
-                HStack {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                            trayOpen.toggle()
-                        }
-                    } label: {
-                        Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Palette.ink.opacity(0.78))
-                            .frame(width: 46, height: 46)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Palette.paper)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
-                            )
-                            .overlay(alignment: .topTrailing) {
-                                // A small red dot while exposure compensation is on, so it can't be forgotten.
-                                if safeEVIndex != EVComp.zeroIndex && !trayOpen {
-                                    Circle()
-                                        .fill(Palette.accent)
-                                        .frame(width: 7, height: 7)
-                                        .offset(x: -5, y: 5)
-                                        .transition(.scale.combined(with: .opacity))
-                                }
-                            }
-                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
-                            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Button {
+                    cycleMeterMode()
+                } label: {
+                    ZStack {
+                        ModeGlyph(mode: meterChoice)
+                            .id(meterChoice)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
-                    .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
-                    Spacer(minLength: 0)
+                    .frame(width: 46, height: 46)
                 }
+                .buttonStyle(PaperKeyStyle())
+                .accessibilityLabel("Metering mode, \(meterChoice.title)")
+                .accessibilityHint("Tap to change between matrix, highlight and spot")
             }
         }
     }

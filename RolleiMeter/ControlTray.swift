@@ -21,16 +21,20 @@ struct ControlTray: View {
     @Namespace private var tabNamespace
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             tabs
             if tab == 0 {
                 dials
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                    .transition(.opacity)
             } else {
                 options
-                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                    .transition(.opacity)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .modifier(Panel())
     }
 
     // MARK: Tabs
@@ -70,8 +74,9 @@ struct ControlTray: View {
     // MARK: Dials
 
     private var dials: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             ScrubDial(title: "EV", selection: $evIndex, labels: EVComp.labels, resetIndex: EVComp.zeroIndex)
+            Rectangle().fill(Palette.hairline.opacity(0.7)).frame(width: 1).padding(.vertical, 8)
             ScrubDial(
                 title: useDIN ? "DIN" : "ISO",
                 selection: $isoIndex,
@@ -111,8 +116,6 @@ struct ControlTray: View {
                 .padding(.trailing, 9)
             }
         }
-        .padding(.horizontal, 12)
-        .modifier(Panel())
     }
 
     private var divider: some View {

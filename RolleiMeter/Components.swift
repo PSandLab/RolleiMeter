@@ -403,6 +403,18 @@ private struct FocusRingScale: View {
     }
 }
 
+/// How strongly a point on the focus scale reads as "inside the depth of field".
+/// 1 inside, easing to 0 just outside. Marks and ticks are drawn darker inside and recede outside,
+/// so depth of field shows as weight, with no extra lines or brackets.
+private enum DepthShade {
+    static func weight(_ p: Double, near: Double, far: Double) -> Double {
+        let ease = 0.012
+        let lo = min(1, max(0, (p - near) / ease + 1))
+        let hi = min(1, max(0, (far - p) / ease + 1))
+        return lo * hi
+    }
+}
+
 private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
@@ -439,16 +451,6 @@ private struct FocusDialFace: View, Animatable {
                 return Double(min(1, max(0, edge / fadeWidth)))
             }
 
-            // Depth-of-field band along the foot of the scale.
-            let bandL = max(x(near), 0), bandR = min(x(far), size.width)
-            if bandR > bandL {
-                var band = Path()
-                band.move(to: CGPoint(x: bandL, y: baseline + 7))
-                band.addLine(to: CGPoint(x: bandR, y: baseline + 7))
-                context.stroke(band, with: .color(sharpLabel != nil ? goldenGreen : accentRed.opacity(0.55)),
-                               style: StrokeStyle(lineWidth: 3, lineCap: .round))
-            }
-
             // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
             let markPositions = marks.map { $0.p }
             let n = 60
@@ -462,7 +464,8 @@ private struct FocusDialFace: View, Animatable {
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: baseline - h))
-                context.stroke(tick, with: .color(mutedInk.opacity(f)), lineWidth: 1.5)
+                let shade = DepthShade.weight(p, near: near, far: far)
+                context.stroke(tick, with: .color(inkColor.opacity(f * (0.26 + 0.74 * shade))), lineWidth: 1.5)
             }
             for mark in marks {
                 let px = x(mark.p)
@@ -470,16 +473,19 @@ private struct FocusDialFace: View, Animatable {
                 if f <= 0 { continue }
                 let green = mark.label == sharpLabel
                 let color: Color = green ? goldenGreen : inkColor
+                // Marks you could set the lens to and still be sharp stay dark; the rest recede.
+                let shade = DepthShade.weight(mark.p, near: near, far: far)
+                let a = f * (0.4 + 0.6 * shade)
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: markTop))
-                context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
+                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: green ? 3 : 2.5)
                 // The mark under the pointer grows a little, like a detent.
                 let underPointer = abs(mark.p - position) < 0.012
                 let text = context.resolve(
                     Text(mark.label)
                         .font(AppTypography.bold(size: underPointer ? 29 : 24))
-                        .foregroundColor(color.opacity(f))
+                        .foregroundColor(color.opacity(a))
                 )
                 context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
             }
@@ -561,8 +567,7 @@ struct ScrubDial: View {
                 .frame(height: 30)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .modifier(Panel())
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -643,6 +648,69 @@ private struct DialFace: View, Animatable {
     }
 }
 
+// MARK: - Paper keys (the square buttons beside the shutter)
+
+struct PaperKeyStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(configuration.isPressed ? Palette.hairline : Palette.paper)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+/// Metering mode drawn as a tiny sensor: a frame with a grid of weighted dots.
+/// Matrix: all cells, centre weighted. Highlight: one bright cell. Spot: a single ring.
+struct ModeGlyph: View {
+    let mode: MeterMode
+
+    var body: some View {
+        Canvas { ctx, size in
+            let s: CGFloat = 22
+            let box = CGRect(x: (size.width - s) / 2, y: (size.height - s) / 2, width: s, height: s)
+            ctx.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(inkColor.opacity(0.78)), lineWidth: 1.3)
+
+            func dot(_ col: Int, _ row: Int, _ r: CGFloat, _ color: Color) {
+                let c = CGPoint(x: box.minX + s * (0.25 + 0.25 * CGFloat(col)), y: box.minY + s * (0.25 + 0.25 * CGFloat(row)))
+                ctx.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(color))
+            }
+
+            switch mode {
+            case .matrix:
+                for row in 0..<3 {
+                    for col in 0..<3 {
+                        let centre = row == 1 && col == 1
+                        dot(col, row, centre ? 2.4 : 1.3, inkColor.opacity(0.78))
+                    }
+                }
+            case .highlight:
+                for row in 0..<3 {
+                    for col in 0..<3 where !(row == 0 && col == 2) {
+                        dot(col, row, 1.3, inkColor.opacity(0.4))
+                    }
+                }
+                dot(2, 0, 2.8, accentRed)
+            case .spot:
+                let c = CGPoint(x: box.midX, y: box.midY)
+                ctx.stroke(Path(ellipseIn: CGRect(x: c.x - 4.6, y: c.y - 4.6, width: 9.2, height: 9.2)),
+                           with: .color(inkColor.opacity(0.78)), lineWidth: 1.3)
+                ctx.fill(Path(ellipseIn: CGRect(x: c.x - 1.3, y: c.y - 1.3, width: 2.6, height: 2.6)),
+                         with: .color(accentRed))
+            }
+        }
+        .frame(width: 46, height: 46)
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Freeze button
 
 private struct PressStyle: ButtonStyle {
@@ -707,7 +775,7 @@ struct FocusMarker: View {
 // MARK: - Focus panel
 
 /// Compact by default: the nearest mark on the Rollei's focus ring for the measured distance.
-/// Tap it to open the full scale with the depth-of-field band.
+/// Tap it to open the full scale; marks inside the depth of field stay dark.
 struct FocusPanel: View {
     /// Channels: subject, near limit, far limit. All are 0...1 positions on the scale.
     @ObservedObject var damp: Damper
@@ -722,12 +790,26 @@ struct FocusPanel: View {
     @Binding var expanded: Bool
     let onToggleUnits: () -> Void
     let onSelectAperture: (Int) -> Void
+    /// False: the compact summary row that sits in the layout.
+    /// True: the full scale as a card, shown floating over the viewfinder so the layout never moves.
+    var card: Bool = false
 
     private var marks: [(label: String, m: Double)] { feet ? Focus.feetMarks : Focus.meterMarks }
     private var unit: String { feet ? "ft" : "m" }
 
     var body: some View {
-        VStack(spacing: 0) {
+        if card {
+            scale
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity)
+                .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .onTapGesture {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded = false }
+                }
+        } else {
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded.toggle() }
@@ -735,18 +817,13 @@ struct FocusPanel: View {
                 summary
             }
             .buttonStyle(.plain)
-
-            if expanded {
-                scale
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity)
+            .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .animation(.smooth(duration: 0.25), value: tooClose)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity)
-        .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .animation(.smooth(duration: 0.25), value: tooClose)
     }
 
     // MARK: summary row
@@ -834,42 +911,23 @@ struct FocusPanel: View {
                 let inset: CGFloat = 8
                 let w = geo.size.width - inset * 2
                 let subjectX = inset + CGFloat(damp.values[0]) * w
-                let nearX = inset + CGFloat(damp.values[1]) * w
-                let farX = inset + CGFloat(damp.values[2]) * w
 
                 ZStack(alignment: .topLeading) {
-                    Rectangle()
-                        .fill(hairline)
-                        .frame(width: w, height: 1)
-                        .position(x: geo.size.width / 2, y: 17)
-
-                    // Depth of field
-                    Capsule()
-                        .fill(accentRed.opacity(0.38))
-                        .frame(width: max(farX - nearX, 3), height: 9)
-                        .position(x: (nearX + farX) / 2, y: 17)
-                        .opacity(showBand ? 1 : 0)
-                    Rectangle()
-                        .fill(accentRed)
-                        .frame(width: 2, height: 15)
-                        .position(x: nearX, y: 17)
-                        .opacity(showBand ? 1 : 0)
-                    Rectangle()
-                        .fill(accentRed)
-                        .frame(width: 2, height: 15)
-                        .position(x: farX, y: 17)
-                        .opacity(showBand ? 1 : 0)
-
-                    // Rollei marks. The closest focusing distance is green.
+                    // Rollei marks. Marks inside the depth of field stay dark, the rest recede.
+                    // The closest focusing distance is green.
                     ForEach(marks.indices, id: \.self) { i in
-                        let x = inset + CGFloat(Focus.position(marks[i].m)) * w
+                        let p = Focus.position(marks[i].m)
+                        let x = inset + CGFloat(p) * w
+                        let shade = showBand ? 0.4 + 0.6 * DepthShade.weight(p, near: damp.values[1], far: damp.values[2]) : 1
                         Rectangle()
-                            .fill(i == 0 ? goldenGreen : mutedInk)
+                            .fill(i == 0 ? goldenGreen : inkColor)
                             .frame(width: 1.5, height: 12)
+                            .opacity(shade)
                             .position(x: x, y: 17)
                         Text(marks[i].label)
                             .font(AppTypography.font(size: 14, weight: i == 0 ? .semibold : .regular))
                             .foregroundStyle(i == 0 ? goldenGreen : inkColor)
+                            .opacity(shade)
                             .position(x: x, y: 36)
                     }
 
@@ -886,7 +944,7 @@ struct FocusPanel: View {
 
             HStack {
                 Text(near.map { Fmt.distance($0, feet: feet) } ?? "")
-                    .foregroundStyle(accentRed)
+                    .foregroundStyle(inkColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -901,7 +959,7 @@ struct FocusPanel: View {
                 }
                 .buttonStyle(.plain)
                 Text(far.map { Fmt.distance($0, feet: feet) } ?? "")
-                    .foregroundStyle(accentRed)
+                    .foregroundStyle(inkColor)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .font(AppTypography.mono(size: 13, weight: .semibold))
