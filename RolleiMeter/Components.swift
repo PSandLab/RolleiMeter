@@ -163,8 +163,7 @@ struct RulerView: View {
             HStack(spacing: 0) {
                 ForEach(Rollei.stops.indices, id: \.self) { i in
                     let r = res[i]
-                    let reading = r.deviation.map(Fmt.exposureAmount) ?? r.label
-                    Text(reading)
+                    Text(r.deviation.map(Fmt.exposureAmount) ?? r.label)
                         .font(AppTypography.font(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium))
                         .foregroundStyle(shutterColor(r, golden: i == golden))
                         .contentTransition(.numericText())
@@ -175,9 +174,9 @@ struct RulerView: View {
                                 .fill(goldenGreen.opacity(r.deviation == nil ? 0.12 : 0))
                                 .padding(.vertical, -1)
                         }
-                        .animation(.smooth(duration: 0.16), value: r.deviation == nil)
+                        .animation(.smooth(duration: 0.25), value: r.deviation == nil)
                         .minimumScaleFactor(0.7)
-                        .animation(.snappy(duration: 0.15), value: reading)
+                        .animation(.smooth(duration: 0.2), value: r.deviation.map(Fmt.exposureAmount) ?? r.label)
                 }
             }
 
@@ -244,79 +243,63 @@ private struct SimpleApertureColumn: View {
         Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
     }
     private var reading: ShutterResult { Exposure.result(for: idealTime) }
-    private var exposureValue: String { reading.deviation.map(Fmt.exposureAmount) ?? reading.label }
     private var exposureStatus: String {
         guard let deviation = reading.deviation else { return reading.isSlow ? "SLOW · HOLD STEADY" : "" }
         return deviation > 0 ? "OVEREXPOSED" : "UNDEREXPOSED"
     }
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Spacer(minLength: 0)
-                    Image(systemName: symbol)
-                        .font(.system(size: 16, weight: .regular))
-                        .rotationEffect(.degrees(aperture.n < 5 ? -8 : 8))
-                        .animation(.spring(response: 0.26, dampingFraction: 0.66), value: aperture.n)
-                    Text("f/" + aperture.label)
-                        .font(AppTypography.font(size: 15, weight: .medium))
-                        .contentTransition(.numericText())
-                        .animation(.snappy(duration: 0.18), value: aperture.label)
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(paper)
-                Spacer(minLength: 10)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(reading.deviation == nil ? "1/" : "")
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .regular))
+                Text("f/" + aperture.label)
+                    .font(AppTypography.font(size: 15, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(paper)
+            Spacer(minLength: 10)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                if reading.deviation == nil {
+                    Text("1/")
                         .font(AppTypography.mono(size: 30, weight: .medium))
                         .foregroundStyle(paper.opacity(0.78))
-                        .frame(width: 36, alignment: .trailing)
-                    Text(exposureValue)
-                        .font(AppTypography.bold(size: 80))
-                        .foregroundStyle(paper)
-                        .contentTransition(.numericText())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .animation(.snappy(duration: 0.15), value: exposureValue)
-                Text(exposureStatus)
-                    .font(AppTypography.next(size: 10, weight: .medium))
-                    .tracking(0.7)
+                Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
+                    .font(AppTypography.bold(size: 80))
                     .foregroundStyle(paper)
+                    .contentTransition(.numericText())
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 12)
-                    .accessibilityHidden(exposureStatus.isEmpty)
-                Spacer(minLength: 10)
+                    .minimumScaleFactor(0.55)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(minHeight: 174, maxHeight: 174)
-            .background(outOfRange ? accentRed : inRangeGreen)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
+            Text(exposureStatus)
+                .font(AppTypography.next(size: 10, weight: .medium))
+                .tracking(0.7)
+                .foregroundStyle(paper)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+                .frame(height: 12)
+                .accessibilityHidden(exposureStatus.isEmpty)
+            Spacer(minLength: 10)
         }
-        .buttonStyle(SoftPressStyle())
-        .frame(maxWidth: .infinity, minHeight: 174, maxHeight: 174)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(minHeight: 174, maxHeight: 174)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .background(outOfRange ? accentRed : inRangeGreen)
     }
 
     private var outOfRange: Bool { reading.deviation != nil }
 }
 
-private struct SoftPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .brightness(configuration.isPressed ? 0.035 : 0)
-            .animation(.spring(response: 0.2, dampingFraction: 0.62), value: configuration.isPressed)
-    }
-}
-
 struct SimpleExposurePair: View {
     @ObservedObject var damp: Damper
-    let focusDamp: Damper
     let iso: Double
     let comp: Double
     let apertureIndex: Int
@@ -334,7 +317,6 @@ struct SimpleExposurePair: View {
             SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: activeAperture, symbol: "camera.aperture", onSelect: onToggleAperture)
             Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
             SimpleFocusColumn(
-                damp: focusDamp,
                 distance: distance,
                 aperture: activeAperture,
                 tooClose: tooClose,
@@ -348,7 +330,6 @@ struct SimpleExposurePair: View {
 }
 
 private struct SimpleFocusColumn: View {
-    let damp: Damper
     let distance: Double?
     let aperture: (label: String, n: Double)
     let tooClose: Bool
@@ -372,7 +353,7 @@ private struct SimpleFocusColumn: View {
                     .foregroundStyle(warnRed)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let distance {
-                FocusRingScale(damp: damp, distance: distance, aperture: aperture, feet: feet)
+                FocusRingScale(distance: distance, aperture: aperture, feet: feet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Text("NO LIDAR")
@@ -392,13 +373,16 @@ private struct SimpleFocusColumn: View {
 
 /// A straight focus scale. The pointer is fixed at the top; the ruler slides beneath it. Only the marks near the pointer are numbered (left / middle / right).
 private struct FocusRingScale: View {
-    @ObservedObject var damp: Damper
     let distance: Double
     let aperture: (label: String, n: Double)
     let feet: Bool
 
     private var marks: [(label: String, m: Double)] {
         feet ? Focus.feetMarks : Focus.meterMarks
+    }
+
+    private var depthRange: (near: Double, far: Double) {
+        DepthOfField.range(subject: distance, n: aperture.n)
     }
 
     private var recommendedFocus: String {
@@ -408,13 +392,14 @@ private struct FocusRingScale: View {
 
     var body: some View {
         FocusDialFace(
-            position: damp.values[0],
-            near: damp.values[1],
-            far: damp.values[2],
+            position: Focus.position(distance),
+            near: Focus.position(depthRange.near),
+            far: Focus.position(depthRange.far),
             sharpLabel: Focus.advice(subject: distance, aperture: aperture.n, feet: feet).sharp
                 ? Focus.advice(subject: distance, aperture: aperture.n, feet: feet).label : nil,
             marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
+        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
@@ -493,12 +478,12 @@ private struct FocusDialFace: View, Animatable {
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: markTop))
+                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: 2.5)
                 // The mark under the pointer grows a little, like a detent.
-                let emphasis = CGFloat(min(max(1 - abs(mark.p - position) / 0.024, 0), 1))
-                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: 2 + emphasis * 0.5)
+                let underPointer = abs(mark.p - position) < 0.012
                 let text = context.resolve(
                     Text(mark.label)
-                        .font(AppTypography.bold(size: 24 + emphasis * 5))
+                        .font(AppTypography.bold(size: underPointer ? 29 : 24))
                         .foregroundColor(color.opacity(a))
                 )
                 context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
@@ -678,64 +663,6 @@ struct PaperKeyStyle: ButtonStyle {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
-    }
-}
-
-/// Three direct metering choices with a moving selection wash.
-struct MeterModePicker: View {
-    let selection: MeterMode
-    let onSelect: (MeterMode) -> Void
-
-    @Namespace private var selectionNamespace
-    private let choices: [MeterMode] = [.matrix, .highlight, .spot]
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(choices, id: \.rawValue) { mode in
-                Button {
-                    onSelect(mode)
-                } label: {
-                    VStack(spacing: 2) {
-                        ModeGlyph(mode: mode)
-                            .scaleEffect(0.7)
-                            .frame(width: 34, height: 34)
-                        Text(mode.title.uppercased())
-                            .font(AppTypography.next(size: 9, weight: .semibold))
-                            .tracking(0.35)
-                            .foregroundStyle(selection == mode ? Palette.accent : Palette.ink)
-                        Text(detail(for: mode))
-                            .font(AppTypography.next(size: 8))
-                            .foregroundStyle(Palette.mutedInk)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 5)
-                    .background {
-                        if selection == mode {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Palette.accent.opacity(0.08))
-                                .matchedGeometryEffect(id: "selectedMeterMode", in: selectionNamespace)
-                        }
-                    }
-                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(SoftPressStyle())
-                .accessibilityLabel("\(mode.title) metering")
-                .accessibilityAddTraits(selection == mode ? .isSelected : [])
-            }
-        }
-        .padding(7)
-        .frame(width: 252)
-        .modifier(Panel())
-    }
-
-    private func detail(for mode: MeterMode) -> String {
-        switch mode {
-        case .matrix: return "Scene average"
-        case .highlight: return "Protect brights"
-        case .spot: return "One point"
-        }
     }
 }
 

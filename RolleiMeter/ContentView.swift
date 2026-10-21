@@ -25,8 +25,8 @@ struct ContentView: View {
 
     // Held in @State, not @StateObject, so 60 fps value changes only redraw the views that watch them.
     // The EV needle starts low and winds up to the first reading.
-    @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 90, damping: 15)
-    @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 145, damping: 20)
+    @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 70, damping: 12)
+    @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 110, damping: 17)
 
     @AppStorage("simpleMode") private var simpleMode = false
     @AppStorage("mode") private var mode: MeterMode = .matrix   // matrix or highlight
@@ -45,7 +45,6 @@ struct ContentView: View {
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
     @State private var trayOpen = false
-    @State private var modePickerOpen = false
     @State private var distPrimed = false
     /// Spot metering only happens after a hold in the viewfinder. Tapping a mode chip goes back.
     @State private var spotActive = false
@@ -106,9 +105,23 @@ struct ContentView: View {
             topBar
             preview
 
+            if trayOpen {
+                ControlTray(
+                    evIndex: $evIndex,
+                    isoIndex: $isoIndex,
+                    useDIN: $useDIN,
+                    useFeet: $useFeet,
+                    simpleMode: $simpleMode,
+                    calibration: $calibration,
+                    armOffset: $armOffset,
+                    rawDistance: { meter.distance }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if simpleMode {
                 SimpleExposurePair(
-                    damp: evDamp, focusDamp: distDamp, iso: iso, comp: comp,
+                    damp: evDamp, iso: iso, comp: comp,
                     apertureIndex: simpleAperture == 3 ? 3 : 0,
                     distance: shownDistance, tooClose: tooClose, feet: useFeet,
                     onToggleAperture: toggleSimpleAperture
@@ -140,25 +153,6 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .bottom) {
-            if trayOpen {
-                ControlTray(
-                    evIndex: $evIndex,
-                    isoIndex: $isoIndex,
-                    useDIN: $useDIN,
-                    useFeet: $useFeet,
-                    simpleMode: $simpleMode,
-                    calibration: $calibration,
-                    armOffset: $armOffset,
-                    rawDistance: { meter.distance }
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 102)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .zIndex(2)
-            }
-        }
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: trayOpen)
         .background(PaperBackground().ignoresSafeArea())
         .preferredColorScheme(night ? .dark : .light)
         .statusBarHidden(true)
@@ -196,17 +190,9 @@ struct ContentView: View {
         .onChange(of: shownDistance) { syncDistance() }
         .onChange(of: selected) { syncDistance() }
         .onChange(of: focusExpanded) {
-            if focusExpanded {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                    trayOpen = false
-                    modePickerOpen = false
-                }
-            }
+            if focusExpanded && trayOpen { withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { trayOpen = false } }
         }
-        .onChange(of: simpleMode) {
-            focusExpanded = false
-            modePickerOpen = false
-        }
+        .onChange(of: simpleMode) { focusExpanded = false }
         .onChange(of: tooClose) {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
@@ -333,7 +319,6 @@ struct ContentView: View {
                     .gesture(
                         SpatialTapGesture().onEnded { value in
                             if suppressTap { return }
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { modePickerOpen = false }
                             let p = normalized(value.location, geo.size)
                             focusBuf = bufferPoint(p, in: geo.size)
                             focusPulse &+= 1
@@ -350,7 +335,6 @@ struct ContentView: View {
                                 if !spotGestureLive {
                                     spotGestureLive = true
                                     suppressTap = true
-                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { modePickerOpen = false }
                                     unfreeze()
                                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 }
@@ -504,23 +488,25 @@ struct ContentView: View {
     /// What the metering key shows: spot wins while a spot is placed, otherwise matrix or highlight.
     private var meterChoice: MeterMode { spotActive ? .spot : baseMode }
 
-    private func selectMeterMode(_ selection: MeterMode) {
-        let changed = selection != meterChoice
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-            modePickerOpen = false
-            if changed {
-                if selection == .spot {
-                    spotActive = true
-                } else {
-                    mode = selection
-                    spotActive = false
-                }
+    /// Matrix, then highlight, then spot, then round again.
+    private func cycleMeterMode() {
+        UISelectionFeedbackGenerator().selectionChanged()
+        let next: MeterMode
+        switch meterChoice {
+        case .matrix: next = .highlight
+        case .highlight: next = .spot
+        case .spot: next = .matrix
+        }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+            if next == .spot {
+                spotActive = true
+            } else {
+                mode = next
+                spotActive = false
             }
         }
-        guard changed else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
         unfreeze()
-        showCaption(selection.title.uppercased())
+        showCaption(next.title.uppercased())
     }
 
     private func showCaption(_ text: String) {
@@ -547,7 +533,6 @@ struct ContentView: View {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                         trayOpen.toggle()
                         if trayOpen { focusExpanded = false }
-                        modePickerOpen = false
                     }
                 } label: {
                     Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
@@ -584,16 +569,7 @@ struct ContentView: View {
                 }
 
                 Button {
-                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
-                        if modePickerOpen {
-                            modePickerOpen = false
-                        } else {
-                            modePickerOpen = true
-                            trayOpen = false
-                            focusExpanded = false
-                        }
-                    }
+                    cycleMeterMode()
                 } label: {
                     ZStack {
                         ModeGlyph(mode: meterChoice)
@@ -604,15 +580,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(PaperKeyStyle())
                 .accessibilityLabel("Metering mode, \(meterChoice.title)")
-                .accessibilityHint("Choose matrix, highlight or spot metering")
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if modePickerOpen {
-                    MeterModePicker(selection: meterChoice, onSelect: selectMeterMode)
-                        .padding(.bottom, 56)
-                        .transition(.move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
-                        .zIndex(3)
-                }
+                .accessibilityHint("Tap to change between matrix, highlight and spot")
             }
         }
     }
