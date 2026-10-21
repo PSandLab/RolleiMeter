@@ -22,8 +22,6 @@ struct ContentView: View {
     @AppStorage("calibration") private var calibration = 0.0
     /// Metres from the phone (held at a natural distance) back to the eye. Added silently to LiDAR readings.
     @AppStorage("armOffset") private var armOffset = 0.0
-    /// 0 = off, 1 = landscape 3:2, 2 = portrait 2:3.
-    @AppStorage("frameMode") private var frameMode = 1
 
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
@@ -164,7 +162,6 @@ struct ContentView: View {
         .onChange(of: spotBuf) { pushConfig() }
         .onChange(of: focusBuf) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
-        .onChange(of: frameMode) { pushConfig() }
         .onChange(of: meter.sceneEV) {
             evDamp.set([ev])
             updateNight()
@@ -183,10 +180,7 @@ struct ContentView: View {
     }
 
     private func pushConfig() {
-        meter.setConfig(
-            mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf,
-            frame: FrameLine.bufferRect(mode: frameMode)
-        )
+        meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf)
     }
 
     /// Switch to the dark palette in dim scenes, and back again in bright ones.
@@ -275,27 +269,6 @@ struct ContentView: View {
         return CGPoint(x: p.x, y: 0.5 + (p.y - 0.5) * frame / aspect)
     }
 
-    /// The inverse of `bufferPoint`: a point in the camera frame back to the box.
-    private func viewPoint(_ q: CGPoint, in size: CGSize) -> CGPoint {
-        let frame = 0.75
-        let aspect = size.width / max(size.height, 1)
-        if aspect < frame {
-            return CGPoint(x: 0.5 + (q.x - 0.5) * frame / aspect, y: q.y)
-        }
-        return CGPoint(x: q.x, y: 0.5 + (q.y - 0.5) * aspect / frame)
-    }
-
-    /// The film frame, in points inside the viewfinder box.
-    private func frameRect(in size: CGSize) -> CGRect {
-        let r = FrameLine.bufferRect(mode: frameMode)
-        let a = viewPoint(CGPoint(x: r.minX, y: r.minY), in: size)
-        let b = viewPoint(CGPoint(x: r.maxX, y: r.maxY), in: size)
-        return CGRect(
-            x: a.x * size.width, y: a.y * size.height,
-            width: (b.x - a.x) * size.width, height: (b.y - a.y) * size.height
-        )
-    }
-
     // MARK: - Viewfinder
 
     private var preview: some View {
@@ -360,12 +333,6 @@ struct ContentView: View {
                                 pinchBase = spotRadius
                             }
                     )
-
-                // The Rollei's 40 mm film frame inside the wider phone view. Matrix and highlight meter inside it.
-                if frameMode != 0 {
-                    FrameOverlay(rect: frameRect(in: geo.size))
-                        .transition(.opacity)
-                }
 
                 if spotActive {
                     let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
@@ -469,18 +436,28 @@ struct ContentView: View {
             modeButton(.matrix)
             modeButton(.highlight)
             if spotActive {
-                Text("SPOT")
-                    .font(AppTypography.next(size: 11, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(Palette.lensLight)
-                    .frame(minWidth: 62, minHeight: 38)
-                    .background {
-                        Capsule()
-                            .fill(Palette.lensLight.opacity(0.22))
-                            .matchedGeometryEffect(id: "chipPill", in: chipNamespace)
-                    }
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                    .accessibilityAddTraits(.isSelected)
+                // Tap to leave spot metering and go back to the last mode.
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) { spotActive = false }
+                    unfreeze()
+                } label: {
+                    Text("SPOT")
+                        .font(AppTypography.next(size: 11, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(Palette.lensLight)
+                        .frame(minWidth: 62, minHeight: 38)
+                        .background {
+                            Capsule()
+                                .fill(Palette.lensLight.opacity(0.22))
+                                .matchedGeometryEffect(id: "chipPill", in: chipNamespace)
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
+                .accessibilityLabel("Spot metering. Tap to turn off.")
+                .accessibilityAddTraits(.isSelected)
             }
         }
         .padding(3)
@@ -528,7 +505,6 @@ struct ContentView: View {
                     useDIN: $useDIN,
                     useFeet: $useFeet,
                     simpleMode: $simpleMode,
-                    frameMode: $frameMode,
                     calibration: $calibration,
                     armOffset: $armOffset,
                     rawDistance: { meter.distance }
@@ -543,6 +519,7 @@ struct ContentView: View {
 
                 HStack {
                     Button {
+                        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                             trayOpen.toggle()
                         }
@@ -559,52 +536,26 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                                     .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
                             )
+                            .overlay(alignment: .topTrailing) {
+                                // A small red dot while exposure compensation is on, so it can't be forgotten.
+                                if safeEVIndex != EVComp.zeroIndex && !trayOpen {
+                                    Circle()
+                                        .fill(Palette.accent)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: -5, y: 5)
+                                        .transition(.scale.combined(with: .opacity))
+                                }
+                            }
+                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
                             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
+                    .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
                     Spacer(minLength: 0)
                 }
             }
         }
         .padding(.horizontal, 4)
-    }
-}
-
-// MARK: - Film frame overlay
-
-/// Dims everything outside the film frame and marks its corners.
-private struct FrameOverlay: View {
-    let rect: CGRect
-
-    var body: some View {
-        Canvas { context, size in
-            var scrim = Path()
-            scrim.addRect(CGRect(origin: .zero, size: size))
-            scrim.addRoundedRect(in: rect, cornerSize: CGSize(width: 4, height: 4))
-            context.fill(scrim, with: .color(Palette.lensDark.opacity(0.3)), style: FillStyle(eoFill: true))
-
-            let l = min(rect.width, rect.height) * 0.12
-            var corners = Path()
-            corners.move(to: CGPoint(x: rect.minX, y: rect.minY + l))
-            corners.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-            corners.addLine(to: CGPoint(x: rect.minX + l, y: rect.minY))
-            corners.move(to: CGPoint(x: rect.maxX - l, y: rect.minY))
-            corners.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-            corners.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + l))
-            corners.move(to: CGPoint(x: rect.maxX, y: rect.maxY - l))
-            corners.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            corners.addLine(to: CGPoint(x: rect.maxX - l, y: rect.maxY))
-            corners.move(to: CGPoint(x: rect.minX + l, y: rect.maxY))
-            corners.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            corners.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - l))
-            context.stroke(
-                corners,
-                with: .color(Palette.lensLight.opacity(0.85)),
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-            )
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }

@@ -39,8 +39,6 @@ final class CameraMeter: NSObject, ObservableObject,
     private var spotRadius: CGFloat = 0.05
     /// Where LiDAR measures distance. Separate from the spot meter.
     private var focus = CGPoint(x: 0.5, y: 0.5)
-    /// Area the matrix and highlight readings cover, in camera-frame coordinates.
-    private var frame = CGRect(x: 0, y: 0, width: 1, height: 1)
     private var smoothed: Double?
     private var deltaSmoothed: Double?
     private var distSmoothed: Double?
@@ -63,12 +61,11 @@ final class CameraMeter: NSObject, ObservableObject,
         return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, frame: CGRect) {
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint) {
         lock.lock()
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
-        self.frame = frame
         self.smoothed = nil
         self.deltaSmoothed = nil
         if focus != self.focus { self.distSmoothed = nil }
@@ -290,7 +287,7 @@ final class CameraMeter: NSObject, ObservableObject,
         if values.count >= 5 {
             values.sort()
             let med = values[values.count / 2]
-            if let s = distSmoothed, abs(med - s) < 0.3 {
+            if let s = distSmoothed, abs(med - s) < max(0.15, 0.08 * s) {
                 distSmoothed = s + 0.4 * (med - s)
             } else {
                 distSmoothed = med
@@ -359,7 +356,6 @@ final class CameraMeter: NSObject, ObservableObject,
         let m = mode
         let sp = spot
         let rad = spotRadius
-        let fr = frame
         lock.unlock()
 
         CVPixelBufferLockBaseAddress(pb, .readOnly)
@@ -379,23 +375,21 @@ final class CameraMeter: NSObject, ObservableObject,
             return 0.2126 * r + 0.7152 * g + 0.0722 * b
         }
 
-        /// Centre-weighted average over the metered frame (the Rollei's film frame when the overlay is on).
+        /// Centre-weighted average over the whole frame.
         /// Also hands back every sample so highlight mode can find the bright end.
         func matrixSample() -> (y: Double, ys: [Double]) {
             let gx = 36
             let gy = 48
-            let fx0 = Double(fr.minX), fy0 = Double(fr.minY)
-            let fw = Double(fr.width), fh = Double(fr.height)
             var ys: [Double] = []
             ys.reserveCapacity(gx * gy)
             var sum = 0.0
             var wsum = 0.0
             for j in 0..<gy {
                 let fy = (Double(j) + 0.5) / Double(gy)
-                let py = min(max(Int((fy0 + fy * fh) * Double(h)), 0), h - 1)
+                let py = min(max(Int(fy * Double(h)), 0), h - 1)
                 for i in 0..<gx {
                     let fx = (Double(i) + 0.5) / Double(gx)
-                    let px = min(max(Int((fx0 + fx * fw) * Double(w)), 0), w - 1)
+                    let px = min(max(Int(fx * Double(w)), 0), w - 1)
                     let y = lum(px, py)
                     let dx = fx - 0.5
                     let dy = fy - 0.5

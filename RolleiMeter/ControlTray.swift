@@ -9,8 +9,6 @@ struct ControlTray: View {
     @Binding var useDIN: Bool
     @Binding var useFeet: Bool
     @Binding var simpleMode: Bool
-    /// 0 = off, 1 = landscape 3:2, 2 = portrait 2:3.
-    @Binding var frameMode: Int
     @Binding var calibration: Double
     /// Metres between where the phone is held and where the Rollei's film plane sits (your eye).
     @Binding var armOffset: Double
@@ -73,11 +71,12 @@ struct ControlTray: View {
 
     private var dials: some View {
         HStack(spacing: 12) {
-            ScrubDial(title: "EV", selection: $evIndex, labels: EVComp.labels)
+            ScrubDial(title: "EV", selection: $evIndex, labels: EVComp.labels, resetIndex: EVComp.zeroIndex)
             ScrubDial(
                 title: useDIN ? "DIN" : "ISO",
                 selection: $isoIndex,
-                labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) }
+                labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) },
+                resetIndex: ISOScale.values.firstIndex(of: 100)
             )
         }
     }
@@ -91,8 +90,6 @@ struct ControlTray: View {
             row("DISTANCE") { EngravedChoice(options: ["M", "FT"], selection: boolBinding($useFeet)) }
             divider
             row("SIMPLE") { EngravedChoice(options: ["OFF", "ON"], selection: boolBinding($simpleMode)) }
-            divider
-            row("FRAME") { EngravedChoice(options: ["OFF", "3:2", "2:3"], selection: $frameMode) }
             divider
             row("CALIBRATE") {
                 MiniStepper(

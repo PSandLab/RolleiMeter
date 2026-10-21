@@ -531,6 +531,8 @@ struct ScrubDial: View {
     let title: String
     @Binding var selection: Int
     let labels: [String]
+    /// The "home" value (0 compensation, ISO 100). Landing on it clicks harder; double-tap returns to it.
+    var resetIndex: Int? = nil
 
     private let spacing: CGFloat = 15
     @State private var base: Int?
@@ -555,7 +557,7 @@ struct ScrubDial: View {
                 .foregroundStyle(inkColor)
                 .contentTransition(.numericText())
                 .animation(.smooth(duration: 0.15), value: selection)
-            DialFace(position: position, count: labels.count, spacing: spacing)
+            DialFace(position: position, count: labels.count, spacing: spacing, home: resetIndex)
                 .frame(height: 30)
         }
         .frame(maxWidth: .infinity)
@@ -570,7 +572,11 @@ struct ScrubDial: View {
                     let index = Int(position.rounded())
                     if index != selection {
                         selection = index
-                        UISelectionFeedbackGenerator().selectionChanged()
+                        if index == resetIndex {
+                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                        } else {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
                     }
                 }
                 .onEnded { _ in
@@ -579,6 +585,13 @@ struct ScrubDial: View {
                         drag = 0
                     }
                 }
+        )
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                guard let resetIndex, selection != resetIndex else { return }
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { selection = resetIndex }
+            }
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
@@ -597,6 +610,7 @@ private struct DialFace: View, Animatable {
     var position: Double
     let count: Int
     let spacing: CGFloat
+    var home: Int? = nil
 
     var animatableData: Double {
         get { position }
@@ -615,7 +629,9 @@ private struct DialFace: View, Animatable {
                 var tick = Path()
                 tick.move(to: CGPoint(x: x, y: size.height))
                 tick.addLine(to: CGPoint(x: x, y: size.height - (major ? 17 : 9)))
-                context.stroke(tick, with: .color(mutedInk.opacity(fade)), lineWidth: major ? 1.8 : 1.2)
+                let isHome = i == home
+                context.stroke(tick, with: .color((isHome ? inkColor : mutedInk).opacity(fade)),
+                               lineWidth: isHome ? 2.4 : (major ? 1.8 : 1.2))
             }
             var pointer = Path()
             pointer.move(to: CGPoint(x: cx - 5, y: 0))
