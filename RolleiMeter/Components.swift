@@ -79,8 +79,8 @@ private struct NeedleGauge: View {
 
     var body: some View {
         Canvas { ctx, size in
+            let r = min(size.width / 2 - 2, size.height - 2)
             let c = CGPoint(x: size.width / 2, y: size.height - 2)
-            let r = size.width / 2 - 1.5
             func point(_ angle: Double, _ len: CGFloat) -> CGPoint {
                 let a = angle * .pi / 180
                 return CGPoint(x: c.x + CGFloat(cos(a)) * len, y: c.y + CGFloat(sin(a)) * len)
@@ -103,7 +103,7 @@ private struct NeedleGauge: View {
             ctx.stroke(needle, with: .color(accentRed), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
             ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
         }
-        .frame(width: 34, height: 19)
+        .frame(width: 34, height: 26)
         .accessibilityHidden(true)
     }
 }
@@ -116,7 +116,7 @@ struct EVBadge: View {
     private var evText: String { String(format: "%.1f", damp.values[0]) }
 
     var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 6) {
+        HStack(alignment: .center, spacing: 6) {
             NeedleGauge(ev: damp.values[0])
             if frozen {
                 Text("HOLD")
@@ -399,7 +399,8 @@ private struct FocusRingScale: View {
                 ? Focus.advice(subject: distance, aperture: aperture.n, feet: feet).label : nil,
             marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
-        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
+        .animation(.spring(response: 0.72, dampingFraction: 0.9), value: distance)
+        .animation(.spring(response: 0.78, dampingFraction: 0.9), value: aperture.n)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
@@ -436,66 +437,79 @@ private struct FocusDialFace: View, Animatable {
     var body: some View {
         Canvas { context, size in
             let cx = size.width / 2
-            // Scale the ruler to the depth-of-field span: wider at small apertures,
-            // tighter at large apertures, while keeping the focused distance centered.
+            let radius = max(size.height * 0.48, 1)
+            let baseline = size.height * 0.91
+            // The depth-of-field span controls the zoom. Small apertures magnify
+            // the focused mark; large apertures reveal more of the engraved scale.
             let depthSpan = max(far - near, 0.015)
-            let pointsPerUnit = CGFloat(min(max(Double(size.width) * 0.72 / depthSpan, 180), 1400))
-            // Pointer, number and ticks stacked as one group, centred in the tile.
-            let groupHeight: CGFloat = 104
-            let y0 = max(0, (size.height - groupHeight) / 2)
-            let numberY = y0 + 30
-            let markTop = y0 + 50
-            let baseline = y0 + 92
-            let fadeWidth: CGFloat = 44
+            let pointsPerUnit = CGFloat(min(max(Double(size.width) * 0.72 / depthSpan, 150), 1200))
+            let fadeWidth = max(28, size.width * 0.22)
 
-            func x(_ p: Double) -> CGFloat { cx + CGFloat(p - position) * pointsPerUnit }
-            func fade(_ x: CGFloat) -> Double {
-                let edge = min(x, size.width - x)
-                return Double(min(1, max(0, edge / fadeWidth)))
+            func theta(_ p: Double) -> CGFloat {
+                CGFloat(p - position) * pointsPerUnit / radius
+            }
+            func point(_ p: Double, inset: CGFloat = 0) -> CGPoint {
+                let a = min(max(theta(p), -1.15), 1.15)
+                let r = radius - inset
+                return CGPoint(x: cx + sin(a) * r, y: baseline - cos(a) * r)
+            }
+            func opacity(_ p: Double) -> Double {
+                let a = abs(theta(p))
+                guard a <= 1.15 else { return 0 }
+                let x = point(p).x
+                return Double(min(1, max(0, min(x, size.width - x) / fadeWidth)))
             }
 
-            // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
-            let markPositions = marks.map { $0.p }
-            let n = 60
-            for i in 0...n {
-                let p = Double(i) / Double(n)
-                if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
-                let px = x(p)
-                let f = fade(px)
-                if f <= 0 { continue }
-                let h: CGFloat = i.isMultiple(of: 5) ? 28 : 18
+            // A fine, shallow curved guide gives the engraved marks a common arc.
+            var arc = Path()
+            for step in 0...48 {
+                let p = position + Double(step) / 48 * (2.3 * Double(radius) / Double(pointsPerUnit)) - (1.15 * Double(radius) / Double(pointsPerUnit))
+                let q = point(p)
+                if step == 0 { arc.move(to: q) } else { arc.addLine(to: q) }
+            }
+            context.stroke(arc, with: .color(inkColor.opacity(0.22)), lineWidth: 1)
+
+            // Fine graduations bend with the lens scale; every fifth mark is longer.
+            for i in 0...60 {
+                let p = Double(i) / 60
+                if marks.contains(where: { abs($0.p - p) < 0.003 }) { continue }
+                let a = abs(theta(p))
+                let f = opacity(p)
+                guard a <= 1.15, f > 0 else { continue }
+                let length: CGFloat = i.isMultiple(of: 5) ? 18 : 10
                 var tick = Path()
-                tick.move(to: CGPoint(x: px, y: baseline))
-                tick.addLine(to: CGPoint(x: px, y: baseline - h))
-                context.stroke(tick, with: .color(inkColor.opacity(f * 0.78)), lineWidth: 1.5)
+                tick.move(to: point(p))
+                tick.addLine(to: point(p, inset: length))
+                context.stroke(tick, with: .color(inkColor.opacity(f * 0.78)), lineWidth: i.isMultiple(of: 5) ? 1.7 : 1.2)
             }
+
+            // Engraved distance numbers follow the same arc and grow at the index.
             for mark in marks {
-                let px = x(mark.p)
-                let f = fade(px)
-                if f <= 0 { continue }
-                let color = inkColor
-                let a = f * 0.78
-                var tick = Path()
-                tick.move(to: CGPoint(x: px, y: baseline))
-                tick.addLine(to: CGPoint(x: px, y: markTop))
-                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: 2.5)
-                // The mark under the pointer grows a little, like a detent.
-                let underPointer = abs(mark.p - position) < 0.012
-                let text = context.resolve(
+                let a = abs(theta(mark.p))
+                let f = opacity(mark.p)
+                guard a <= 1.15, f > 0 else { continue }
+                let underPointer = abs(mark.p - position) < 0.018
+                let anchor = point(mark.p, inset: 31)
+                let label = context.resolve(
                     Text(mark.label)
-                        .font(AppTypography.bold(size: underPointer ? 29 : 24))
-                        .foregroundColor(color.opacity(a))
+                        .font(AppTypography.bold(size: underPointer ? 42 : 29))
+                        .foregroundColor(inkColor.opacity(f))
                 )
-                context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
+                context.draw(label, at: anchor, anchor: .center)
+
+                var tick = Path()
+                tick.move(to: point(mark.p))
+                tick.addLine(to: point(mark.p, inset: underPointer ? 25 : 20))
+                context.stroke(tick, with: .color(inkColor.opacity(f * 0.88)), lineWidth: underPointer ? 2.4 : 1.8)
             }
 
-            // Fixed pointer
-            var tri = Path()
-            tri.move(to: CGPoint(x: cx - 7, y: y0))
-            tri.addLine(to: CGPoint(x: cx + 7, y: y0))
-            tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
-            tri.closeSubpath()
-            context.fill(tri, with: .color(accentRed))
+            // Fixed index at the crown of the dial.
+            var index = Path()
+            index.move(to: CGPoint(x: cx - 7, y: 8))
+            index.addLine(to: CGPoint(x: cx + 7, y: 8))
+            index.addLine(to: CGPoint(x: cx, y: 19))
+            index.closeSubpath()
+            context.fill(index, with: .color(accentRed))
         }
         .clipped()
     }
