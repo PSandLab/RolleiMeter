@@ -51,9 +51,8 @@ enum EVComp {
     static let values: [Double] = (-6...6).map { Double($0) / 3.0 }
     static let zeroIndex = 6
 
-    static let labels: [String] = values.map { v in
-        abs(v) < 0.01 ? "0" : String(format: "%+.1f", v)
-    }
+    /// Same +⅓ / −⅔ style as the calibration value and the out-of-range shutter readings.
+    static let labels: [String] = values.map { Fmt.stops($0) }
 }
 
 enum ShutterStatus { case ok, tooFast, tooSlow }

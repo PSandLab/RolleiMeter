@@ -114,7 +114,7 @@ struct EVBadge: View {
     private var evText: String { String(format: "%.1f", damp.values[0]) }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
             NeedleGauge(ev: damp.values[0])
             if frozen {
                 Text("HOLD")
@@ -322,8 +322,8 @@ struct SimpleExposurePair: View {
             )
         }
         .background(paper)
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -338,7 +338,7 @@ private struct SimpleFocusColumn: View {
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
                 Image(systemName: "scope").font(.system(size: 16, weight: .regular))
-                Text("FOCUS").font(AppTypography.next(size: 12, weight: .medium))
+                Text("FOCUS").font(AppTypography.next(size: 12, weight: .medium)).tracking(0.9)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(mutedInk)
@@ -773,9 +773,10 @@ struct FocusPanel: View {
     }
 
     private var summary: some View {
-        HStack(spacing: 5) {
+        HStack(alignment: .lastTextBaseline, spacing: 5) {
             Text("FOCUS")
                 .font(AppTypography.next(size: 9, weight: .medium))
+                .tracking(1)
                 .foregroundStyle(mutedInk)
             if !tooClose, let advice, !advice.sharp {
                 FocusRangeIndicator(lo: advice.lo, hi: advice.hi, fontSize: 17)
@@ -809,6 +810,7 @@ struct FocusPanel: View {
             }
             Text(detailText)
                 .font(AppTypography.next(size: 9, weight: .medium))
+                .tracking(0.4)
                 .foregroundStyle(detailColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)

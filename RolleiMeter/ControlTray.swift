@@ -108,6 +108,7 @@ struct ControlTray: View {
                     )
                     armButton
                 }
+                .padding(.trailing, 9)
             }
         }
         .padding(.horizontal, 12)
@@ -213,7 +214,8 @@ struct EngravedChoice: View {
                                     .matchedGeometryEffect(id: "choiceUnderline", in: underlineNamespace)
                             }
                         }
-                        .frame(minWidth: 38, minHeight: 30)
+                        .padding(.horizontal, 9)
+                        .frame(minHeight: 30)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -253,7 +255,7 @@ private struct MiniStepper: View {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Palette.ink)
-                .frame(width: 32, height: 30)
+                .frame(width: 28, height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -426,7 +426,6 @@ struct ContentView: View {
             EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
             Spacer(minLength: 12)
         }
-        .padding(.horizontal, 16)
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
     }
@@ -529,11 +528,11 @@ struct ContentView: View {
                             .foregroundStyle(Palette.ink.opacity(0.78))
                             .frame(width: 46, height: 46)
                             .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .fill(Palette.paper)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
                             )
                             .overlay(alignment: .topTrailing) {
@@ -547,7 +546,7 @@ struct ContentView: View {
                                 }
                             }
                             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
-                            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
@@ -556,6 +555,5 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(.horizontal, 4)
     }
 }
