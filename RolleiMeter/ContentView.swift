@@ -51,6 +51,7 @@ struct ContentView: View {
     @State private var spot = CGPoint(x: 0.5, y: 0.5)      // spot meter point (press and hold), viewfinder coordinates
     @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)   // the same point in camera-frame coordinates
     @State private var focus = CGPoint(x: 0.5, y: 0.5)     // LiDAR distance point (tap), viewfinder coordinates
+    @State private var focusPulse = 0
     @State private var focusBuf = CGPoint(x: 0.5, y: 0.5)  // the same point in camera-frame coordinates
     @State private var focusExpanded = false
     @State private var spotGestureLive = false
@@ -268,6 +269,7 @@ struct ContentView: View {
 
     private func resetFocusToCenter() {
         focusBuf = CGPoint(x: 0.5, y: 0.5)
+        focusPulse &+= 1
         withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
             focus = CGPoint(x: 0.5, y: 0.5)
         }
@@ -319,6 +321,7 @@ struct ContentView: View {
                             if suppressTap { return }
                             let p = normalized(value.location, geo.size)
                             focusBuf = bufferPoint(p, in: geo.size)
+                            focusPulse &+= 1
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
                             unfreeze()
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -386,7 +389,7 @@ struct ContentView: View {
                 }
 
                 if meter.hasLiDAR {
-                    FocusMarker(tooClose: tooClose)
+                    FocusMarker(tooClose: tooClose, pulseID: focusPulse)
                     .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
                     .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
                     .allowsHitTesting(false)
@@ -561,6 +564,7 @@ struct ContentView: View {
                         .foregroundStyle(Palette.mutedInk)
                         .padding(.trailing, 10)
                         .transition(.opacity)
+                        .contentTransition(.opacity)
                         .accessibilityHidden(true)
                 }
 

@@ -18,6 +18,7 @@ struct ControlTray: View {
     @State private var tab = 0
     /// 0 = idle, 1 = waiting for the phone to be moved to the eye.
     @State private var armStage = 0
+    @State private var armCountdown = 4
     @Namespace private var tabNamespace
 
     var body: some View {
@@ -25,10 +26,16 @@ struct ControlTray: View {
             tabs
             if tab == 0 {
                 dials
-                    .transition(.opacity)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .move(edge: .bottom).combined(with: .opacity)
+                    ))
             } else {
                 options
-                    .transition(.opacity)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)
+                    ))
             }
         }
         .padding(.horizontal, 12)
@@ -156,8 +163,11 @@ struct ControlTray: View {
         Button {
             startArmCalibration()
         } label: {
-            Text(armStage == 0 ? "SET" : "HOLD AT EYE…")
+            Text(armStage == 0 ? "SET" : "HOLD AT EYE · \(armCountdown)")
                 .font(AppTypography.next(size: 11, weight: .semibold))
+                .contentTransition(.numericText())
+                .animation(.smooth(duration: 0.18), value: armCountdown)
+                .animation(.smooth(duration: 0.18), value: armStage)
                 .tracking(0.8)
                 .foregroundStyle(armStage == 0 ? Palette.ink : Palette.accent)
                 .padding(.horizontal, 10)
@@ -177,8 +187,14 @@ struct ControlTray: View {
         armStage = 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            defer { armStage = 0 }
+            for remaining in stride(from: 4, through: 1, by: -1) {
+                armCountdown = remaining
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            defer {
+                armStage = 0
+                armCountdown = 4
+            }
             guard let second = rawDistance(), second > first + 0.05 else {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return
