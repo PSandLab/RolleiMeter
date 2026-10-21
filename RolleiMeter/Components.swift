@@ -19,11 +19,11 @@ struct Panel: ViewModifier {
 
     func body(content: Content) -> some View {
         content.background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
                 .fill(Palette.paper)
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner - 1, style: .continuous)
                         .strokeBorder(
                             LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
                             lineWidth: 1
@@ -103,7 +103,7 @@ private struct NeedleGauge: View {
             ctx.stroke(needle, with: .color(accentRed), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
             ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
         }
-        .frame(width: 34, height: 19)
+        .frame(width: InstrumentMetrics.evGaugeWidth, height: InstrumentMetrics.evGaugeHeight)
         .accessibilityHidden(true)
     }
 }
@@ -216,8 +216,8 @@ struct RulerView: View {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
+        .padding(.horizontal, InstrumentMetrics.compactSpace)
+        .padding(.vertical, InstrumentMetrics.panelInset)
         .modifier(Panel())
     }
 
@@ -705,7 +705,7 @@ struct ModeGlyph: View {
                          with: .color(accentRed))
             }
         }
-        .frame(width: 46, height: 46)
+        .frame(width: InstrumentMetrics.keySide, height: InstrumentMetrics.keySide)
         .accessibilityHidden(true)
     }
 }
@@ -727,10 +727,10 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(hairline).frame(width: 84, height: 84)
+                Circle().fill(hairline).frame(width: InstrumentMetrics.shutterOuterDiameter, height: InstrumentMetrics.shutterOuterDiameter)
                 Circle()
                     .fill(paper)
-                    .frame(width: 68, height: 68)
+                    .frame(width: InstrumentMetrics.shutterCoreDiameter, height: InstrumentMetrics.shutterCoreDiameter)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
                     .stroke(frozen ? accentRed : mutedInk, lineWidth: frozen ? 4 : 1)
