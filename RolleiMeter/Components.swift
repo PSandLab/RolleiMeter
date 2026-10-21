@@ -19,11 +19,11 @@ struct Panel: ViewModifier {
 
     func body(content: Content) -> some View {
         content.background {
-            RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Palette.paper)
-                .overlay(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
                 .overlay(
-                    RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner - 1, style: .continuous)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(
                             LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
                             lineWidth: 1
@@ -103,7 +103,7 @@ private struct NeedleGauge: View {
             ctx.stroke(needle, with: .color(accentRed), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
             ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
         }
-        .frame(width: InstrumentMetrics.evGaugeWidth, height: InstrumentMetrics.evGaugeHeight)
+        .frame(width: 34, height: 19)
         .accessibilityHidden(true)
     }
 }
@@ -216,8 +216,8 @@ struct RulerView: View {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
         }
-        .padding(.horizontal, InstrumentMetrics.compactSpace)
-        .padding(.vertical, InstrumentMetrics.panelInset)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
         .modifier(Panel())
     }
 
@@ -287,7 +287,7 @@ private struct SimpleApertureColumn: View {
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, InstrumentMetrics.screenInset)
+        .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(minHeight: 174, maxHeight: 174)
         .contentShape(Rectangle())
@@ -324,8 +324,8 @@ struct SimpleExposurePair: View {
             )
         }
         .background(paper)
-        .overlay(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous).stroke(hairline, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -653,14 +653,14 @@ struct PaperKeyStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(configuration.isPressed ? Palette.hairline : Palette.paper)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
@@ -705,7 +705,7 @@ struct ModeGlyph: View {
                          with: .color(accentRed))
             }
         }
-        .frame(width: InstrumentMetrics.keySide, height: InstrumentMetrics.keySide)
+        .frame(width: 46, height: 46)
         .accessibilityHidden(true)
     }
 }
@@ -727,14 +727,14 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(hairline).frame(width: InstrumentMetrics.shutterOuterDiameter, height: InstrumentMetrics.shutterOuterDiameter)
+                Circle().fill(hairline).frame(width: 84, height: 84)
                 Circle()
                     .fill(paper)
-                    .frame(width: InstrumentMetrics.shutterCoreDiameter, height: InstrumentMetrics.shutterCoreDiameter)
+                    .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
                     .stroke(frozen ? accentRed : mutedInk, lineWidth: frozen ? 4 : 1)
-                    .frame(width: InstrumentMetrics.shutterCoreDiameter, height: InstrumentMetrics.shutterCoreDiameter)
+                    .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Image(systemName: frozen ? "pause.fill" : "viewfinder")
                     .font(.system(size: 15, weight: .medium))
@@ -771,7 +771,7 @@ private struct FocusPing: View {
     var body: some View {
         Circle()
             .stroke(tooClose ? warnRed : Palette.lensLight, lineWidth: 1)
-            .frame(width: InstrumentMetrics.focusMarkerSide, height: InstrumentMetrics.focusMarkerSide)
+            .frame(width: 30, height: 30)
             .scaleEffect(expanded ? 1.8 : 0.45)
             .opacity(expanded ? 0 : 0.7)
             .onAppear {
@@ -798,13 +798,13 @@ struct FocusMarker: View {
             FocusBrackets()
                 .stroke(tooClose ? warnRed : Palette.lensLight,
                         style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                .frame(width: InstrumentMetrics.focusMarkerSide, height: InstrumentMetrics.focusMarkerSide)
+                .frame(width: 30, height: 30)
                 .scaleEffect(tooClose ? 0.88 : 1)
             Circle()
                 .fill(tooClose ? warnRed : Palette.lensLight)
                 .frame(width: 3, height: 3)
         }
-        .frame(width: InstrumentMetrics.focusMarkerSide, height: InstrumentMetrics.focusMarkerSide)
+        .frame(width: 30, height: 30)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }
@@ -842,7 +842,7 @@ struct FocusPanel: View {
                 .padding(.vertical, 5)
                 .frame(maxWidth: .infinity)
                 .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .onTapGesture {
                     UISelectionFeedbackGenerator().selectionChanged()
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded = false }
@@ -859,7 +859,7 @@ struct FocusPanel: View {
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity)
             .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .animation(.smooth(duration: 0.25), value: tooClose)
         }
     }
