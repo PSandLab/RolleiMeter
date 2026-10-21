@@ -20,6 +20,9 @@ enum InstrumentMetrics {
     static let panelCorner: CGFloat = 10
     static var viewfinderCorner: CGFloat { panelCorner * phi }
 
+    /// The small focus cursor is subordinate to the square controls by the same ratio.
+    static var focusMarkerSide: CGFloat { keySide / phi }
+
     /// Keep the compact EV arc's width proportional to its height.
     static let evGaugeHeight: CGFloat = 19
     static var evGaugeWidth: CGFloat { evGaugeHeight * phi }
