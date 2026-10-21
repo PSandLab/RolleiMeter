@@ -24,10 +24,9 @@ struct ContentView: View {
     @StateObject private var meter = CameraMeter()
 
     // Held in @State, not @StateObject, so 60 fps value changes only redraw the views that watch them.
-    // Use nearly critically damped springs so the instrument settles without bouncing.
-    @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 60, damping: 16)
-    @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 70, damping: 18)
-    @State private var lastEVTarget: Double?
+    // The EV needle starts low and winds up to the first reading.
+    @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 70, damping: 12)
+    @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 110, damping: 17)
 
     @AppStorage("simpleMode") private var simpleMode = false
     @AppStorage("mode") private var mode: MeterMode = .matrix   // matrix or highlight
@@ -162,7 +161,6 @@ struct ContentView: View {
             UIApplication.shared.isIdleTimerDisabled = true
             if mode == .spot { mode = .matrix }   // older versions could save spot as the mode
             pushConfig()
-            lastEVTarget = ev
             evDamp.set([ev])
             syncDistance()
             meter.start()
@@ -184,11 +182,11 @@ struct ContentView: View {
         .onChange(of: focusBuf) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
         .onChange(of: meter.sceneEV) {
-            updateEVDamper()
+            evDamp.set([ev])
             updateNight()
         }
-        .onChange(of: calibration) { updateEVDamper(force: true) }
-        .onChange(of: frozenEV) { updateEVDamper(force: true) }
+        .onChange(of: calibration) { evDamp.set([ev]) }
+        .onChange(of: frozenEV) { evDamp.set([ev]) }
         .onChange(of: shownDistance) { syncDistance() }
         .onChange(of: selected) { syncDistance() }
         .onChange(of: focusExpanded) {
@@ -206,14 +204,6 @@ struct ContentView: View {
 
     private func pushConfig() {
         meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf)
-    }
-
-    /// Ignore EV changes smaller than a twentieth of a stop so the needle has time to settle.
-    private func updateEVDamper(force: Bool = false) {
-        let target = ev
-        if !force, let lastEVTarget, abs(target - lastEVTarget) < 0.05 { return }
-        lastEVTarget = target
-        evDamp.set([target])
     }
 
     /// Switch to the dark palette in dim scenes, and back again in bright ones.
