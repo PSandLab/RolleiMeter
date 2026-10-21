@@ -21,7 +21,7 @@ struct Panel: ViewModifier {
         content.background {
             RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
                 .fill(Palette.paper)
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+                .overlay(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous).stroke(stroke, lineWidth: lineWidth))
                 .overlay(
                     RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner - 1, style: .continuous)
                         .strokeBorder(
@@ -287,7 +287,7 @@ private struct SimpleApertureColumn: View {
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, InstrumentMetrics.screenInset)
         .padding(.vertical, 14)
         .frame(minHeight: 174, maxHeight: 174)
         .contentShape(Rectangle())
@@ -324,8 +324,8 @@ struct SimpleExposurePair: View {
             )
         }
         .background(paper)
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous).stroke(hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
     }
 }
 
@@ -653,14 +653,14 @@ struct PaperKeyStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
                     .fill(configuration.isPressed ? Palette.hairline : Palette.paper)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous)
                     .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
@@ -734,7 +734,7 @@ struct FreezeButton: View {
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
                     .stroke(frozen ? accentRed : mutedInk, lineWidth: frozen ? 4 : 1)
-                    .frame(width: 68, height: 68)
+                    .frame(width: InstrumentMetrics.shutterCoreDiameter, height: InstrumentMetrics.shutterCoreDiameter)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Image(systemName: frozen ? "pause.fill" : "viewfinder")
                     .font(.system(size: 15, weight: .medium))
@@ -842,7 +842,7 @@ struct FocusPanel: View {
                 .padding(.vertical, 5)
                 .frame(maxWidth: .infinity)
                 .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
                 .onTapGesture {
                     UISelectionFeedbackGenerator().selectionChanged()
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded = false }
@@ -859,7 +859,7 @@ struct FocusPanel: View {
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity)
             .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: InstrumentMetrics.panelCorner, style: .continuous))
             .animation(.smooth(duration: 0.25), value: tooClose)
         }
     }
