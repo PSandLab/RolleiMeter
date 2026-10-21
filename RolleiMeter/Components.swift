@@ -93,8 +93,10 @@ private struct NeedleGauge: View {
                 tick.addLine(to: point(angle, r))
                 ctx.stroke(tick, with: .color(mutedInk), lineWidth: i % 2 == 0 ? 1.4 : 1)
             }
-            let norm = min(max(ev / 18.0, -0.1), 1.1)
-            let needleAngle = -90.0 - 55.0 + 110.0 * norm
+            // Keep the needle inside the engraved 0–18 EV arc so it stays aligned
+            // with the end ticks instead of drifting past them at either extreme.
+            let norm = min(max(ev, 0), 18) / 18.0
+            let needleAngle = -145.0 + 110.0 * norm
             var needle = Path()
             needle.move(to: c)
             needle.addLine(to: point(needleAngle, r - 1))
@@ -431,12 +433,13 @@ private struct FocusDialFace: View, Animatable {
         }
     }
 
-    /// Points of horizontal travel for the full near-to-infinity focus range.
-    private let pointsPerUnit: CGFloat = 520
-
     var body: some View {
         Canvas { context, size in
             let cx = size.width / 2
+            // Scale the ruler to the depth-of-field span: wider at small apertures,
+            // tighter at large apertures, while keeping the focused distance centered.
+            let depthSpan = max(far - near, 0.015)
+            let pointsPerUnit = CGFloat(min(max(Double(size.width) * 0.72 / depthSpan, 180), 1400))
             // Pointer, number and ticks stacked as one group, centred in the tile.
             let groupHeight: CGFloat = 104
             let y0 = max(0, (size.height - groupHeight) / 2)
@@ -464,22 +467,18 @@ private struct FocusDialFace: View, Animatable {
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: baseline - h))
-                let shade = DepthShade.weight(p, near: near, far: far)
-                context.stroke(tick, with: .color(inkColor.opacity(f * (0.26 + 0.74 * shade))), lineWidth: 1.5)
+                context.stroke(tick, with: .color(inkColor.opacity(f * 0.78)), lineWidth: 1.5)
             }
             for mark in marks {
                 let px = x(mark.p)
                 let f = fade(px)
                 if f <= 0 { continue }
-                let green = mark.label == sharpLabel
-                let color: Color = green ? goldenGreen : inkColor
-                // Marks you could set the lens to and still be sharp stay dark; the rest recede.
-                let shade = DepthShade.weight(mark.p, near: near, far: far)
-                let a = f * (0.4 + 0.6 * shade)
+                let color = inkColor
+                let a = f * 0.78
                 var tick = Path()
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: markTop))
-                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: green ? 3 : 2.5)
+                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: 2.5)
                 // The mark under the pointer grows a little, like a detent.
                 let underPointer = abs(mark.p - position) < 0.012
                 let text = context.resolve(
