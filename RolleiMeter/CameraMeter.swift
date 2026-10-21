@@ -42,6 +42,11 @@ final class CameraMeter: NSObject, ObservableObject,
     private var smoothed: Double?
     private var deltaSmoothed: Double?
     private var distSmoothed: Double?
+    /// A large new distance must persist across several frames before the focus scale follows it.
+    private var distJumpCandidate: Double?
+    private var distJumpCount = 0
+    /// Keep the last good distance briefly through isolated invalid depth frames.
+    private var lastValidDepthTime: CFTimeInterval?
     private var latestPreviewPixelBuffer: CVPixelBuffer?
     private let previewImageContext = CIContext()
     private var lastPublish: CFTimeInterval = 0
@@ -68,7 +73,12 @@ final class CameraMeter: NSObject, ObservableObject,
         self.spotRadius = radius
         self.smoothed = nil
         self.deltaSmoothed = nil
-        if focus != self.focus { self.distSmoothed = nil }
+        if focus != self.focus {
+            self.distSmoothed = nil
+            self.distJumpCandidate = nil
+            self.distJumpCount = 0
+            self.lastValidDepthTime = nil
+        }
         self.focus = focus
         lock.unlock()
     }
@@ -283,22 +293,57 @@ final class CameraMeter: NSObject, ObservableObject,
         }
 
         var out: Double?
+        let now = CACurrentMediaTime()
         lock.lock()
         if values.count >= 5 {
             values.sort()
             let med = values[values.count / 2]
-            if let s = distSmoothed, abs(med - s) < max(0.15, 0.08 * s) {
-                distSmoothed = s + 0.4 * (med - s)
+            lastValidDepthTime = now
+
+            if let current = distSmoothed {
+                let movement = abs(Focus.position(med) - Focus.position(current))
+                if movement < 0.012 {
+                    // Ignore motion too small to matter on the Rollei focus scale.
+                    distJumpCandidate = nil
+                    distJumpCount = 0
+                } else if movement > 0.06 {
+                    // A single large LiDAR jump is often noise. Follow it only after three
+                    // nearby readings agree, then let the regular filter settle the rest.
+                    if let candidate = distJumpCandidate,
+                       abs(Focus.position(med) - Focus.position(candidate)) < 0.025 {
+                        distJumpCount += 1
+                    } else {
+                        distJumpCandidate = med
+                        distJumpCount = 1
+                    }
+                    if distJumpCount >= 3 {
+                        distSmoothed = current + 0.35 * (med - current)
+                        distJumpCandidate = nil
+                        distJumpCount = 0
+                    }
+                } else {
+                    distSmoothed = current + 0.22 * (med - current)
+                    distJumpCandidate = nil
+                    distJumpCount = 0
+                }
             } else {
+                // Start at the first valid reading rather than animating from a made-up value.
                 distSmoothed = med
+                distJumpCandidate = nil
+                distJumpCount = 0
             }
             out = distSmoothed
         } else {
-            distSmoothed = nil
+            // Brief invalid patches no longer blank and re-prime the focus scale.
+            if let lastValidDepthTime, now - lastValidDepthTime > 0.4 {
+                distSmoothed = nil
+                distJumpCandidate = nil
+                distJumpCount = 0
+            }
+            out = distSmoothed
         }
         lock.unlock()
 
-        let now = CACurrentMediaTime()
         guard now - lastDepthPublish > 0.1 else { return }
         lastDepthPublish = now
         DispatchQueue.main.async { [weak self] in

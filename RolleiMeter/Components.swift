@@ -150,10 +150,23 @@ struct RulerView: View {
 
     @Namespace private var indexNamespace
 
-    private var results: [ShutterResult] {
+    @State private var heldResults: [ShutterResult] = []
+
+    private var idealTimes: [Double] {
         Rollei.stops.map {
-            Exposure.result(for: Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: $0.n))
+            Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: $0.n)
         }
+    }
+
+    private var results: [ShutterResult] {
+        idealTimes.enumerated().map { index, time in
+            let previous = heldResults.indices.contains(index) ? heldResults[index] : nil
+            return Exposure.result(for: time, keeping: previous)
+        }
+    }
+
+    private func resetHeldResults() {
+        heldResults = idealTimes.map { Exposure.result(for: $0) }
     }
 
     var body: some View {
@@ -166,7 +179,7 @@ struct RulerView: View {
                     Text(r.deviation.map(Fmt.exposureAmount) ?? r.label)
                         .font(AppTypography.font(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium))
                         .foregroundStyle(shutterColor(r, golden: i == golden))
-                        .contentTransition(.numericText())
+                        .contentTransition(.opacity)
                         .frame(maxWidth: .infinity)
                         .background {
                             // Pale band behind every aperture that gives a correct exposure right now.
@@ -176,7 +189,7 @@ struct RulerView: View {
                         }
                         .animation(.smooth(duration: 0.25), value: r.deviation == nil)
                         .minimumScaleFactor(0.7)
-                        .animation(.smooth(duration: 0.2), value: r.deviation.map(Fmt.exposureAmount) ?? r.label)
+                        .animation(.easeOut(duration: 0.12), value: r.deviation.map(Fmt.exposureAmount) ?? r.label)
                 }
             }
 
@@ -219,6 +232,10 @@ struct RulerView: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 8)
         .modifier(Panel())
+        .onAppear { resetHeldResults() }
+        .onChange(of: idealTimes) { _ in heldResults = results }
+        .onChange(of: iso) { _ in resetHeldResults() }
+        .onChange(of: comp) { _ in resetHeldResults() }
     }
 
     /// Orange-red for out of range, a warning tint for readings slower than 1/60 s, green for the golden aperture.

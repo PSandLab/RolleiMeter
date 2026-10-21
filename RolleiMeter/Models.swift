@@ -96,6 +96,20 @@ enum Exposure {
         }
         return ShutterResult(label: best.label, t: best.t, status: .ok, deviation: nil)
     }
+
+    /// Keep the current native shutter marking until another one is clearly closer.
+    /// The margin prevents small EV fluctuations from toggling labels at their midpoint.
+    static func result(for t: Double, keeping previous: ShutterResult?, margin: Double = 0.18) -> ShutterResult {
+        let next = result(for: t)
+        guard let previous,
+              previous.status == .ok,
+              next.status == .ok,
+              previous.label != next.label else { return next }
+
+        let previousDistance = abs(log2(t / previous.t))
+        let nextDistance = abs(log2(t / next.t))
+        return nextDistance + margin < previousDistance ? next : previous
+    }
 }
 
 enum Fmt {
