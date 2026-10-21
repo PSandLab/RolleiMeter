@@ -441,8 +441,10 @@ private struct FocusDialFace: View, Animatable {
             let baseline = size.height * 0.91
             // The depth-of-field span controls the zoom. Small apertures magnify
             // the focused mark; large apertures reveal more of the engraved scale.
-            let depthSpan = max(far - near, 0.015)
-            let pointsPerUnit = CGFloat(min(max(Double(size.width) * 0.72 / depthSpan, 150), 1200))
+            let depthSpan: Double = max(far - near, 0.015)
+            let scaleCandidate: Double = Double(size.width) * 0.72 / depthSpan
+            let boundedScale: Double = min(max(scaleCandidate, 150.0), 1200.0)
+            let pointsPerUnit: CGFloat = CGFloat(boundedScale)
             let fadeWidth = max(28, size.width * 0.22)
 
             func theta(_ p: Double) -> CGFloat {
