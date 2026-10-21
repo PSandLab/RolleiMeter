@@ -79,8 +79,8 @@ private struct NeedleGauge: View {
 
     var body: some View {
         Canvas { ctx, size in
-            let r = min(size.width / 2 - 2, size.height - 2)
             let c = CGPoint(x: size.width / 2, y: size.height - 2)
+            let r = size.width / 2 - 1.5
             func point(_ angle: Double, _ len: CGFloat) -> CGPoint {
                 let a = angle * .pi / 180
                 return CGPoint(x: c.x + CGFloat(cos(a)) * len, y: c.y + CGFloat(sin(a)) * len)
@@ -103,7 +103,7 @@ private struct NeedleGauge: View {
             ctx.stroke(needle, with: .color(accentRed), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
             ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
         }
-        .frame(width: 34, height: 26)
+        .frame(width: 34, height: 19)
         .accessibilityHidden(true)
     }
 }
@@ -116,7 +116,7 @@ struct EVBadge: View {
     private var evText: String { String(format: "%.1f", damp.values[0]) }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
             NeedleGauge(ev: damp.values[0])
             if frozen {
                 Text("HOLD")
@@ -399,8 +399,7 @@ private struct FocusRingScale: View {
                 ? Focus.advice(subject: distance, aperture: aperture.n, feet: feet).label : nil,
             marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
-        .animation(.spring(response: 0.72, dampingFraction: 0.9), value: distance)
-        .animation(.spring(response: 0.78, dampingFraction: 0.9), value: aperture.n)
+        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
@@ -415,36 +414,6 @@ private enum DepthShade {
         let lo = min(1, max(0, (p - near) / ease + 1))
         let hi = min(1, max(0, (far - p) / ease + 1))
         return lo * hi
-    }
-}
-
-private struct FocusDialGeometry {
-    let position: Double
-    let radius: CGFloat
-    let baseline: CGFloat
-    let centerX: CGFloat
-    let pointsPerUnit: CGFloat
-    let fadeWidth: CGFloat
-    let width: CGFloat
-
-    func angle(for value: Double) -> CGFloat {
-        CGFloat(value - position) * pointsPerUnit / radius
-    }
-
-    func point(for value: Double, inset: CGFloat = 0) -> CGPoint {
-        let boundedAngle = min(max(angle(for: value), -1.15), 1.15)
-        let adjustedRadius = radius - inset
-        return CGPoint(
-            x: centerX + sin(boundedAngle) * adjustedRadius,
-            y: baseline - cos(boundedAngle) * adjustedRadius
-        )
-    }
-
-    func opacity(for value: Double) -> Double {
-        guard abs(angle(for: value)) <= 1.15 else { return 0 }
-        let x = point(for: value).x
-        let visibleWidth = min(x, width - x)
-        return Double(min(1, max(0, visibleWidth / fadeWidth)))
     }
 }
 
@@ -466,103 +435,69 @@ private struct FocusDialFace: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            drawDial(context: &context, size: size)
+            let cx = size.width / 2
+            // Scale the ruler to the depth-of-field span: wider at small apertures,
+            // tighter at large apertures, while keeping the focused distance centered.
+            let depthSpan = max(far - near, 0.015)
+            let pointsPerUnit = CGFloat(min(max(Double(size.width) * 0.72 / depthSpan, 180), 1400))
+            // Pointer, number and ticks stacked as one group, centred in the tile.
+            let groupHeight: CGFloat = 104
+            let y0 = max(0, (size.height - groupHeight) / 2)
+            let numberY = y0 + 30
+            let markTop = y0 + 50
+            let baseline = y0 + 92
+            let fadeWidth: CGFloat = 44
+
+            func x(_ p: Double) -> CGFloat { cx + CGFloat(p - position) * pointsPerUnit }
+            func fade(_ x: CGFloat) -> Double {
+                let edge = min(x, size.width - x)
+                return Double(min(1, max(0, edge / fadeWidth)))
+            }
+
+            // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
+            let markPositions = marks.map { $0.p }
+            let n = 60
+            for i in 0...n {
+                let p = Double(i) / Double(n)
+                if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
+                let px = x(p)
+                let f = fade(px)
+                if f <= 0 { continue }
+                let h: CGFloat = i.isMultiple(of: 5) ? 28 : 18
+                var tick = Path()
+                tick.move(to: CGPoint(x: px, y: baseline))
+                tick.addLine(to: CGPoint(x: px, y: baseline - h))
+                context.stroke(tick, with: .color(inkColor.opacity(f * 0.78)), lineWidth: 1.5)
+            }
+            for mark in marks {
+                let px = x(mark.p)
+                let f = fade(px)
+                if f <= 0 { continue }
+                let color = inkColor
+                let a = f * 0.78
+                var tick = Path()
+                tick.move(to: CGPoint(x: px, y: baseline))
+                tick.addLine(to: CGPoint(x: px, y: markTop))
+                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: 2.5)
+                // The mark under the pointer grows a little, like a detent.
+                let underPointer = abs(mark.p - position) < 0.012
+                let text = context.resolve(
+                    Text(mark.label)
+                        .font(AppTypography.bold(size: underPointer ? 29 : 24))
+                        .foregroundColor(color.opacity(a))
+                )
+                context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
+            }
+
+            // Fixed pointer
+            var tri = Path()
+            tri.move(to: CGPoint(x: cx - 7, y: y0))
+            tri.addLine(to: CGPoint(x: cx + 7, y: y0))
+            tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
+            tri.closeSubpath()
+            context.fill(tri, with: .color(accentRed))
         }
         .clipped()
-    }
-
-    private func drawDial(context: inout GraphicsContext, size: CGSize) {
-        let depthSpan = max(far - near, 0.015)
-        let scale = min(max(Double(size.width) * 0.72 / depthSpan, 150.0), 1200.0)
-        let geometry = FocusDialGeometry(
-            position: position,
-            radius: max(size.height * 0.48, 1),
-            baseline: size.height * 0.91,
-            centerX: size.width / 2,
-            pointsPerUnit: CGFloat(scale),
-            fadeWidth: max(28, size.width * 0.22),
-            width: size.width
-        )
-
-        drawArc(context: &context, geometry: geometry)
-        drawGraduations(context: &context, geometry: geometry)
-        drawDistanceMarks(context: &context, geometry: geometry)
-        drawIndex(context: &context, centerX: geometry.centerX)
-    }
-
-    private func drawArc(context: inout GraphicsContext, geometry: FocusDialGeometry) {
-        var arc = Path()
-        for step in 0...48 {
-            let offset = Double(step) / 48.0
-            let span = 2.3 * Double(geometry.radius) / Double(geometry.pointsPerUnit)
-            let p = geometry.position + offset * span - span / 2
-            let point = geometry.point(for: p)
-            if step == 0 {
-                arc.move(to: point)
-            } else {
-                arc.addLine(to: point)
-            }
-        }
-        context.stroke(arc, with: .color(inkColor.opacity(0.22)), lineWidth: 1)
-    }
-
-    private func drawGraduations(context: inout GraphicsContext, geometry: FocusDialGeometry) {
-        for index in 0...60 {
-            let value = Double(index) / 60.0
-            if isEngravedMark(value) { continue }
-
-            let visibleOpacity = geometry.opacity(for: value)
-            guard visibleOpacity > 0 else { continue }
-
-            let isMajor = index.isMultiple(of: 5)
-            let tickLength: CGFloat = isMajor ? 18 : 10
-            var tick = Path()
-            tick.move(to: geometry.point(for: value))
-            tick.addLine(to: geometry.point(for: value, inset: tickLength))
-            let weight: CGFloat = isMajor ? 1.7 : 1.2
-            let tint = inkColor.opacity(visibleOpacity * 0.78)
-            context.stroke(tick, with: .color(tint), lineWidth: weight)
-        }
-    }
-
-    private func isEngravedMark(_ value: Double) -> Bool {
-        for mark in marks where abs(mark.p - value) < 0.003 {
-            return true
-        }
-        return false
-    }
-
-    private func drawDistanceMarks(context: inout GraphicsContext, geometry: FocusDialGeometry) {
-        for mark in marks {
-            let visibleOpacity = geometry.opacity(for: mark.p)
-            guard visibleOpacity > 0 else { continue }
-
-            let underPointer = abs(mark.p - position) < 0.018
-            let anchor = geometry.point(for: mark.p, inset: 31)
-            let fontSize: CGFloat = underPointer ? 42 : 29
-            let labelText = Text(mark.label)
-                .font(AppTypography.bold(size: fontSize))
-                .foregroundColor(inkColor.opacity(visibleOpacity))
-            let resolvedLabel = context.resolve(labelText)
-            context.draw(resolvedLabel, at: anchor, anchor: .center)
-
-            let inset: CGFloat = underPointer ? 25 : 20
-            var tick = Path()
-            tick.move(to: geometry.point(for: mark.p))
-            tick.addLine(to: geometry.point(for: mark.p, inset: inset))
-            let tickWidth: CGFloat = underPointer ? 2.4 : 1.8
-            let tickColor = inkColor.opacity(visibleOpacity * 0.88)
-            context.stroke(tick, with: .color(tickColor), lineWidth: tickWidth)
-        }
-    }
-
-    private func drawIndex(context: inout GraphicsContext, centerX: CGFloat) {
-        var index = Path()
-        index.move(to: CGPoint(x: centerX - 7, y: 8))
-        index.addLine(to: CGPoint(x: centerX + 7, y: 8))
-        index.addLine(to: CGPoint(x: centerX, y: 19))
-        index.closeSubpath()
-        context.fill(index, with: .color(accentRed))
     }
 }
 
