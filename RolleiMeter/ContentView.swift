@@ -101,7 +101,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: InstrumentMetrics.panelInset) {
+        VStack(spacing: 10) {
             topBar
             preview
 
@@ -150,7 +150,7 @@ struct ContentView: View {
 
             controls
         }
-        .padding(.horizontal, InstrumentMetrics.screenInset)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PaperBackground().ignoresSafeArea())
@@ -447,7 +447,7 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .clipShape(RoundedRectangle(cornerRadius: InstrumentMetrics.viewfinderCorner, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
@@ -538,7 +538,7 @@ struct ContentView: View {
                     Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(Palette.ink.opacity(0.78))
-                        .frame(width: InstrumentMetrics.keySide, height: InstrumentMetrics.keySide)
+                        .frame(width: 46, height: 46)
                         .overlay(alignment: .topTrailing) {
                             // A small red dot while exposure compensation is on, so it can't be forgotten.
                             if safeEVIndex != EVComp.zeroIndex && !trayOpen {
@@ -576,7 +576,7 @@ struct ContentView: View {
                             .id(meterChoice)
                             .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
-                    .frame(width: InstrumentMetrics.keySide, height: InstrumentMetrics.keySide)
+                    .frame(width: 46, height: 46)
                 }
                 .buttonStyle(PaperKeyStyle())
                 .accessibilityLabel("Metering mode, \(meterChoice.title)")
