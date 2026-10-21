@@ -22,6 +22,8 @@ final class CameraMeter: NSObject, ObservableObject,
     @Published private(set) var distance: Double?
     @Published private(set) var hasLiDAR = false
     @Published private(set) var denied = false
+    /// Spot reading minus the framed matrix reading, in stops. Only set while spot metering.
+    @Published private(set) var spotDelta: Double?
 
     private let sessionQueue = DispatchQueue(label: "meter.session")
     private let frameQueue = DispatchQueue(label: "meter.frames")
@@ -37,7 +39,10 @@ final class CameraMeter: NSObject, ObservableObject,
     private var spotRadius: CGFloat = 0.05
     /// Where LiDAR measures distance. Separate from the spot meter.
     private var focus = CGPoint(x: 0.5, y: 0.5)
+    /// Area the matrix and highlight readings cover, in camera-frame coordinates.
+    private var frame = CGRect(x: 0, y: 0, width: 1, height: 1)
     private var smoothed: Double?
+    private var deltaSmoothed: Double?
     private var distSmoothed: Double?
     private var latestPreviewPixelBuffer: CVPixelBuffer?
     private let previewImageContext = CIContext()
@@ -58,12 +63,14 @@ final class CameraMeter: NSObject, ObservableObject,
         return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint) {
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, frame: CGRect) {
         lock.lock()
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
+        self.frame = frame
         self.smoothed = nil
+        self.deltaSmoothed = nil
         if focus != self.focus { self.distSmoothed = nil }
         self.focus = focus
         lock.unlock()
@@ -352,6 +359,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let m = mode
         let sp = spot
         let rad = spotRadius
+        let fr = frame
         lock.unlock()
 
         CVPixelBufferLockBaseAddress(pb, .readOnly)
@@ -371,7 +379,37 @@ final class CameraMeter: NSObject, ObservableObject,
             return 0.2126 * r + 0.7152 * g + 0.0722 * b
         }
 
+        /// Centre-weighted average over the metered frame (the Rollei's film frame when the overlay is on).
+        /// Also hands back every sample so highlight mode can find the bright end.
+        func matrixSample() -> (y: Double, ys: [Double]) {
+            let gx = 36
+            let gy = 48
+            let fx0 = Double(fr.minX), fy0 = Double(fr.minY)
+            let fw = Double(fr.width), fh = Double(fr.height)
+            var ys: [Double] = []
+            ys.reserveCapacity(gx * gy)
+            var sum = 0.0
+            var wsum = 0.0
+            for j in 0..<gy {
+                let fy = (Double(j) + 0.5) / Double(gy)
+                let py = min(max(Int((fy0 + fy * fh) * Double(h)), 0), h - 1)
+                for i in 0..<gx {
+                    let fx = (Double(i) + 0.5) / Double(gx)
+                    let px = min(max(Int((fx0 + fx * fw) * Double(w)), 0), w - 1)
+                    let y = lum(px, py)
+                    let dx = fx - 0.5
+                    let dy = fy - 0.5
+                    let weight = 0.35 + 0.65 * exp(-(dx * dx + dy * dy) / 0.18)
+                    ys.append(y)
+                    sum += weight * y
+                    wsum += weight
+                }
+            }
+            return (sum / wsum, ys)
+        }
+
         let yRaw: Double
+        var deltaNow: Double?
 
         switch m {
         case .spot:
@@ -393,28 +431,12 @@ final class CameraMeter: NSObject, ObservableObject,
                 }
             }
             yRaw = count > 0 ? sum / count : 0.18
+            deltaNow = log2(max(yRaw, 0.0005) / max(matrixSample().y, 0.0005))
 
         case .matrix, .highlight:
-            let gx = 36
-            let gy = 48
-            var ys: [Double] = []
-            ys.reserveCapacity(gx * gy)
-            var sum = 0.0
-            var wsum = 0.0
-            for j in 0..<gy {
-                let fy = (Double(j) + 0.5) / Double(gy)
-                for i in 0..<gx {
-                    let fx = (Double(i) + 0.5) / Double(gx)
-                    let y = lum(Int(fx * Double(w)), Int(fy * Double(h)))
-                    let dx = fx - 0.5
-                    let dy = fy - 0.5
-                    let weight = 0.35 + 0.65 * exp(-(dx * dx + dy * dy) / 0.18)
-                    ys.append(y)
-                    sum += weight * y
-                    wsum += weight
-                }
-            }
-            let yMatrix = sum / wsum
+            let sample = matrixSample()
+            var ys = sample.ys
+            let yMatrix = sample.y
 
             if m == .matrix {
                 yRaw = yMatrix
@@ -439,13 +461,26 @@ final class CameraMeter: NSObject, ObservableObject,
             smoothed = ev
         }
         let out = smoothed ?? ev
+        var deltaOut: Double?
+        if let d = deltaNow {
+            if let s = deltaSmoothed {
+                deltaSmoothed = s + 0.3 * (d - s)
+            } else {
+                deltaSmoothed = d
+            }
+            deltaOut = deltaSmoothed
+        } else {
+            deltaSmoothed = nil
+        }
         lock.unlock()
+        let delta = deltaOut
 
         let now = CACurrentMediaTime()
         if now - lastPublish > 0.05 {
             lastPublish = now
             DispatchQueue.main.async { [weak self] in
                 self?.sceneEV = out
+                self?.spotDelta = delta
             }
         }
     }

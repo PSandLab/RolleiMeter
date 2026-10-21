@@ -1,14 +1,13 @@
 import SwiftUI
 import UIKit
-
-private let viewfinderPaper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
-private let viewfinderInk = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
+import AudioToolbox
 
 struct ContentView: View {
     @StateObject private var meter = CameraMeter()
 
     // Held in @State, not @StateObject, so 60 fps value changes only redraw the views that watch them.
-    @State private var evDamp = Damper(count: 1, initial: 12, stiffness: 70, damping: 12)
+    // The EV needle starts low and winds up to the first reading.
+    @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 70, damping: 12)
     @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 110, damping: 17)
 
     @AppStorage("simpleMode") private var simpleMode = false
@@ -21,14 +20,17 @@ struct ContentView: View {
     @AppStorage("aperture") private var selected = 2      // aperture used for depth of field
     @AppStorage("simpleAperture") private var simpleAperture = 0
     @AppStorage("calibration") private var calibration = 0.0
+    /// Metres from the phone (held at a natural distance) back to the eye. Added silently to LiDAR readings.
+    @AppStorage("armOffset") private var armOffset = 0.0
+    /// 0 = off, 1 = landscape 3:2, 2 = portrait 2:3.
+    @AppStorage("frameMode") private var frameMode = 1
 
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
-    @State private var controlsExpanded = false
-    @State private var meterPrimed = false
+    @State private var trayOpen = false
     @State private var distPrimed = false
-    /// Spot metering only happens after a tap in the viewfinder. Tapping a mode chip goes back.
+    /// Spot metering only happens after a hold in the viewfinder. Tapping a mode chip goes back.
     @State private var spotActive = false
     @State private var spot = CGPoint(x: 0.5, y: 0.5)      // spot meter point (press and hold), viewfinder coordinates
     @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)   // the same point in camera-frame coordinates
@@ -41,7 +43,10 @@ struct ContentView: View {
     @AppStorage("hintCount") private var hintCount = 0
     @State private var spotRadius: CGFloat = 0.05
     @State private var pinchBase: CGFloat = 0.05
-    @State private var showSettings = false
+    @State private var blink = false
+    @State private var night = false
+    @State private var nightSince: Date?
+    @Namespace private var chipNamespace
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
@@ -51,7 +56,12 @@ struct ContentView: View {
     private var comp: Double { EVComp.values[safeEVIndex] }
     private var liveEV: Double { meter.sceneEV + calibration }
     private var ev: Double { frozenEV ?? liveEV }
-    private var shownDistance: Double? { frozenEV != nil ? frozenDist : meter.distance }
+
+    /// LiDAR distance plus the arm offset, so it is the distance from the film plane, not from the phone.
+    private var shownDistance: Double? {
+        guard let raw = frozenEV != nil ? frozenDist : meter.distance else { return nil }
+        return raw + armOffset
+    }
 
     private var baseMode: MeterMode { mode == .spot ? .matrix : mode }
     private var engineMode: MeterMode { spotActive ? .spot : baseMode }
@@ -126,15 +136,15 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(viewfinderPaper.ignoresSafeArea())
-        .preferredColorScheme(.light)
+        .background(PaperBackground().ignoresSafeArea())
+        .preferredColorScheme(night ? .dark : .light)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             if mode == .spot { mode = .matrix }   // older versions could save spot as the mode
             pushConfig()
-            evDamp.set([ev], snap: true)
+            evDamp.set([ev])
             syncDistance()
             meter.start()
             hintCount += 1
@@ -154,9 +164,10 @@ struct ContentView: View {
         .onChange(of: spotBuf) { pushConfig() }
         .onChange(of: focusBuf) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
+        .onChange(of: frameMode) { pushConfig() }
         .onChange(of: meter.sceneEV) {
-            evDamp.set([ev], snap: !meterPrimed)
-            meterPrimed = true
+            evDamp.set([ev])
+            updateNight()
         }
         .onChange(of: calibration) { evDamp.set([ev]) }
         .onChange(of: frozenEV) { evDamp.set([ev]) }
@@ -165,15 +176,35 @@ struct ContentView: View {
         .onChange(of: tooClose) {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(simpleMode: $simpleMode, useDIN: $useDIN, useFeet: $useFeet, golden: $golden, calibration: $calibration)
-                .presentationDetents([.medium, .large])
-                .preferredColorScheme(.light)
+        // A small click as the focus ring passes each engraved mark.
+        .onChange(of: advice?.label) {
+            if advice != nil { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.45) }
         }
     }
 
     private func pushConfig() {
-        meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf)
+        meter.setConfig(
+            mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf,
+            frame: FrameLine.bufferRect(mode: frameMode)
+        )
+    }
+
+    /// Switch to the dark palette in dim scenes, and back again in bright ones.
+    /// Needs a couple of seconds in the new light, so a quick glance at a dark corner does nothing.
+    private func updateNight() {
+        let wantNight = night ? liveEV < 6.5 : liveEV < 5.0
+        if wantNight == night {
+            nightSince = nil
+            return
+        }
+        guard let since = nightSince else {
+            nightSince = Date()
+            return
+        }
+        if Date().timeIntervalSince(since) > (night ? 1.5 : 2.5) {
+            withAnimation(.easeInOut(duration: 0.8)) { night = wantNight }
+            nightSince = nil
+        }
     }
 
     private func syncDistance() {
@@ -189,13 +220,23 @@ struct ContentView: View {
     }
 
     private func toggleFreeze() {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         if frozenEV == nil {
+            shutterBlink()
             frozenPreviewImage = meter.previewSnapshot()
             frozenEV = liveEV
             frozenDist = meter.distance
         } else {
             unfreeze()
+        }
+    }
+
+    /// A very short dip to black and the camera shutter click, like a mirror slap.
+    private func shutterBlink() {
+        AudioServicesPlaySystemSound(1108)
+        blink = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            withAnimation(.easeOut(duration: 0.2)) { blink = false }
         }
     }
 
@@ -234,6 +275,27 @@ struct ContentView: View {
         return CGPoint(x: p.x, y: 0.5 + (p.y - 0.5) * frame / aspect)
     }
 
+    /// The inverse of `bufferPoint`: a point in the camera frame back to the box.
+    private func viewPoint(_ q: CGPoint, in size: CGSize) -> CGPoint {
+        let frame = 0.75
+        let aspect = size.width / max(size.height, 1)
+        if aspect < frame {
+            return CGPoint(x: 0.5 + (q.x - 0.5) * frame / aspect, y: q.y)
+        }
+        return CGPoint(x: q.x, y: 0.5 + (q.y - 0.5) * aspect / frame)
+    }
+
+    /// The film frame, in points inside the viewfinder box.
+    private func frameRect(in size: CGSize) -> CGRect {
+        let r = FrameLine.bufferRect(mode: frameMode)
+        let a = viewPoint(CGPoint(x: r.minX, y: r.minY), in: size)
+        let b = viewPoint(CGPoint(x: r.maxX, y: r.maxY), in: size)
+        return CGRect(
+            x: a.x * size.width, y: a.y * size.height,
+            width: (b.x - a.x) * size.width, height: (b.y - a.y) * size.height
+        )
+    }
+
     // MARK: - Viewfinder
 
     private var preview: some View {
@@ -246,7 +308,7 @@ struct ContentView: View {
                         .resizable()
                         .scaledToFill()
                         .opacity(1)
-                        .overlay(viewfinderPaper.opacity(0.04))
+                        .overlay(Palette.lensLight.opacity(0.04))
                         .transition(.opacity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -299,17 +361,38 @@ struct ContentView: View {
                             }
                     )
 
+                // The Rollei's 40 mm film frame inside the wider phone view. Matrix and highlight meter inside it.
+                if frameMode != 0 {
+                    FrameOverlay(rect: frameRect(in: geo.size))
+                        .transition(.opacity)
+                }
+
                 if spotActive {
                     let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
                     Circle()
-                        .strokeBorder(viewfinderPaper, lineWidth: 2)
-                        .shadow(color: viewfinderInk.opacity(0.5), radius: 2)
+                        .strokeBorder(Palette.lensLight, lineWidth: 2)
+                        .shadow(color: Palette.lensDark.opacity(0.5), radius: 2)
                         .frame(width: d, height: d)
                         .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
                         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
                         .animation(.interactiveSpring, value: spotRadius)
                         .transition(.scale(scale: 1.6).combined(with: .opacity))
                         .allowsHitTesting(false)
+
+                    // How far the spot sits from the overall scene, in stops.
+                    if let delta = meter.spotDelta {
+                        Text(Fmt.stops(delta))
+                            .font(AppTypography.font(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.lensLight)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Palette.lensDark.opacity(0.62), in: Capsule())
+                            .contentTransition(.numericText())
+                            .position(x: spot.x * geo.size.width, y: max(14, spot.y * geo.size.height - d / 2 - 14))
+                            .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
+                            .animation(.smooth(duration: 0.15), value: Fmt.stops(delta))
+                            .allowsHitTesting(false)
+                    }
                 }
 
                 if meter.hasLiDAR {
@@ -322,10 +405,10 @@ struct ContentView: View {
                 if showHint {
                     Text("Tap: distance   ·   Hold: spot meter")
                         .font(AppTypography.next(size: 12, weight: .medium))
-                        .foregroundStyle(viewfinderPaper)
+                        .foregroundStyle(Palette.lensLight)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(viewfinderInk.opacity(0.88), in: Capsule())
+                        .background(Palette.lensDark.opacity(0.88), in: Capsule())
                         .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
                         .transition(.opacity)
                         .allowsHitTesting(false)
@@ -341,15 +424,29 @@ struct ContentView: View {
                     VStack(spacing: 10) {
                         Text("Camera access is off")
                             .font(AppTypography.next(size: 16, weight: .semibold))
-                        Button("Open Settings") {
+                            .foregroundStyle(Palette.ink)
+                        Button {
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 UIApplication.shared.open(url)
                             }
+                        } label: {
+                            Text("OPEN SETTINGS")
+                                .font(AppTypography.next(size: 12, weight: .semibold))
+                                .tracking(1)
+                                .foregroundStyle(Palette.accent)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                     .padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .modifier(Panel())
                 }
+
+                // Shutter blink on freeze.
+                Color.black
+                    .opacity(blink ? 0.9 : 0)
+                    .allowsHitTesting(false)
             }
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
@@ -361,31 +458,34 @@ struct ContentView: View {
         HStack {
             EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
             Spacer(minLength: 12)
-            Button {
-                showSettings = true
-            } label: {
-                Text("SETTINGS")
-                    .font(AppTypography.next(size: 12, weight: .semibold))
-                    .tracking(1.1)
-                    .foregroundStyle(viewfinderInk)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
     }
 
     private var modeChips: some View {
         HStack(spacing: 0) {
             modeButton(.matrix)
-            Rectangle().fill(viewfinderPaper.opacity(0.34)).frame(width: 1, height: 17)
-                .padding(.horizontal, 2)
             modeButton(.highlight)
+            if spotActive {
+                Text("SPOT")
+                    .font(AppTypography.next(size: 11, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Palette.lensLight)
+                    .frame(minWidth: 62, minHeight: 38)
+                    .background {
+                        Capsule()
+                            .fill(Palette.lensLight.opacity(0.22))
+                            .matchedGeometryEffect(id: "chipPill", in: chipNamespace)
+                    }
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .accessibilityAddTraits(.isSelected)
+            }
         }
-        .padding(.horizontal, 4)
-        .background(viewfinderInk.opacity(0.48), in: Capsule())
+        .padding(3)
+        .background(Palette.lensDark.opacity(0.48), in: Capsule())
+        .animation(.spring(response: 0.35, dampingFraction: 0.78), value: spotActive)
     }
 
     private func modeButton(_ meterMode: MeterMode) -> some View {
@@ -401,8 +501,15 @@ struct ContentView: View {
             Text(meterMode.title.uppercased())
                 .font(AppTypography.next(size: 11, weight: isSelected ? .semibold : .regular))
                 .tracking(0.8)
-                .foregroundStyle(isSelected ? viewfinderPaper : viewfinderPaper.opacity(0.68))
-                .frame(minWidth: 82, minHeight: 44)
+                .foregroundStyle(isSelected ? Palette.lensLight : Palette.lensLight.opacity(0.68))
+                .frame(minWidth: 82, minHeight: 38)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(Palette.lensLight.opacity(0.22))
+                            .matchedGeometryEffect(id: "chipPill", in: chipNamespace)
+                    }
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -414,15 +521,18 @@ struct ContentView: View {
 
     private var controls: some View {
         VStack(spacing: 8) {
-            if controlsExpanded {
-                HStack(spacing: 12) {
-                    WheelBox(title: "EV", selection: $evIndex, labels: EVComp.labels)
-                    WheelBox(
-                        title: useDIN ? "DIN" : "ISO",
-                        selection: $isoIndex,
-                        labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) }
-                    )
-                }
+            if trayOpen {
+                ControlTray(
+                    evIndex: $evIndex,
+                    isoIndex: $isoIndex,
+                    useDIN: $useDIN,
+                    useFeet: $useFeet,
+                    simpleMode: $simpleMode,
+                    frameMode: $frameMode,
+                    calibration: $calibration,
+                    armOffset: $armOffset,
+                    rawDistance: { meter.distance }
+                )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -434,25 +544,25 @@ struct ContentView: View {
                 HStack {
                     Button {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                            controlsExpanded.toggle()
+                            trayOpen.toggle()
                         }
                     } label: {
-                        Image(systemName: controlsExpanded ? "chevron.down" : "slider.horizontal.3")
+                        Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(viewfinderInk.opacity(0.78))
+                            .foregroundStyle(Palette.ink.opacity(0.78))
                             .frame(width: 46, height: 46)
                             .background(
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(viewfinderPaper)
+                                    .fill(Palette.paper)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .stroke(viewfinderInk.opacity(0.16), lineWidth: 1)
+                                    .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
                             )
                             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(controlsExpanded ? "Hide exposure controls" : "Show exposure controls")
+                    .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
                     Spacer(minLength: 0)
                 }
             }
@@ -461,66 +571,40 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Settings
+// MARK: - Film frame overlay
 
-struct SettingsView: View {
-    @Binding var simpleMode: Bool
-    @Binding var useDIN: Bool
-    @Binding var useFeet: Bool
-    @Binding var golden: Int
-    @Binding var calibration: Double
-    @Environment(\.dismiss) private var dismiss
+/// Dims everything outside the film frame and marks its corners.
+private struct FrameOverlay: View {
+    let rect: CGRect
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Toggle("Simple exposure pair", isOn: $simpleMode)
-                    Toggle("Show film speed as DIN", isOn: $useDIN)
-                    Picker("Distance units", selection: $useFeet) {
-                        Text("Meters").tag(false)
-                        Text("Feet").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                } footer: {
-                    Text("You can also tap m / ft on the open focus scale.")
-                }
-                Section {
-                    Picker("Golden aperture", selection: $golden) {
-                        Text("None").tag(-1)
-                        ForEach(Rollei.stops.indices, id: \.self) { i in
-                            Text("ƒ/" + Rollei.stops[i].label).tag(i)
-                        }
-                    }
-                } footer: {
-                    Text("You can also long-press any aperture on the scale. Tap an aperture to set the depth of field shown on the distance dial.")
-                }
-                Section {
-                    Stepper(value: $calibration, in: -3...3, step: 1.0 / 3.0) {
-                        HStack {
-                            Text("Calibration")
-                            Spacer()
-                            Text(Fmt.stops(calibration))
-                                .font(AppTypography.regular(size: 17))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } footer: {
-                    Text("Shifts every reading, in stops. Set it once against a meter you trust.")
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(viewfinderPaper)
-            .listRowBackground(viewfinderPaper)
-            .toolbarBackground(viewfinderPaper, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
+        Canvas { context, size in
+            var scrim = Path()
+            scrim.addRect(CGRect(origin: .zero, size: size))
+            scrim.addRoundedRect(in: rect, cornerSize: CGSize(width: 4, height: 4))
+            context.fill(scrim, with: .color(Palette.lensDark.opacity(0.3)), style: FillStyle(eoFill: true))
+
+            let l = min(rect.width, rect.height) * 0.12
+            var corners = Path()
+            corners.move(to: CGPoint(x: rect.minX, y: rect.minY + l))
+            corners.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+            corners.addLine(to: CGPoint(x: rect.minX + l, y: rect.minY))
+            corners.move(to: CGPoint(x: rect.maxX - l, y: rect.minY))
+            corners.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            corners.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + l))
+            corners.move(to: CGPoint(x: rect.maxX, y: rect.maxY - l))
+            corners.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            corners.addLine(to: CGPoint(x: rect.maxX - l, y: rect.maxY))
+            corners.move(to: CGPoint(x: rect.minX + l, y: rect.maxY))
+            corners.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            corners.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - l))
+            context.stroke(
+                corners,
+                with: .color(Palette.lensLight.opacity(0.85)),
+                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+            )
         }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

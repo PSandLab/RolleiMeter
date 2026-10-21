@@ -171,6 +171,32 @@ enum Focus {
     }
 }
 
+// MARK: - Film frame
+
+/// The Rollei's 40 mm film frame as it sits inside the iPhone's wider view.
+enum FrameLine {
+    /// The iPhone main camera is roughly 24 mm equivalent. Against 40 mm, the film frame covers
+    /// 24 / 40 of the view along its long side.
+    static let longSide = 24.0 / 40.0
+
+    /// 0 = off (whole camera frame), 1 = landscape 3:2, 2 = portrait 2:3.
+    /// Returned in camera-frame coordinates (0...1 across a portrait 3:4 frame).
+    static func bufferRect(mode: Int) -> CGRect {
+        switch mode {
+        case 1:
+            let w = longSide / 0.75
+            let h = longSide * 2.0 / 3.0
+            return CGRect(x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h)
+        case 2:
+            let w = longSide * 2.0 / 3.0 / 0.75
+            let h = longSide
+            return CGRect(x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h)
+        default:
+            return CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+    }
+}
+
 // MARK: - Depth of field
 
 enum DepthOfField {

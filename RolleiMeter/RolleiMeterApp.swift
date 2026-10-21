@@ -9,7 +9,6 @@ struct RolleiMeterApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.light)
                 .environment(\.font, AppTypography.regular(size: 17))
         }
     }

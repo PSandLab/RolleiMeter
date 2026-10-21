@@ -3,24 +3,34 @@ import AVFoundation
 import AVKit
 import UIKit
 
-private let paper = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
-private let inkColor = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
-private let mutedInk = Color(red: Double(0x8B) / 255.0, green: Double(0x89) / 255.0, blue: Double(0x82) / 255.0)
-private let hairline = Color(red: Double(0xD4) / 255.0, green: Double(0xD0) / 255.0, blue: Double(0xC7) / 255.0)
-private let accentOrange = Color(red: Double(0xB3) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x31) / 255.0)
-private let goldenGreen = Color(red: Double(0x4C) / 255.0, green: Double(0x6B) / 255.0, blue: Double(0x52) / 255.0)
-private let warnRed = accentOrange
+private let paper = Palette.paper
+private let inkColor = Palette.ink
+private let mutedInk = Palette.mutedInk
+private let hairline = Palette.hairline
+private let accentRed = Palette.accent
+private let goldenGreen = Palette.green
+private let warnRed = accentRed
 private let inRangeGreen = goldenGreen
 
-private struct Panel: ViewModifier {
-    var stroke: Color = hairline
+/// Paper panel: hairline edge, a faint light edge along the top, and a very soft shadow.
+struct Panel: ViewModifier {
+    var stroke: Color = Palette.hairline
     var lineWidth: CGFloat = 1
 
     func body(content: Content) -> some View {
         content.background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(paper)
+                .fill(Palette.paper)
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
+                            lineWidth: 1
+                        )
+                        .padding(1)
+                )
+                .shadow(color: Palette.lensDark.opacity(0.07), radius: 3, y: 1)
         }
     }
 }
@@ -63,16 +73,49 @@ struct CameraPreview: UIViewRepresentable {
 
 // MARK: - EV badge
 
+/// A small match-needle gauge. The needle rides the same spring as the numbers, so it overshoots a touch.
+private struct NeedleGauge: View {
+    let ev: Double
+
+    var body: some View {
+        Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height - 2)
+            let r = size.width / 2 - 1.5
+            func point(_ angle: Double, _ len: CGFloat) -> CGPoint {
+                let a = angle * .pi / 180
+                return CGPoint(x: c.x + CGFloat(cos(a)) * len, y: c.y + CGFloat(sin(a)) * len)
+            }
+            // Ticks every 3 EV across a 110 degree arc, straight up being -90.
+            for i in 0...6 {
+                let angle = -90.0 - 55.0 + 110.0 * Double(i) / 6.0
+                var tick = Path()
+                tick.move(to: point(angle, r - 3.5))
+                tick.addLine(to: point(angle, r))
+                ctx.stroke(tick, with: .color(mutedInk), lineWidth: i % 2 == 0 ? 1.4 : 1)
+            }
+            let norm = min(max(ev / 18.0, -0.1), 1.1)
+            let needleAngle = -90.0 - 55.0 + 110.0 * norm
+            var needle = Path()
+            needle.move(to: c)
+            needle.addLine(to: point(needleAngle, r - 1))
+            ctx.stroke(needle, with: .color(accentRed), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
+        }
+        .frame(width: 34, height: 19)
+        .accessibilityHidden(true)
+    }
+}
+
 struct EVBadge: View {
     @ObservedObject var damp: Damper
     let frozen: Bool
     let spot: Bool
 
+    private var evText: String { String(format: "%.1f", damp.values[0]) }
+
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "sun.max.fill")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(accentOrange)
+            NeedleGauge(ev: damp.values[0])
             if frozen {
                 Text("HOLD")
                     .transition(.move(edge: .leading).combined(with: .opacity))
@@ -81,7 +124,8 @@ struct EVBadge: View {
                 Text("SPOT")
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            Text("EV " + String(format: "%.1f", damp.values[0]))
+            Text("EV " + evText)
+                .contentTransition(.numericText())
         }
         .font(AppTypography.font(size: 13, weight: .medium))
         .foregroundStyle(inkColor)
@@ -102,6 +146,8 @@ struct RulerView: View {
     let onSelect: (Int) -> Void
     let onToggleGolden: (Int) -> Void
 
+    @Namespace private var indexNamespace
+
     private var results: [ShutterResult] {
         Rollei.stops.map {
             Exposure.result(for: Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: $0.n))
@@ -117,9 +163,16 @@ struct RulerView: View {
                     let r = res[i]
                     Text(r.deviation.map(Fmt.exposureAmount) ?? r.label)
                         .font(AppTypography.font(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium))
-                        .foregroundStyle(r.deviation == nil ? (i == golden ? goldenGreen : inkColor) : accentOrange)
+                        .foregroundStyle(shutterColor(r, golden: i == golden))
                         .contentTransition(.numericText())
                         .frame(maxWidth: .infinity)
+                        .background {
+                            // Pale band behind every aperture that gives a correct exposure right now.
+                            Rectangle()
+                                .fill(goldenGreen.opacity(r.deviation == nil ? 0.12 : 0))
+                                .padding(.vertical, -1)
+                        }
+                        .animation(.smooth(duration: 0.25), value: r.deviation == nil)
                         .minimumScaleFactor(0.7)
                         .animation(.smooth(duration: 0.2), value: r.deviation.map(Fmt.exposureAmount) ?? r.label)
                 }
@@ -143,7 +196,12 @@ struct RulerView: View {
                         .foregroundStyle(i == golden ? goldenGreen : inkColor)
                         .frame(height: 22)
                         .overlay(alignment: .bottom) {
-                            Rectangle().fill(selected == i ? inkColor : Color.clear).frame(height: 1)
+                            if selected == i {
+                                Rectangle()
+                                    .fill(inkColor)
+                                    .frame(height: 1.5)
+                                    .matchedGeometryEffect(id: "apertureIndex", in: indexNamespace)
+                            }
                         }
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
@@ -159,6 +217,13 @@ struct RulerView: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 8)
         .modifier(Panel())
+    }
+
+    /// Orange-red for out of range, a warning tint for readings slower than 1/60 s, green for the golden aperture.
+    private func shutterColor(_ r: ShutterResult, golden: Bool) -> Color {
+        if r.deviation != nil { return accentRed }
+        if r.isSlow { return accentRed.opacity(0.75) }
+        return golden ? goldenGreen : inkColor
     }
 }
 
@@ -177,7 +242,7 @@ private struct SimpleApertureColumn: View {
     }
     private var reading: ShutterResult { Exposure.result(for: idealTime) }
     private var exposureStatus: String {
-        guard let deviation = reading.deviation else { return "" }
+        guard let deviation = reading.deviation else { return reading.isSlow ? "SLOW · HOLD STEADY" : "" }
         return deviation > 0 ? "OVEREXPOSED" : "UNDEREXPOSED"
     }
 
@@ -193,14 +258,21 @@ private struct SimpleApertureColumn: View {
             }
             .foregroundStyle(paper)
             Spacer(minLength: 10)
-            Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
-                .font(AppTypography.bold(size: 80))
-                .foregroundStyle(paper)
-                .contentTransition(.numericText())
-                .lineLimit(1)
-                .minimumScaleFactor(0.62)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                if reading.deviation == nil {
+                    Text("1/")
+                        .font(AppTypography.mono(size: 30, weight: .medium))
+                        .foregroundStyle(paper.opacity(0.78))
+                }
+                Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
+                    .font(AppTypography.bold(size: 80))
+                    .foregroundStyle(paper)
+                    .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
             Text(exposureStatus)
                 .font(AppTypography.next(size: 10, weight: .medium))
                 .tracking(0.7)
@@ -218,7 +290,7 @@ private struct SimpleApertureColumn: View {
         .frame(minHeight: 174, maxHeight: 174)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
-        .background(outOfRange ? accentOrange : inRangeGreen)
+        .background(outOfRange ? accentRed : inRangeGreen)
     }
 
     private var outOfRange: Bool { reading.deviation != nil }
@@ -373,7 +445,7 @@ private struct FocusDialFace: View, Animatable {
                 var band = Path()
                 band.move(to: CGPoint(x: bandL, y: baseline + 7))
                 band.addLine(to: CGPoint(x: bandR, y: baseline + 7))
-                context.stroke(band, with: .color(sharpLabel != nil ? goldenGreen : accentOrange.opacity(0.55)),
+                context.stroke(band, with: .color(sharpLabel != nil ? goldenGreen : accentRed.opacity(0.55)),
                                style: StrokeStyle(lineWidth: 3, lineCap: .round))
             }
 
@@ -402,8 +474,12 @@ private struct FocusDialFace: View, Animatable {
                 tick.move(to: CGPoint(x: px, y: baseline))
                 tick.addLine(to: CGPoint(x: px, y: markTop))
                 context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
+                // The mark under the pointer grows a little, like a detent.
+                let underPointer = abs(mark.p - position) < 0.012
                 let text = context.resolve(
-                    Text(mark.label).font(AppTypography.bold(size: 24)).foregroundColor(color.opacity(f))
+                    Text(mark.label)
+                        .font(AppTypography.bold(size: underPointer ? 29 : 24))
+                        .foregroundColor(color.opacity(f))
                 )
                 context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
             }
@@ -414,7 +490,7 @@ private struct FocusDialFace: View, Animatable {
             tri.addLine(to: CGPoint(x: cx + 7, y: y0))
             tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
             tri.closeSubpath()
-            context.fill(tri, with: .color(accentOrange))
+            context.fill(tri, with: .color(accentRed))
         }
         .clipped()
     }
@@ -434,7 +510,7 @@ private struct FocusRangeIndicator: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
             Image(systemName: "arrowtriangle.down.fill")
                 .font(.system(size: max(9, fontSize * 0.32), weight: .semibold))
-                .foregroundStyle(accentOrange)
+                .foregroundStyle(accentRed)
                 .frame(width: max(13, fontSize * 0.42))
             Text(hi)
                 .lineLimit(1)
@@ -448,41 +524,105 @@ private struct FocusRangeIndicator: View {
     }
 }
 
-// MARK: - Wheel
+// MARK: - Scrub dial
 
-struct WheelBox: View {
+/// A horizontal ruler you drag under a fixed pointer. One haptic tick per step.
+struct ScrubDial: View {
     let title: String
     @Binding var selection: Int
     let labels: [String]
 
+    private let spacing: CGFloat = 15
+    @State private var base: Int?
+    @State private var drag: CGFloat = 0
+
+    private var safeSelection: Int { min(max(selection, 0), max(labels.count - 1, 0)) }
+
+    /// Fractional index under the pointer. Follows the finger while dragging.
+    private var position: Double {
+        guard let base else { return Double(safeSelection) }
+        return min(max(Double(base) - Double(drag / spacing), 0), Double(max(labels.count - 1, 0)))
+    }
+
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             Text(title)
-                .font(AppTypography.next(size: 12))
-                .foregroundStyle(.secondary)
-            ZStack(alignment: .trailing) {
-                Picker(title, selection: $selection) {
-                    ForEach(labels.indices, id: \.self) { i in
-                        Text(labels[i])
-                            .font(AppTypography.mono(size: 16))
-                            .tag(i)
+                .font(AppTypography.next(size: 10, weight: .medium))
+                .tracking(1)
+                .foregroundStyle(mutedInk)
+            Text(labels.isEmpty ? "" : labels[safeSelection])
+                .font(AppTypography.bold(size: 28))
+                .foregroundStyle(inkColor)
+                .contentTransition(.numericText())
+                .animation(.smooth(duration: 0.15), value: selection)
+            DialFace(position: position, count: labels.count, spacing: spacing)
+                .frame(height: 30)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .modifier(Panel())
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if base == nil { base = safeSelection }
+                    drag = value.translation.width
+                    let index = Int(position.rounded())
+                    if index != selection {
+                        selection = index
+                        UISelectionFeedbackGenerator().selectionChanged()
                     }
                 }
-                .pickerStyle(.wheel)
-                .frame(width: 100, height: 92)
-                .clipped()
+                .onEnded { _ in
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) {
+                        base = nil
+                        drag = 0
+                    }
+                }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(labels.isEmpty ? "" : labels[safeSelection])
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: selection = min(selection + 1, labels.count - 1)
+            case .decrement: selection = max(selection - 1, 0)
+            @unknown default: break
+            }
+        }
+    }
+}
 
-                Image(systemName: "arrowtriangle.left.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(accentOrange)
-                    .padding(.trailing, 5)
-                    .allowsHitTesting(false)
+private struct DialFace: View, Animatable {
+    var position: Double
+    let count: Int
+    let spacing: CGFloat
+
+    var animatableData: Double {
+        get { position }
+        set { position = newValue }
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let cx = size.width / 2
+            for i in 0..<count {
+                let x = cx + CGFloat(Double(i) - position) * spacing
+                let fade = Double(min(1, max(0, min(x, size.width - x) / 30)))
+                if fade <= 0 { continue }
+                // Third-stop steps: every third tick is a full stop.
+                let major = i % 3 == 0
+                var tick = Path()
+                tick.move(to: CGPoint(x: x, y: size.height))
+                tick.addLine(to: CGPoint(x: x, y: size.height - (major ? 17 : 9)))
+                context.stroke(tick, with: .color(mutedInk.opacity(fade)), lineWidth: major ? 1.8 : 1.2)
             }
-            .modifier(Panel())
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .onChange(of: selection) {
-                UISelectionFeedbackGenerator().selectionChanged()
-            }
+            var pointer = Path()
+            pointer.move(to: CGPoint(x: cx - 5, y: 0))
+            pointer.addLine(to: CGPoint(x: cx + 5, y: 0))
+            pointer.addLine(to: CGPoint(x: cx, y: 8))
+            pointer.closeSubpath()
+            context.fill(pointer, with: .color(accentRed))
         }
     }
 }
@@ -510,7 +650,7 @@ struct FreezeButton: View {
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
-                    .stroke(frozen ? accentOrange : mutedInk, lineWidth: frozen ? 4 : 1)
+                    .stroke(frozen ? accentRed : mutedInk, lineWidth: frozen ? 4 : 1)
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
             }
@@ -540,7 +680,7 @@ struct FocusMarker: View {
 
     var body: some View {
         FocusBrackets()
-            .stroke(tooClose ? warnRed : paper,
+            .stroke(tooClose ? warnRed : Palette.lensLight,
                     style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             .frame(width: 30, height: 30)
             .animation(.smooth(duration: 0.2), value: tooClose)
@@ -613,7 +753,7 @@ struct FocusPanel: View {
     private var detailColor: Color {
         if tooClose { return warnRed }
         guard let advice else { return mutedInk }
-        return advice.sharp ? goldenGreen : accentOrange
+        return advice.sharp ? goldenGreen : accentRed
     }
 
     private var summary: some View {
@@ -669,7 +809,7 @@ struct FocusPanel: View {
     private var scale: some View {
         let visible = distance != nil
         let showBand = visible && !tooClose
-        let tint = tooClose ? warnRed : accentOrange
+        let tint = tooClose ? warnRed : accentRed
 
         return VStack(spacing: 0) {
             GeometryReader { geo in
@@ -687,17 +827,17 @@ struct FocusPanel: View {
 
                     // Depth of field
                     Capsule()
-                        .fill(accentOrange.opacity(0.38))
+                        .fill(accentRed.opacity(0.38))
                         .frame(width: max(farX - nearX, 3), height: 9)
                         .position(x: (nearX + farX) / 2, y: 17)
                         .opacity(showBand ? 1 : 0)
                     Rectangle()
-                        .fill(accentOrange)
+                        .fill(accentRed)
                         .frame(width: 2, height: 15)
                         .position(x: nearX, y: 17)
                         .opacity(showBand ? 1 : 0)
                     Rectangle()
-                        .fill(accentOrange)
+                        .fill(accentRed)
                         .frame(width: 2, height: 15)
                         .position(x: farX, y: 17)
                         .opacity(showBand ? 1 : 0)
@@ -728,7 +868,7 @@ struct FocusPanel: View {
 
             HStack {
                 Text(near.map { Fmt.distance($0, feet: feet) } ?? "")
-                    .foregroundStyle(accentOrange)
+                    .foregroundStyle(accentRed)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -743,7 +883,7 @@ struct FocusPanel: View {
                 }
                 .buttonStyle(.plain)
                 Text(far.map { Fmt.distance($0, feet: feet) } ?? "")
-                    .foregroundStyle(accentOrange)
+                    .foregroundStyle(accentRed)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .font(AppTypography.mono(size: 13, weight: .semibold))
