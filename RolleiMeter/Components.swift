@@ -736,6 +736,11 @@ struct FreezeButton: View {
                     .stroke(frozen ? accentRed : mutedInk, lineWidth: frozen ? 4 : 1)
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
+                Image(systemName: frozen ? "pause.fill" : "viewfinder")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(frozen ? accentRed : mutedInk)
+                    .contentTransition(.symbolEffect(.replace))
+                    .accessibilityHidden(true)
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.6), value: frozen)
         }
@@ -757,17 +762,51 @@ private struct FocusBrackets: Shape {
     }
 }
 
-/// Shows the LiDAR focus point as a clean cursor on the viewfinder.
-struct FocusMarker: View {
+/// A short, expanding ring confirms a new focus point without obscuring the camera image.
+private struct FocusPing: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
     let tooClose: Bool
 
     var body: some View {
-        FocusBrackets()
-            .stroke(tooClose ? warnRed : Palette.lensLight,
-                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        Circle()
+            .stroke(tooClose ? warnRed : Palette.lensLight, lineWidth: 1)
             .frame(width: 30, height: 30)
-            .animation(.smooth(duration: 0.2), value: tooClose)
-            .allowsHitTesting(false)
+            .scaleEffect(expanded ? 1.8 : 0.45)
+            .opacity(expanded ? 0 : 0.7)
+            .onAppear {
+                if reduceMotion {
+                    expanded = true
+                } else {
+                    withAnimation(.easeOut(duration: 0.48)) { expanded = true }
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// Shows the LiDAR focus point as a clean cursor on the viewfinder.
+struct FocusMarker: View {
+    let tooClose: Bool
+    var pulseID: Int = 0
+
+    var body: some View {
+        ZStack {
+            if pulseID > 0 {
+                FocusPing(tooClose: tooClose).id(pulseID)
+            }
+            FocusBrackets()
+                .stroke(tooClose ? warnRed : Palette.lensLight,
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                .frame(width: 30, height: 30)
+                .scaleEffect(tooClose ? 0.88 : 1)
+            Circle()
+                .fill(tooClose ? warnRed : Palette.lensLight)
+                .frame(width: 3, height: 3)
+        }
+        .frame(width: 30, height: 30)
+        .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
+        .allowsHitTesting(false)
     }
 }
 
