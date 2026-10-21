@@ -771,7 +771,7 @@ private struct FocusPing: View {
     var body: some View {
         Circle()
             .stroke(tooClose ? warnRed : Palette.lensLight, lineWidth: 1)
-            .frame(width: 30, height: 30)
+            .frame(width: InstrumentMetrics.focusMarkerSide, height: InstrumentMetrics.focusMarkerSide)
             .scaleEffect(expanded ? 1.8 : 0.45)
             .opacity(expanded ? 0 : 0.7)
             .onAppear {
@@ -798,13 +798,13 @@ struct FocusMarker: View {
             FocusBrackets()
                 .stroke(tooClose ? warnRed : Palette.lensLight,
                         style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                .frame(width: 30, height: 30)
+                .frame(width: InstrumentMetrics.focusMarkerSide, height: InstrumentMetrics.focusMarkerSide)
                 .scaleEffect(tooClose ? 0.88 : 1)
             Circle()
                 .fill(tooClose ? warnRed : Palette.lensLight)
                 .frame(width: 3, height: 3)
         }
-        .frame(width: 30, height: 30)
+        .frame(width: InstrumentMetrics.focusMarkerSide, height: InstrumentMetrics.focusMarkerSide)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }
