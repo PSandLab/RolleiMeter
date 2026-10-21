@@ -101,7 +101,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: InstrumentMetrics.panelInset) {
             topBar
             preview
 
@@ -576,7 +576,7 @@ struct ContentView: View {
                             .id(meterChoice)
                             .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
-                    .frame(width: 46, height: 46)
+                    .frame(width: InstrumentMetrics.keySide, height: InstrumentMetrics.keySide)
                 }
                 .buttonStyle(PaperKeyStyle())
                 .accessibilityLabel("Metering mode, \(meterChoice.title)")
