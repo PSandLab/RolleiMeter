@@ -418,6 +418,36 @@ private enum DepthShade {
     }
 }
 
+private struct FocusDialGeometry {
+    let position: Double
+    let radius: CGFloat
+    let baseline: CGFloat
+    let centerX: CGFloat
+    let pointsPerUnit: CGFloat
+    let fadeWidth: CGFloat
+    let width: CGFloat
+
+    func angle(for value: Double) -> CGFloat {
+        CGFloat(value - position) * pointsPerUnit / radius
+    }
+
+    func point(for value: Double, inset: CGFloat = 0) -> CGPoint {
+        let boundedAngle = min(max(angle(for: value), -1.15), 1.15)
+        let adjustedRadius = radius - inset
+        return CGPoint(
+            x: centerX + sin(boundedAngle) * adjustedRadius,
+            y: baseline - cos(boundedAngle) * adjustedRadius
+        )
+    }
+
+    func opacity(for value: Double) -> Double {
+        guard abs(angle(for: value)) <= 1.15 else { return 0 }
+        let x = point(for: value).x
+        let visibleWidth = min(x, width - x)
+        return Double(min(1, max(0, visibleWidth / fadeWidth)))
+    }
+}
+
 private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
@@ -436,84 +466,103 @@ private struct FocusDialFace: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            let cx = size.width / 2
-            let radius = max(size.height * 0.48, 1)
-            let baseline = size.height * 0.91
-            // The depth-of-field span controls the zoom. Small apertures magnify
-            // the focused mark; large apertures reveal more of the engraved scale.
-            let depthSpan: Double = max(far - near, 0.015)
-            let scaleCandidate: Double = Double(size.width) * 0.72 / depthSpan
-            let boundedScale: Double = min(max(scaleCandidate, 150.0), 1200.0)
-            let pointsPerUnit: CGFloat = CGFloat(boundedScale)
-            let fadeWidth = max(28, size.width * 0.22)
-
-            func theta(_ p: Double) -> CGFloat {
-                CGFloat(p - position) * pointsPerUnit / radius
-            }
-            func point(_ p: Double, inset: CGFloat = 0) -> CGPoint {
-                let a = min(max(theta(p), -1.15), 1.15)
-                let r = radius - inset
-                return CGPoint(x: cx + sin(a) * r, y: baseline - cos(a) * r)
-            }
-            func opacity(_ p: Double) -> Double {
-                let a = abs(theta(p))
-                guard a <= 1.15 else { return 0 }
-                let x = point(p).x
-                return Double(min(1, max(0, min(x, size.width - x) / fadeWidth)))
-            }
-
-            // A fine, shallow curved guide gives the engraved marks a common arc.
-            var arc = Path()
-            for step in 0...48 {
-                let p = position + Double(step) / 48 * (2.3 * Double(radius) / Double(pointsPerUnit)) - (1.15 * Double(radius) / Double(pointsPerUnit))
-                let q = point(p)
-                if step == 0 { arc.move(to: q) } else { arc.addLine(to: q) }
-            }
-            context.stroke(arc, with: .color(inkColor.opacity(0.22)), lineWidth: 1)
-
-            // Fine graduations bend with the lens scale; every fifth mark is longer.
-            for i in 0...60 {
-                let p = Double(i) / 60
-                if marks.contains(where: { abs($0.p - p) < 0.003 }) { continue }
-                let a = abs(theta(p))
-                let f = opacity(p)
-                guard a <= 1.15, f > 0 else { continue }
-                let length: CGFloat = i.isMultiple(of: 5) ? 18 : 10
-                var tick = Path()
-                tick.move(to: point(p))
-                tick.addLine(to: point(p, inset: length))
-                context.stroke(tick, with: .color(inkColor.opacity(f * 0.78)), lineWidth: i.isMultiple(of: 5) ? 1.7 : 1.2)
-            }
-
-            // Engraved distance numbers follow the same arc and grow at the index.
-            for mark in marks {
-                let a = abs(theta(mark.p))
-                let f = opacity(mark.p)
-                guard a <= 1.15, f > 0 else { continue }
-                let underPointer = abs(mark.p - position) < 0.018
-                let anchor = point(mark.p, inset: 31)
-                let label = context.resolve(
-                    Text(mark.label)
-                        .font(AppTypography.bold(size: underPointer ? 42 : 29))
-                        .foregroundColor(inkColor.opacity(f))
-                )
-                context.draw(label, at: anchor, anchor: .center)
-
-                var tick = Path()
-                tick.move(to: point(mark.p))
-                tick.addLine(to: point(mark.p, inset: underPointer ? 25 : 20))
-                context.stroke(tick, with: .color(inkColor.opacity(f * 0.88)), lineWidth: underPointer ? 2.4 : 1.8)
-            }
-
-            // Fixed index at the crown of the dial.
-            var index = Path()
-            index.move(to: CGPoint(x: cx - 7, y: 8))
-            index.addLine(to: CGPoint(x: cx + 7, y: 8))
-            index.addLine(to: CGPoint(x: cx, y: 19))
-            index.closeSubpath()
-            context.fill(index, with: .color(accentRed))
+            drawDial(context: &context, size: size)
         }
         .clipped()
+    }
+
+    private func drawDial(context: inout GraphicsContext, size: CGSize) {
+        let depthSpan = max(far - near, 0.015)
+        let scale = min(max(Double(size.width) * 0.72 / depthSpan, 150.0), 1200.0)
+        let geometry = FocusDialGeometry(
+            position: position,
+            radius: max(size.height * 0.48, 1),
+            baseline: size.height * 0.91,
+            centerX: size.width / 2,
+            pointsPerUnit: CGFloat(scale),
+            fadeWidth: max(28, size.width * 0.22),
+            width: size.width
+        )
+
+        drawArc(context: &context, geometry: geometry)
+        drawGraduations(context: &context, geometry: geometry)
+        drawDistanceMarks(context: &context, geometry: geometry)
+        drawIndex(context: &context, centerX: geometry.centerX)
+    }
+
+    private func drawArc(context: inout GraphicsContext, geometry: FocusDialGeometry) {
+        var arc = Path()
+        for step in 0...48 {
+            let offset = Double(step) / 48.0
+            let span = 2.3 * Double(geometry.radius) / Double(geometry.pointsPerUnit)
+            let p = geometry.position + offset * span - span / 2
+            let point = geometry.point(for: p)
+            if step == 0 {
+                arc.move(to: point)
+            } else {
+                arc.addLine(to: point)
+            }
+        }
+        context.stroke(arc, with: .color(inkColor.opacity(0.22)), lineWidth: 1)
+    }
+
+    private func drawGraduations(context: inout GraphicsContext, geometry: FocusDialGeometry) {
+        for index in 0...60 {
+            let value = Double(index) / 60.0
+            if isEngravedMark(value) { continue }
+
+            let visibleOpacity = geometry.opacity(for: value)
+            guard visibleOpacity > 0 else { continue }
+
+            let isMajor = index.isMultiple(of: 5)
+            let tickLength: CGFloat = isMajor ? 18 : 10
+            var tick = Path()
+            tick.move(to: geometry.point(for: value))
+            tick.addLine(to: geometry.point(for: value, inset: tickLength))
+            let weight: CGFloat = isMajor ? 1.7 : 1.2
+            let tint = inkColor.opacity(visibleOpacity * 0.78)
+            context.stroke(tick, with: .color(tint), lineWidth: weight)
+        }
+    }
+
+    private func isEngravedMark(_ value: Double) -> Bool {
+        for mark in marks where abs(mark.p - value) < 0.003 {
+            return true
+        }
+        return false
+    }
+
+    private func drawDistanceMarks(context: inout GraphicsContext, geometry: FocusDialGeometry) {
+        for mark in marks {
+            let visibleOpacity = geometry.opacity(for: mark.p)
+            guard visibleOpacity > 0 else { continue }
+
+            let underPointer = abs(mark.p - position) < 0.018
+            let anchor = geometry.point(for: mark.p, inset: 31)
+            let fontSize: CGFloat = underPointer ? 42 : 29
+            let labelText = Text(mark.label)
+                .font(AppTypography.bold(size: fontSize))
+                .foregroundColor(inkColor.opacity(visibleOpacity))
+            let resolvedLabel = context.resolve(labelText)
+            context.draw(resolvedLabel, at: anchor, anchor: .center)
+
+            let inset: CGFloat = underPointer ? 25 : 20
+            var tick = Path()
+            tick.move(to: geometry.point(for: mark.p))
+            tick.addLine(to: geometry.point(for: mark.p, inset: inset))
+            let tickWidth: CGFloat = underPointer ? 2.4 : 1.8
+            let tickColor = inkColor.opacity(visibleOpacity * 0.88)
+            context.stroke(tick, with: .color(tickColor), lineWidth: tickWidth)
+        }
+    }
+
+    private func drawIndex(context: inout GraphicsContext, centerX: CGFloat) {
+        var index = Path()
+        index.move(to: CGPoint(x: centerX - 7, y: 8))
+        index.addLine(to: CGPoint(x: centerX + 7, y: 8))
+        index.addLine(to: CGPoint(x: centerX, y: 19))
+        index.closeSubpath()
+        context.fill(index, with: .color(accentRed))
     }
 }
 
