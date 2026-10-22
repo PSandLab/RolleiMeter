@@ -504,7 +504,15 @@ struct ScrubDial: View {
                 .tracking(1.2)
                 .foregroundStyle(mutedInk)
 
-            ValueRail(position: position, labels: labels, row: row)
+            ValueRail(
+                position: position,
+                labels: labels,
+                row: row,
+                size: 16.5,
+                weight: .bold,
+                shrink: 0.20,
+                alpha: { d in 0.28 + 0.72 * (1 - smoothstep(0.2, 2.3, d)) }
+            )
                 .frame(maxWidth: .infinity)
                 .frame(height: face)
                 .overlay(alignment: .trailing) {
@@ -561,11 +569,19 @@ struct ScrubDial: View {
 }
 
 /// The strip of values drawn inside a window. Everything is one piece: the number at the centre of
-/// the window is the same drawing as the numbers above and below it, only closer to the light.
+/// the window is the same drawing as the numbers above and below it, only nearer the light.
 private struct ValueRail: View, Animatable {
     var position: Double
     let labels: [String]
+    /// Points between two neighbouring values.
     let row: CGFloat
+    let size: CGFloat
+    let weight: Font.Weight
+    /// How much a value shrinks by the time it sits two rows away.
+    let shrink: CGFloat
+    var offsetX: CGFloat = 0
+    /// How much ink a value keeps, given how many rows it is from the pointer.
+    let alpha: (CGFloat) -> CGFloat
 
     var animatableData: Double {
         get { position }
@@ -573,25 +589,22 @@ private struct ValueRail: View, Animatable {
     }
 
     var body: some View {
-        Canvas { ctx, size in
-            let cx = size.width / 2
-            let midY = size.height / 2
-            let half = max(size.height / 2, 1)
+        Canvas { ctx, canvas in
+            let cx = canvas.width / 2 + offsetX
+            let midY = canvas.height / 2
             for i in labels.indices {
                 let d = CGFloat(Double(i) - position)
                 let y = midY + d * row
-                if y < -row || y > size.height + row { continue }
-                // Distance from the middle of the window, 0 at the pointer and 1 at the rim.
-                let r = min(abs(d * row) / half, 1.3)
-                let rim = 1 - smoothstep(0.70, 1.05, r)
-                if rim <= 0.02 { continue }
-                let near = 1 - smoothstep(0, 0.9, r)
+                if y < -row || y > canvas.height + row { continue }
+                let a = alpha(abs(d))
+                if a <= 0.02 { continue }
+                let scale = 1 - shrink * smoothstep(0, 1.6, abs(d))
                 let text = Text(labels[i])
-                    .font(AppTypography.mono(size: 16.5, weight: .bold))
-                    .foregroundColor(inkColor.opacity(rim * (0.34 + 0.66 * near)))
+                    .font(AppTypography.mono(size: size, weight: weight))
+                    .foregroundColor(inkColor.opacity(a))
                 var sub = ctx
                 sub.translateBy(x: cx, y: y)
-                sub.scaleBy(x: 1 - 0.22 * smoothstep(0, 0.95, r), y: 1 - 0.22 * smoothstep(0, 0.95, r))
+                sub.scaleBy(x: scale, y: scale)
                 sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
             }
         }
@@ -602,33 +615,6 @@ private struct ValueRail: View, Animatable {
 }
 
 // MARK: - Paper keys (the square buttons beside the shutter)
-
-/// A key standing off the plate: lit along its top-left edge, casting a soft shadow underneath.
-/// Pressed, it loses the light and sinks a little.
-struct PaperKeyStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: configuration.isPressed
-                            ? [Palette.bezelBottom, Palette.paper]
-                            : [Palette.bezelTop, Palette.bezelBottom],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .compositingGroup()
-                    .shadow(color: Palette.cast,
-                            radius: configuration.isPressed ? 1 : 3,
-                            x: 0, y: configuration.isPressed ? 0.5 : 2)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.975 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
-    }
-}
 
 /// A word-shaped key. Braun labels are printed words on the panel, not pictograms.
 struct SetKeyStyle: ButtonStyle {
@@ -720,7 +706,7 @@ struct ApertureDrum: View {
     /// Thickness of the bezel around the glass.
     private let bezel: CGFloat = 4
     /// Points of finger travel per stop.
-    private let pitch: CGFloat = 22
+    private let pitch: CGFloat = 18.5
     private let homeIndex = 3
 
     @State private var position: Double = 0
@@ -734,11 +720,19 @@ struct ApertureDrum: View {
     private var nearest: Int { min(max(Int(position.rounded()), 0), stopCount - 1) }
 
     var body: some View {
-        DrumFace(position: position, pitch: pitch)
-            .frame(width: width - bezel * 2, height: height - bezel * 2)
-            .modifier(WindowInset(radius: 11, bezel: bezel))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .gesture(dragGesture)
+        ZStack {
+            DrumFace(position: position, pitch: pitch)
+            // A small red mark against the stop you have set.
+            PointerTriangle()
+                .fill(accentRed)
+                .frame(width: 4.5, height: 9)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .offset(x: -3)
+        }
+        .frame(width: width - bezel * 2, height: height - bezel * 2)
+        .modifier(WindowInset(radius: 11, bezel: bezel))
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .gesture(dragGesture)
             .onAppear {
                 position = Double(index)
                 lastDetent = index
@@ -852,21 +846,24 @@ private struct DrumFace: View, Animatable {
 
     var body: some View {
         Canvas { ctx, size in
-            let cx = size.width / 2
+            // Optically centred in the space left of the pointer, not in the window.
+            let cx = size.width / 2 - 3.5
             let midY = size.height / 2
-            let half = max(size.height / 2, 1)
             for i in Rollei.stops.indices {
                 let d = CGFloat(Double(i) - position)
                 let y = midY + d * pitch
                 if y < -pitch || y > size.height + pitch { continue }
-                let r = min(abs(d * pitch) / half, 1.3)
-                let rim = 1 - smoothstep(0.68, 1.02, r)
-                if rim <= 0.02 { continue }
-                let near = 1 - smoothstep(0, 0.95, r)
+                let ad = abs(d)
+                // Three stops read clearly; the next two only show where the window cuts them, so
+                // you can see there is more of the ring above and below.
+                let near = 1 - smoothstep(0.30, 1.10, ad)
+                let mid = 1 - smoothstep(0.80, 1.90, ad)
+                let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
+                if a <= 0.02 { continue }
+                let scale = 1 - 0.26 * smoothstep(0, 1.6, ad)
                 let text = Text(Rollei.stops[i].label)
-                    .font(AppTypography.bold(size: 20))
-                    .foregroundColor(inkColor.opacity(rim * (0.34 + 0.66 * near)))
-                let scale = 1 - 0.26 * smoothstep(0, 0.98, r)
+                    .font(AppTypography.bold(size: 19.5))
+                    .foregroundColor(inkColor.opacity(a))
                 var sub = ctx
                 sub.translateBy(x: cx, y: y)
                 sub.scaleBy(x: scale, y: scale)
@@ -879,47 +876,112 @@ private struct DrumFace: View, Animatable {
     }
 }
 
-/// Metering mode drawn as a tiny sensor: a frame with a grid of weighted dots.
-/// Matrix: all cells, centre weighted. Highlight: one bright cell. Spot: a single ring.
-struct ModeGlyph: View {
-    let mode: MeterMode
+// MARK: - Metering mode
+
+/// The metering mode in a window of its own, turned the same way as the aperture. The names are the
+/// wheel: the mode in use sits at the pointer, the other two wait above and below it.
+struct MeterDrum: View {
+    let modes: [MeterMode]
+    /// The mode in use.
+    let index: Int
+    /// A mode picked by turning the wheel.
+    let onPick: (Int) -> Void
+    /// A tap. Steps on to the next mode.
+    let onTap: () -> Void
+
+    private let width: CGFloat = 82
+    private let height: CGFloat = 84
+    private let bezel: CGFloat = 4
+    /// Points of finger travel per mode.
+    private let pitch: CGFloat = 19
+
+    @State private var position: Double = 0
+    @State private var base: Double?
+    @State private var moved = false
+    @State private var lastDetent = -1
+
+    private var labels: [String] { modes.map { $0.title.uppercased() } }
+    private var nearest: Int { min(max(Int(position.rounded()), 0), max(modes.count - 1, 0)) }
 
     var body: some View {
-        Canvas { ctx, size in
-            let s: CGFloat = 22
-            let box = CGRect(x: (size.width - s) / 2, y: (size.height - s) / 2, width: s, height: s)
-            ctx.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(inkColor.opacity(0.78)), lineWidth: 1.3)
-
-            func dot(_ col: Int, _ row: Int, _ r: CGFloat, _ color: Color) {
-                let c = CGPoint(x: box.minX + s * (0.25 + 0.25 * CGFloat(col)), y: box.minY + s * (0.25 + 0.25 * CGFloat(row)))
-                ctx.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(color))
+        ValueRail(
+            position: position,
+            labels: labels,
+            row: pitch,
+            size: 12,
+            weight: .bold,
+            shrink: 0.20,
+            alpha: { d in
+                0.10 + 0.90 * (0.5 * (1 - smoothstep(0.8, 1.9, d)) + 0.5 * (1 - smoothstep(0.3, 1.1, d)))
             }
-
-            switch mode {
-            case .matrix:
-                for row in 0..<3 {
-                    for col in 0..<3 {
-                        let centre = row == 1 && col == 1
-                        dot(col, row, centre ? 2.4 : 1.3, inkColor.opacity(0.78))
-                    }
-                }
-            case .highlight:
-                for row in 0..<3 {
-                    for col in 0..<3 where !(row == 0 && col == 2) {
-                        dot(col, row, 1.3, inkColor.opacity(0.4))
-                    }
-                }
-                dot(2, 0, 2.8, accentRed)
-            case .spot:
-                let c = CGPoint(x: box.midX, y: box.midY)
-                ctx.stroke(Path(ellipseIn: CGRect(x: c.x - 4.6, y: c.y - 4.6, width: 9.2, height: 9.2)),
-                           with: .color(inkColor.opacity(0.78)), lineWidth: 1.3)
-                ctx.fill(Path(ellipseIn: CGRect(x: c.x - 1.3, y: c.y - 1.3, width: 2.6, height: 2.6)),
-                         with: .color(accentRed))
+        )
+        .frame(width: width - bezel * 2, height: height - bezel * 2)
+        .modifier(WindowInset(radius: 11, bezel: bezel))
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .gesture(dragGesture)
+        .onAppear {
+            position = Double(index)
+            lastDetent = index
+        }
+        .onChange(of: index) { newValue in
+            guard base == nil else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                position = Double(newValue)
             }
         }
-        .frame(width: 46, height: 46)
-        .accessibilityHidden(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Metering mode")
+        .accessibilityValue(modes.isEmpty ? "" : modes[nearest].title)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onPick(min(nearest + 1, modes.count - 1))
+            case .decrement: onPick(max(nearest - 1, 0))
+            @unknown default: break
+            }
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if base == nil {
+                    base = position
+                    moved = false
+                }
+                if !moved && abs(value.translation.height) > 4 { moved = true }
+                guard moved, let start = base else { return }
+                position = rubber(start - Double(value.translation.height / pitch))
+                detent()
+            }
+            .onEnded { value in
+                let start = base ?? position
+                let wasMoved = moved
+                base = nil
+                moved = false
+                if !wasMoved {
+                    onTap()
+                    return
+                }
+                let predicted = start - Double(value.predictedEndTranslation.height / pitch)
+                let target = Double(min(max(Int(rubber(predicted).rounded()), 0), max(modes.count - 1, 0)))
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
+                onPick(Int(target))
+            }
+    }
+
+    /// Past either end the wheel stretches a little and springs back.
+    private func rubber(_ v: Double) -> Double {
+        let hi = Double(max(modes.count - 1, 0))
+        if v < 0 { return max(-0.3, v * 0.3) }
+        if v > hi { return min(hi + 0.3, hi + (v - hi) * 0.3) }
+        return v
+    }
+
+    private func detent() {
+        let stop = nearest
+        guard stop != lastDetent else { return }
+        lastDetent = stop
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 }
 

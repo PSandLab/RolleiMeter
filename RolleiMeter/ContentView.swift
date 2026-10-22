@@ -58,9 +58,6 @@ struct ContentView: View {
     @State private var blink = false
     @State private var night = false
     @State private var nightSince: Date?
-    /// Brief name of the metering mode, shown beside its button after a change.
-    @State private var modeCaption: String?
-    @State private var captionToken = 0
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
@@ -464,18 +461,28 @@ struct ContentView: View {
 
     // MARK: - Metering mode
 
-    /// What the metering key shows: spot wins while a spot is placed, otherwise matrix or highlight.
+    /// The order the wheel turns in: matrix, then highlight, then spot, then round again.
+    private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
+
+    /// What the wheel shows: spot wins while a spot is placed, otherwise matrix or highlight.
     private var meterChoice: MeterMode { spotActive ? .spot : baseMode }
 
-    /// Matrix, then highlight, then spot, then round again.
+    private var meterIndex: Int { meterModes.firstIndex(of: meterChoice) ?? 0 }
+
+    /// A mode turned to on the wheel.
+    private func pickMeterMode(_ index: Int) {
+        let next = meterModes[min(max(index, 0), meterModes.count - 1)]
+        guard next != meterChoice else { return }
+        applyMeterMode(next)
+    }
+
+    /// A tap on the wheel: one step on.
     private func cycleMeterMode() {
         UISelectionFeedbackGenerator().selectionChanged()
-        let next: MeterMode
-        switch meterChoice {
-        case .matrix: next = .highlight
-        case .highlight: next = .spot
-        case .spot: next = .matrix
-        }
+        applyMeterMode(meterModes[(meterIndex + 1) % meterModes.count])
+    }
+
+    private func applyMeterMode(_ next: MeterMode) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
             if next == .spot {
                 spotActive = true
@@ -485,17 +492,6 @@ struct ContentView: View {
             }
         }
         unfreeze()
-        showCaption(next.title.uppercased())
-    }
-
-    private func showCaption(_ text: String) {
-        captionToken += 1
-        let token = captionToken
-        withAnimation(.easeOut(duration: 0.2)) { modeCaption = text }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            guard token == captionToken else { return }
-            withAnimation(.easeOut(duration: 0.35)) { modeCaption = nil }
-        }
     }
 
     // MARK: - Controls
@@ -508,31 +504,12 @@ struct ContentView: View {
 
             HStack(spacing: 0) {
                 // Metering lives on the left, under the EV badge it belongs to.
-                Button {
-                    cycleMeterMode()
-                } label: {
-                    ZStack {
-                        ModeGlyph(mode: meterChoice)
-                            .id(meterChoice)
-                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                    }
-                    .frame(width: 60, height: 84)
-                }
-                .buttonStyle(PaperKeyStyle())
-                .accessibilityLabel("Metering mode, \(meterChoice.title)")
-                .accessibilityHint("Tap to change between matrix, highlight and spot")
-
-                if let modeCaption {
-                    Text(modeCaption)
-                        .font(AppTypography.next(size: 11, weight: .medium))
-                        .tracking(1)
-                        .foregroundStyle(Palette.mutedInk)
-                        .padding(.leading, 10)
-                        .transition(.opacity)
-                        .contentTransition(.opacity)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
+                MeterDrum(
+                    modes: meterModes,
+                    index: meterIndex,
+                    onPick: pickMeterMode,
+                    onTap: cycleMeterMode
+                )
 
                 Spacer(minLength: 0)
 
