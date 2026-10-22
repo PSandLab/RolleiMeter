@@ -23,6 +23,8 @@ enum Palette {
     static let hairline = dynamic(0xD4D0C7, 0x3B3935)
     static let accent = dynamic(0xB32631, 0xE2575F)
     static let green = dynamic(0x4C6B52, 0x86AE8D)
+    /// Correct exposure, but too slow to hand-hold. Sits between green and red.
+    static let amber = dynamic(0x8F5C15, 0xD8A24E)
 
     /// Soft top edge light on panels.
     static let highlight = Color(UIColor { trait in

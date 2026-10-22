@@ -11,6 +11,7 @@ private let accentRed = Palette.accent
 private let goldenGreen = Palette.green
 private let warnRed = accentRed
 private let inRangeGreen = goldenGreen
+private let warningAmber = Palette.amber
 
 /// Paper panel: hairline edge, a faint light edge along the top, and a very soft shadow.
 struct Panel: ViewModifier {
@@ -143,8 +144,6 @@ private struct SimpleApertureColumn: View {
     let iso: Double
     let comp: Double
     let aperture: (label: String, n: Double)
-    let symbol: String
-    let onSelect: () -> Void
 
     private var idealTime: Double {
         Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
@@ -157,15 +156,11 @@ private struct SimpleApertureColumn: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Spacer(minLength: 0)
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .regular))
-                Text("f/" + aperture.label)
-                    .font(AppTypography.font(size: 15, weight: .medium))
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(paper)
+            Text("SHUTTER")
+                .font(AppTypography.next(size: 12, weight: .medium))
+                .tracking(0.9)
+                .foregroundStyle(paper)
+                .frame(maxWidth: .infinity)
             Spacer(minLength: 10)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 if reading.deviation == nil {
@@ -197,12 +192,14 @@ private struct SimpleApertureColumn: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(minHeight: 174, maxHeight: 174)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
-        .background(outOfRange ? accentRed : inRangeGreen)
+        .background(outOfRange ? accentRed : (slow ? warningAmber : inRangeGreen))
     }
 
     private var outOfRange: Bool { reading.deviation != nil }
+
+    /// Correct exposure, but slower than the hand-holdable line. Amber, not red: nothing is wrong
+    /// with the exposure, only with your chances of holding it still.
+    private var slow: Bool { reading.deviation == nil && reading.isSlow }
 }
 
 struct SimpleExposurePair: View {
@@ -213,7 +210,6 @@ struct SimpleExposurePair: View {
     let distance: Double?
     let tooClose: Bool
     let feet: Bool
-    let onToggleAperture: () -> Void
 
     private var activeAperture: (label: String, n: Double) {
         Rollei.stops[apertureIndex]
@@ -221,7 +217,7 @@ struct SimpleExposurePair: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: activeAperture, symbol: "camera.aperture", onSelect: onToggleAperture)
+            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: activeAperture)
             Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
             SimpleFocusColumn(
                 distance: distance,
@@ -549,6 +545,255 @@ struct PaperKeyStyle: ButtonStyle {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+/// A word-shaped key. Braun labels are printed words on the panel, not pictograms.
+struct SetKeyStyle: ButtonStyle {
+    let active: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(active ? Palette.ink : (configuration.isPressed ? Palette.hairline : Palette.paper))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Palette.ink.opacity(active ? 0 : 0.16), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Aperture drum
+
+/// What the auto light is saying.
+enum AutoLampState {
+    case off, good, slow, bad
+}
+
+/// The LED beside the drum. Green while the ring has room to work, amber when it is pinned wide
+/// open and the shutter has slipped past the hand-holdable line, red when even f/22 can't save it.
+struct AutoLamp: View {
+    let state: AutoLampState
+
+    private var color: Color {
+        switch state {
+        case .off: return Color.clear
+        case .good: return Palette.green
+        case .slow: return Palette.amber
+        case .bad: return Palette.accent
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .shadow(color: color.opacity(0.55), radius: 3)
+            Text("A")
+                .font(AppTypography.next(size: 8, weight: .medium))
+                .tracking(0.6)
+                .foregroundStyle(state == .off ? Color.clear : Palette.mutedInk)
+        }
+        .frame(width: 16, alignment: .leading)
+        .opacity(state == .off ? 0 : 1)
+        .animation(.easeOut(duration: 0.18), value: state)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The vertical aperture wheel in the bottom-right corner. The chosen stop sits in a fixed window
+/// and the strip turns behind it. Tap hands the aperture to the meter; a drag takes it back.
+struct ApertureDrum: View {
+    /// The stop the app wants shown: your choice, or auto's answer.
+    let index: Int
+    let auto: Bool
+    /// A stop picked by hand. Always leaves auto.
+    let onPick: (Int) -> Void
+    let onTap: () -> Void
+    /// Long press: back to f/8.
+    let onHome: () -> Void
+
+    private let width: CGFloat = 60
+    private let height: CGFloat = 84
+    /// Points of finger travel per stop.
+    private let pitch: CGFloat = 28
+    private let homeIndex = 3
+
+    @State private var position: Double = 0
+    @State private var base: Double?
+    @State private var moved = false
+    @State private var longPressFired = false
+    @State private var pressToken = 0
+    @State private var lastDetent = -1
+
+    private var stopCount: Int { Rollei.stops.count }
+    private var nearest: Int { min(max(Int(position.rounded()), 0), stopCount - 1) }
+
+    var body: some View {
+        ZStack {
+            DrumTicks(position: position, pitch: pitch)
+                .allowsHitTesting(false)
+
+            Text(Rollei.stops[nearest].label)
+                .font(AppTypography.bold(size: 32))
+                .foregroundStyle(inkColor)
+                .contentTransition(.numericText())
+                .animation(.smooth(duration: 0.15), value: nearest)
+                .allowsHitTesting(false)
+        }
+        .frame(width: width, height: height)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(paper)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(inkColor.opacity(0.16), lineWidth: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
+                    lineWidth: 1
+                )
+                .padding(1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .gesture(dragGesture)
+        .onAppear {
+            position = Double(index)
+            lastDetent = index
+        }
+        .onChange(of: index) { newValue in
+            guard base == nil else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                position = Double(newValue)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Aperture")
+        .accessibilityValue("f/" + Rollei.stops[nearest].label + (auto ? ", auto" : ", manual"))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onPick(min(nearest + 1, stopCount - 1))
+            case .decrement: onPick(max(nearest - 1, 0))
+            @unknown default: break
+            }
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if base == nil {
+                    base = position
+                    moved = false
+                    longPressFired = false
+                    scheduleHome()
+                }
+                guard !longPressFired else { return }
+                if !moved && abs(value.translation.height) > 4 {
+                    moved = true
+                    pressToken += 1      // the finger is scrolling, not holding
+                }
+                guard moved, let start = base else { return }
+                position = rubber(start - Double(value.translation.height / pitch))
+                detent()
+            }
+            .onEnded { value in
+                pressToken += 1
+                let start = base ?? position
+                let wasMoved = moved
+                let fired = longPressFired
+                base = nil
+                moved = false
+                longPressFired = false
+
+                if fired { return }
+                if !wasMoved {
+                    onTap()
+                    return
+                }
+                let predicted = start - Double(value.predictedEndTranslation.height / pitch)
+                let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
+                detent()
+                onPick(Int(target))
+            }
+    }
+
+    /// Past either end the drum stretches a little and springs back.
+    private func rubber(_ v: Double) -> Double {
+        let lo = 0.0
+        let hi = Double(stopCount - 1)
+        if v < lo { return max(lo - 0.35, lo - (lo - v) * 0.3) }
+        if v > hi { return min(hi + 0.35, hi + (v - hi) * 0.3) }
+        return v
+    }
+
+    private func detent() {
+        let stop = nearest
+        guard stop != lastDetent else { return }
+        lastDetent = stop
+        if stop == homeIndex {
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+        } else {
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+    }
+
+    /// Held still for a moment: the ring goes home to f/8.
+    private func scheduleHome() {
+        pressToken += 1
+        let token = pressToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            guard token == pressToken, base != nil, !moved else { return }
+            longPressFired = true
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                position = Double(homeIndex)
+            }
+            lastDetent = homeIndex
+            onHome()
+        }
+    }
+}
+
+/// The neighbouring stops, scrolling behind the fixed window. The one at the centre is hidden —
+/// the big number lives there instead.
+private struct DrumTicks: View, Animatable {
+    var position: Double
+    let pitch: CGFloat
+
+    var animatableData: Double {
+        get { position }
+        set { position = newValue }
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let midY = size.height / 2
+            for i in Rollei.stops.indices {
+                let d = Double(i) - position
+                if abs(d) > 1.8 { continue }
+                let inner = min(max((abs(d) - 0.5) / 0.5, 0), 1)
+                let edge = min(max((1.6 - abs(d)) / 0.5, 0), 1)
+                let alpha = 0.36 * inner * edge
+                if alpha <= 0.01 { continue }
+                let label = Text(Rollei.stops[i].label)
+                    .font(AppTypography.mono(size: 13, weight: .medium))
+                    .foregroundColor(inkColor.opacity(alpha))
+                let y = midY + CGFloat(d) * pitch
+                context.draw(context.resolve(label), at: CGPoint(x: size.width / 2, y: y), anchor: .center)
+            }
+        }
+        .clipped()
     }
 }
 

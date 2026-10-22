@@ -32,7 +32,8 @@ struct ContentView: View {
     @AppStorage("evIndex") private var evIndex = 6        // 0 compensation
     @AppStorage("useDIN") private var useDIN = false
     @AppStorage("useFeet") private var useFeet = false
-    @AppStorage("simpleAperture") private var simpleAperture = 0   // 0 = f/2.8, 3 = f/8
+    @AppStorage("simpleAperture") private var apertureStop = 0     // 0 = f/2.8 … 6 = f/22
+    @AppStorage("autoAperture") private var autoAperture = false
     @AppStorage("calibration") private var calibration = 0.0
     /// Metres from the phone (held at a natural distance) back to the eye. Added silently to LiDAR readings.
     @AppStorage("armOffset") private var armOffset = 0.0
@@ -63,8 +64,23 @@ struct ContentView: View {
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
-    /// The two apertures the app offers: f/2.8 and f/8.
-    private var apertureIndex: Int { simpleAperture == 3 ? 3 : 0 }
+    /// The stop on the drum.
+    private var apertureIndex: Int { min(max(apertureStop, 0), Rollei.stops.count - 1) }
+
+    /// Auto: the widest stop whose shutter is no faster than the camera's top speed. Wider always
+    /// means faster, so it is the first stop from f/2.8 that isn't blown.
+    private var autoApertureIndex: Int {
+        let reading = ev
+        for i in Rollei.stops.indices {
+            let t = Exposure.idealShutter(ev100: reading, iso: iso, comp: comp, n: Rollei.stops[i].n)
+            if t >= Rollei.fastest { return i }
+        }
+        return Rollei.stops.count - 1
+    }
+
+    /// What the drum, the shutter panel and the focus scale all agree on.
+    private var resolvedApertureIndex: Int { autoAperture ? autoApertureIndex : apertureIndex }
+    private var resolvedAperture: (label: String, n: Double) { Rollei.stops[resolvedApertureIndex] }
 
     private var iso: Double { Double(ISOScale.values[safeISOIndex]) }
     private var comp: Double { EVComp.values[safeEVIndex] }
@@ -87,7 +103,7 @@ struct ContentView: View {
 
     private var advice: FocusAdvice? {
         guard let d = shownDistance, d >= Focus.nearest else { return nil }
-        return Focus.advice(subject: d, aperture: Rollei.stops[apertureIndex].n, feet: useFeet)
+        return Focus.advice(subject: d, aperture: resolvedAperture.n, feet: useFeet)
     }
 
     var body: some View {
@@ -110,9 +126,8 @@ struct ContentView: View {
 
             SimpleExposurePair(
                 damp: evDamp, iso: iso, comp: comp,
-                apertureIndex: apertureIndex,
-                distance: shownDistance, tooClose: tooClose, feet: useFeet,
-                onToggleAperture: toggleSimpleAperture
+                apertureIndex: resolvedApertureIndex,
+                distance: shownDistance, tooClose: tooClose, feet: useFeet
             )
 
             controls
@@ -215,18 +230,28 @@ struct ContentView: View {
         frozenPreviewImage = nil
     }
 
-    private func resetFocusToCenter() {
-        focusBuf = CGPoint(x: 0.5, y: 0.5)
-        focusPulse &+= 1
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) {
-            focus = CGPoint(x: 0.5, y: 0.5)
+    /// A stop picked by hand. Touching the drum always means "I'll take it".
+    private func pickAperture(_ index: Int) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+            autoAperture = false
+            apertureStop = min(max(index, 0), Rollei.stops.count - 1)
         }
     }
 
-    private func toggleSimpleAperture() {
-        simpleAperture = simpleAperture == 0 ? 3 : 0
+    private func toggleAutoAperture() {
         UISelectionFeedbackGenerator().selectionChanged()
-        resetFocusToCenter()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            autoAperture.toggle()
+        }
+    }
+
+    private func returnHomeAperture() {
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            autoAperture = false
+            apertureStop = 3
+        }
     }
 
     /// The camera frame is 3:4 and the viewfinder fills its box, cropping whatever overflows.
@@ -390,12 +415,43 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 12) {
             EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
             Spacer(minLength: 12)
+            trayKey
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
+    }
+
+    /// The tray key. A printed word, not a pictogram.
+    private var trayKey: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                trayOpen.toggle()
+            }
+        } label: {
+            Text("SET")
+                .font(AppTypography.next(size: 10, weight: .medium))
+                .tracking(1.3)
+                .foregroundStyle(trayOpen ? Palette.paper : Palette.ink.opacity(0.78))
+                .frame(width: 46, height: 46)
+                .overlay(alignment: .topTrailing) {
+                    // A small red dot while exposure compensation is on, so it can't be forgotten.
+                    if safeEVIndex != EVComp.zeroIndex && !trayOpen {
+                        Circle()
+                            .fill(Palette.accent)
+                            .frame(width: 7, height: 7)
+                            .offset(x: -5, y: 5)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
+        }
+        .buttonStyle(SetKeyStyle(active: trayOpen))
+        .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
+        .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
     }
 
     // MARK: - Metering mode
@@ -443,45 +499,7 @@ struct ContentView: View {
             }
 
             HStack(spacing: 0) {
-                Button {
-                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                        trayOpen.toggle()
-                    }
-                } label: {
-                    Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Palette.ink.opacity(0.78))
-                        .frame(width: 46, height: 46)
-                        .overlay(alignment: .topTrailing) {
-                            // A small red dot while exposure compensation is on, so it can't be forgotten.
-                            if safeEVIndex != EVComp.zeroIndex && !trayOpen {
-                                Circle()
-                                    .fill(Palette.accent)
-                                    .frame(width: 7, height: 7)
-                                    .offset(x: -5, y: 5)
-                                    .transition(.scale.combined(with: .opacity))
-                            }
-                        }
-                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
-                }
-                .buttonStyle(PaperKeyStyle())
-                .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
-                .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
-
-                Spacer(minLength: 0)
-
-                if let modeCaption {
-                    Text(modeCaption)
-                        .font(AppTypography.next(size: 11, weight: .medium))
-                        .tracking(1)
-                        .foregroundStyle(Palette.mutedInk)
-                        .padding(.trailing, 10)
-                        .transition(.opacity)
-                        .contentTransition(.opacity)
-                        .accessibilityHidden(true)
-                }
-
+                // Metering lives on the left, under the EV badge it belongs to.
                 Button {
                     cycleMeterMode()
                 } label: {
@@ -490,12 +508,48 @@ struct ContentView: View {
                             .id(meterChoice)
                             .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
-                    .frame(width: 46, height: 46)
+                    .frame(width: 60, height: 84)
                 }
                 .buttonStyle(PaperKeyStyle())
                 .accessibilityLabel("Metering mode, \(meterChoice.title)")
                 .accessibilityHint("Tap to change between matrix, highlight and spot")
+
+                if let modeCaption {
+                    Text(modeCaption)
+                        .font(AppTypography.next(size: 11, weight: .medium))
+                        .tracking(1)
+                        .foregroundStyle(Palette.mutedInk)
+                        .padding(.leading, 10)
+                        .transition(.opacity)
+                        .contentTransition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+
+                Spacer(minLength: 0)
+
+                // Aperture lives on the right, under the tray key.
+                HStack(spacing: 6) {
+                    AutoLamp(state: autoLampState)
+                    ApertureDrum(
+                        index: resolvedApertureIndex,
+                        auto: autoAperture,
+                        onPick: pickAperture,
+                        onTap: toggleAutoAperture,
+                        onHome: returnHomeAperture
+                    )
+                }
             }
         }
+    }
+
+    /// The lamp repeats the shutter panel's verdict beside your thumb.
+    private var autoLampState: AutoLampState {
+        guard autoAperture else { return .off }
+        let t = Exposure.idealShutter(ev100: ev, iso: iso, comp: comp,
+                                      n: resolvedAperture.n)
+        let reading = Exposure.result(for: t)
+        if reading.deviation != nil { return .bad }
+        return reading.isSlow ? .slow : .good
     }
 }
