@@ -11,18 +11,17 @@ private let accentRed = Palette.accent
 private let goldenGreen = Palette.green
 private let warnRed = accentRed
 
-// Clean, functional Braun panel with honest hairline borders
 struct Panel: ViewModifier {
     var stroke: Color = Palette.hairline
     var lineWidth: CGFloat = 1
 
     func body(content: Content) -> some View {
         content.background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Palette.paper)
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(stroke, lineWidth: lineWidth))
                 .compositingGroup()
-                .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
+                .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 4)
         }
     }
 }
@@ -33,8 +32,7 @@ private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGF
     return t * t * (3 - 2 * t)
 }
 
-// Precision recessed well inspired by Braun calculator displays
-private struct WindowInset: ViewModifier {
+struct WindowInset: ViewModifier {
     var radius: CGFloat = 8
     var bezel: CGFloat = 3
 
@@ -47,7 +45,7 @@ private struct WindowInset: ViewModifier {
                     .fill(Palette.well)
                     .overlay {
                         RoundedRectangle(cornerRadius: inner, style: .continuous)
-                            .strokeBorder(Palette.ink.opacity(0.08), lineWidth: 1)
+                            .strokeBorder(Palette.ink.opacity(0.06), lineWidth: 1)
                     }
             }
             .padding(bezel)
@@ -61,7 +59,7 @@ private struct WindowInset: ViewModifier {
                     .strokeBorder(Palette.hairline, lineWidth: 1)
             }
             .compositingGroup()
-            .shadow(color: Palette.cast, radius: 3, x: 0, y: 1)
+            .shadow(color: Palette.cast, radius: 2, x: 0, y: 1)
     }
 }
 
@@ -479,16 +477,16 @@ private struct FocusDialFace: View, Animatable {
     }
 }
 
-// MARK: - Scrub dial
+// MARK: - Braun Horizontal Radio Tuning Scale (Free Horizontal Scroll)
 
-struct ScrubDial: View {
+struct HorizontalScrubDial: View {
     let title: String
     @Binding var selection: Int
     let labels: [String]
     var resetIndex: Int? = nil
 
-    private let row: CGFloat = 15.5
-    private let face: CGFloat = 78
+    private let pitch: CGFloat = 52
+    private let height: CGFloat = 58
 
     @State private var base: Int?
     @State private var drag: CGFloat = 0
@@ -497,43 +495,44 @@ struct ScrubDial: View {
 
     private var position: Double {
         guard let base else { return Double(safeSelection) }
-        return min(max(Double(base) - Double(drag / row), 0), Double(max(labels.count - 1, 0)))
+        return min(max(Double(base) - Double(drag / pitch), 0), Double(max(labels.count - 1, 0)))
     }
 
     var body: some View {
-        VStack(spacing: 5) {
-            Text(title)
-                .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(1.2)
-                .foregroundStyle(mutedInk)
+        VStack(spacing: 3) {
+            HStack {
+                Text(title)
+                    .font(AppTypography.next(size: 10, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(Palette.mutedInk)
+                Spacer()
+                Text(labels.isEmpty ? "" : labels[safeSelection])
+                    .font(AppTypography.mono(size: 11, weight: .bold))
+                    .foregroundStyle(Palette.ink)
+            }
+            .padding(.horizontal, 4)
 
-            ValueRail(
-                position: position,
-                labels: labels,
-                row: row,
-                size: 16.5,
-                weight: .bold,
-                shrink: 0.20,
-                alpha: { d in 0.22 + 0.78 * (1 - smoothstep(0.10, 2.00, d)) }
-            )
-                .frame(maxWidth: .infinity)
-                .frame(height: face)
-                .overlay(alignment: .trailing) {
-                    PointerTriangle()
+            ZStack {
+                HorizontalValueRail(position: position, labels: labels, pitch: pitch)
+                    .frame(height: height)
+
+                // Clean Braun orange needle marker
+                VStack(spacing: 0) {
+                    Rectangle()
                         .fill(Palette.braunOrange)
-                        .frame(width: 7, height: 11)
-                        .padding(.trailing, 7)
+                        .frame(width: 2, height: 16)
+                    Spacer()
                 }
-                .modifier(WindowInset(radius: 10, bezel: 4))
+                .frame(height: height)
+            }
+            .modifier(WindowInset(radius: 8, bezel: 2))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     if base == nil { base = safeSelection }
-                    drag = value.translation.height
+                    drag = value.translation.width
                     let index = Int(position.rounded())
                     if index != selection {
                         selection = index
@@ -558,28 +557,13 @@ struct ScrubDial: View {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { selection = resetIndex }
             }
         )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(labels.isEmpty ? "" : labels[safeSelection])
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: selection = min(selection + 1, labels.count - 1)
-            case .decrement: selection = max(selection - 1, 0)
-            @unknown default: break
-            }
-        }
     }
 }
 
-private struct ValueRail: View, Animatable {
+private struct HorizontalValueRail: View, Animatable {
     var position: Double
     let labels: [String]
-    let row: CGFloat
-    let size: CGFloat
-    let weight: Font.Weight
-    let shrink: CGFloat
-    var offsetX: CGFloat = 0
-    let alpha: (CGFloat) -> CGFloat
+    let pitch: CGFloat
 
     var animatableData: Double {
         get { position }
@@ -587,57 +571,43 @@ private struct ValueRail: View, Animatable {
     }
 
     var body: some View {
-        Canvas { ctx, canvas in
-            let cx = canvas.width / 2 + offsetX
-            let midY = canvas.height / 2
+        Canvas { ctx, size in
+            let cx = size.width / 2
+            let tickBaseline: CGFloat = 20
+            let textBaseline: CGFloat = 42
+            let fadeWidth: CGFloat = 40
+
+            func fade(_ px: CGFloat) -> Double {
+                let edge = min(px, size.width - px)
+                return Double(min(max(edge / fadeWidth, 0), 1))
+            }
+
             for i in labels.indices {
                 let d = CGFloat(Double(i) - position)
-                let y = midY + d * row
-                if y < -row || y > canvas.height + row { continue }
-                let a = alpha(abs(d))
-                if a <= 0.02 { continue }
-                let scale = 1 - shrink * smoothstep(0, 1.6, abs(d))
+                let x = cx + d * pitch
+                if x < -pitch || x > size.width + pitch { continue }
+                let f = fade(x)
+                if f <= 0.02 { continue }
+
+                // Major tick under each value
+                var tick = Path()
+                tick.move(to: CGPoint(x: x, y: 0))
+                tick.addLine(to: CGPoint(x: x, y: tickBaseline))
+                ctx.stroke(tick, with: .color(Palette.mutedInk.opacity(f * 0.7)), lineWidth: 1.2)
+
+                let isSelected = abs(d) < 0.4
                 let text = Text(labels[i])
-                    .font(AppTypography.mono(size: size, weight: weight))
-                    .foregroundColor(Palette.engraved.opacity(a))
-                var sub = ctx
-                sub.translateBy(x: cx, y: y)
-                sub.scaleBy(x: scale, y: scale)
-                sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
+                    .font(AppTypography.mono(size: isSelected ? 13 : 11, weight: isSelected ? .bold : .medium))
+                    .foregroundColor(Palette.engraved.opacity(f * (isSelected ? 1.0 : 0.6)))
+                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: textBaseline), anchor: .center)
             }
         }
         .clipped()
         .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
-struct SetKeyStyle: ButtonStyle {
-    let active: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Palette.bezelTop)
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Palette.ink)
-                        .opacity(active ? 1 : 0)
-                }
-                .compositingGroup()
-                .shadow(color: Palette.cast, radius: active ? 1 : 3, x: 0, y: active ? 0.5 : 1)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Palette.hairline, lineWidth: 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.95 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
-            .animation(.easeOut(duration: 0.2), value: active)
-    }
-}
+// MARK: - Aperture drum
 
 enum AutoLampState {
     case off, good, slow, bad
@@ -716,16 +686,6 @@ struct ApertureDrum: View {
                 guard base == nil else { return }
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                     position = Double(newValue)
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Aperture")
-            .accessibilityValue("f/" + Rollei.stops[nearest].label + (auto ? ", auto" : ", manual"))
-            .accessibilityAdjustableAction { direction in
-                switch direction {
-                case .increment: onPick(min(nearest + 1, stopCount - 1))
-                case .decrement: onPick(max(nearest - 1, 0))
-                @unknown default: break
                 }
             }
     }
@@ -839,7 +799,6 @@ private struct DrumFace: View, Animatable {
         }
         .clipped()
         .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
@@ -865,17 +824,28 @@ struct MeterDrum: View {
     private var nearest: Int { min(max(Int(position.rounded()), 0), max(modes.count - 1, 0)) }
 
     var body: some View {
-        ValueRail(
-            position: position,
-            labels: labels,
-            row: pitch,
-            size: 13.5,
-            weight: .bold,
-            shrink: 0.20,
-            alpha: { d in
-                0.10 + 0.90 * (0.5 * (1 - smoothstep(0.8, 1.9, d)) + 0.5 * (1 - smoothstep(0.3, 1.1, d)))
+        Canvas { ctx, canvas in
+            let cx = canvas.width / 2
+            let midY = canvas.height / 2
+            for i in labels.indices {
+                let d = CGFloat(Double(i) - position)
+                let y = midY + d * pitch
+                if y < -pitch || y > canvas.height + pitch { continue }
+                let ad = abs(d)
+                let near = 1 - smoothstep(0.30, 1.10, ad)
+                let mid = 1 - smoothstep(0.80, 1.90, ad)
+                let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
+                if a <= 0.02 { continue }
+                let scale = 1 - 0.20 * smoothstep(0, 1.6, ad)
+                let text = Text(labels[i])
+                    .font(AppTypography.bold(size: 13.5))
+                    .foregroundColor(Palette.engraved.opacity(a))
+                var sub = ctx
+                sub.translateBy(x: cx, y: y)
+                sub.scaleBy(x: scale, y: scale)
+                sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
             }
-        )
+        }
         .frame(width: width - bezel * 2, height: height - bezel * 2)
         .modifier(WindowInset(radius: 8, bezel: bezel))
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -888,16 +858,6 @@ struct MeterDrum: View {
             guard base == nil else { return }
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                 position = Double(newValue)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Metering mode")
-        .accessibilityValue(modes.isEmpty ? "" : modes[nearest].title)
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: onPick(min(nearest + 1, modes.count - 1))
-            case .decrement: onPick(max(nearest - 1, 0))
-            @unknown default: break
             }
         }
     }
@@ -945,9 +905,9 @@ struct MeterDrum: View {
     }
 }
 
-// MARK: - Dieter Rams Iconic Frameless Orange Shutter Button
+// MARK: - Authentic Dieter Rams Shutter Button (Clean Solid Matte Orange, NO Glow, NO Icon)
 
-private struct PressStyle: ButtonStyle {
+struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
@@ -962,26 +922,21 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                // Pure frameless circular button in legendary Braun Orange
+                // Pure, solid, unadorned Braun Orange disc
                 Circle()
                     .fill(Palette.braunOrange)
-                    .frame(width: 70, height: 70)
-                    .shadow(color: Palette.braunOrange.opacity(frozen ? 0.25 : 0.40),
-                            radius: frozen ? 4 : 8, x: 0, y: frozen ? 1.5 : 3)
+                    .frame(width: 68, height: 68)
+                    // Honest, subtle neutral physical contact shadow (NO glowing halo)
+                    .shadow(color: Color.black.opacity(frozen ? 0.08 : 0.16),
+                            radius: frozen ? 2 : 4, x: 0, y: frozen ? 1 : 2)
 
-                // Crisp molded matte rim highlight
+                // Precision micro-bevel edge
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-                    .frame(width: 70, height: 70)
-
-                Image(systemName: frozen ? "pause.fill" : "viewfinder")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .contentTransition(.symbolEffect(.replace))
-                    .accessibilityHidden(true)
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    .frame(width: 68, height: 68)
             }
-            .scaleEffect(frozen ? 0.96 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: frozen)
+            .scaleEffect(frozen ? 0.94 : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.75), value: frozen)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(frozen ? "Unfreeze exposure" : "Freeze exposure")

@@ -89,11 +89,34 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            topBar
-            preview
+        ZStack(alignment: .bottom) {
+            // Main interface: rock-solid layout so the camera preview layer never resizes or stutters!
+            VStack(spacing: 10) {
+                topBar
+                preview
+                SimpleExposurePair(
+                    damp: evDamp, iso: iso, comp: comp,
+                    apertureIndex: resolvedApertureIndex,
+                    distance: shownDistance,
+                    hasLiDAR: meter.hasLiDAR,
+                    tooClose: tooClose, feet: useFeet
+                )
+                controls
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
 
+            // Settings drawer: slides smoothly over the bottom tiles without moving the camera!
             if trayOpen {
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            trayOpen = false
+                        }
+                    }
+                    .transition(.opacity)
+
                 ControlTray(
                     evIndex: $evIndex,
                     isoIndex: $isoIndex,
@@ -101,23 +124,18 @@ struct ContentView: View {
                     useFeet: $useFeet,
                     calibration: $calibration,
                     armOffset: $armOffset,
-                    rawDistance: { meter.distance }
+                    rawDistance: { meter.distance },
+                    onClose: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                            trayOpen = false
+                        }
+                    }
                 )
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-
-            SimpleExposurePair(
-                damp: evDamp, iso: iso, comp: comp,
-                apertureIndex: resolvedApertureIndex,
-                distance: shownDistance,
-                hasLiDAR: meter.hasLiDAR,
-                tooClose: tooClose, feet: useFeet
-            )
-
-            controls
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PaperBackground().ignoresSafeArea())
         .preferredColorScheme(night ? .dark : .light)
@@ -141,7 +159,6 @@ struct ContentView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             meter.stop()
         }
-        // Fix Battery Vampire Bug: stops camera when locked or backgrounded
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 UIApplication.shared.isIdleTimerDisabled = true
@@ -270,7 +287,6 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 } else if frozenEV != nil {
-                    // Visual fallback to ensure preview looks paused even if raw buffer was busy
                     Color.black.opacity(0.35)
                         .allowsHitTesting(false)
                 }
@@ -421,6 +437,7 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
     }
 
+    // Dieter Rams circular tactile push button with precision indicator dot
     private var trayKey: some View {
         Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
@@ -428,25 +445,28 @@ struct ContentView: View {
                 trayOpen.toggle()
             }
         } label: {
-            Text("SET")
-                .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(1.3)
-                .foregroundStyle(trayOpen ? Palette.paper : Palette.ink.opacity(0.78))
-                .frame(width: 46, height: 46)
-                .overlay(alignment: .topTrailing) {
-                    if safeEVIndex != EVComp.zeroIndex && !trayOpen {
-                        Circle()
-                            .fill(Palette.accent)
-                            .frame(width: 7, height: 7)
-                            .offset(x: -5, y: 5)
-                            .transition(.scale.combined(with: .opacity))
-                    }
+            ZStack {
+                Circle()
+                    .fill(trayOpen ? Palette.ink : Palette.paper)
+                    .frame(width: 40, height: 40)
+                    .overlay(Circle().stroke(Palette.hairline, lineWidth: 1))
+                    .shadow(color: Palette.cast, radius: 2, x: 0, y: 1)
+
+                Text("SET")
+                    .font(AppTypography.next(size: 11, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(trayOpen ? Palette.paper : Palette.ink)
+
+                if safeEVIndex != EVComp.zeroIndex && !trayOpen {
+                    Circle()
+                        .fill(Palette.braunOrange)
+                        .frame(width: 6, height: 6)
+                        .offset(x: 11, y: -11)
                 }
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: safeEVIndex == EVComp.zeroIndex)
+            }
         }
-        .buttonStyle(SetKeyStyle(active: trayOpen))
+        .buttonStyle(PressStyle())
         .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
-        .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]

@@ -9,6 +9,7 @@ struct ControlTray: View {
     @Binding var calibration: Double
     @Binding var armOffset: Double
     let rawDistance: () -> Double?
+    let onClose: () -> Void
 
     @State private var tab = 0
     @State private var armStage = 0
@@ -17,38 +18,40 @@ struct ControlTray: View {
     @Namespace private var tabNamespace
 
     var body: some View {
-        VStack(spacing: 4) {
-            tabs
+        VStack(spacing: 8) {
+            header
             if tab == 0 {
-                dials
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .top).combined(with: .opacity),
-                        removal: .move(edge: .bottom).combined(with: .opacity)
-                    ))
+                horizontalDials
             } else {
                 options
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .move(edge: .top).combined(with: .opacity)
-                    ))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
         .modifier(Panel())
         .onDisappear {
-            // Cancel countdown task if tray is dismissed
             armTask?.cancel()
             armStage = 0
             armCountdown = 4
         }
     }
 
-    private var tabs: some View {
-        HStack(spacing: 24) {
-            tabButton("DIALS", 0)
-            tabButton("OPTIONS", 1)
+    private var header: some View {
+        HStack {
+            HStack(spacing: 18) {
+                tabButton("DIALS", 0)
+                tabButton("OPTIONS", 1)
+            }
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Palette.mutedInk)
+                    .frame(width: 24, height: 24)
+                    .background(Palette.well, in: Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -58,36 +61,40 @@ struct ControlTray: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { tab = index }
         } label: {
             Text(title)
-                .font(AppTypography.next(size: 11, weight: tab == index ? .semibold : .regular))
+                .font(AppTypography.next(size: 11, weight: tab == index ? .bold : .regular))
                 .tracking(1.1)
                 .foregroundStyle(tab == index ? Palette.ink : Palette.mutedInk)
-                .padding(.vertical, 5)
+                .padding(.vertical, 4)
                 .overlay(alignment: .bottom) {
                     if tab == index {
                         Rectangle()
-                            .fill(Palette.accent)
+                            .fill(Palette.braunOrange)
                             .frame(height: 1.5)
                             .matchedGeometryEffect(id: "tabUnderline", in: tabNamespace)
                     }
                 }
-                .frame(minHeight: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(tab == index ? .isSelected : [])
     }
 
-    private var dials: some View {
-        HStack(spacing: 0) {
-            ScrubDial(title: "EV", selection: $evIndex, labels: EVComp.labels, resetIndex: EVComp.zeroIndex)
-            Rectangle().fill(Palette.hairline.opacity(0.7)).frame(width: 1).padding(.vertical, 8)
-            ScrubDial(
-                title: useDIN ? "DIN" : "ISO",
+    // Free horizontal scroll scales
+    private var horizontalDials: some View {
+        VStack(spacing: 10) {
+            HorizontalScrubDial(
+                title: "EV COMPENSATION",
+                selection: $evIndex,
+                labels: EVComp.labels,
+                resetIndex: EVComp.zeroIndex
+            )
+            HorizontalScrubDial(
+                title: useDIN ? "FILM SPEED (DIN)" : "FILM SPEED (ISO)",
                 selection: $isoIndex,
                 labels: ISOScale.values.map { ISOScale.label($0, din: useDIN) },
                 resetIndex: ISOScale.values.firstIndex(of: 100)
             )
         }
+        .padding(.vertical, 4)
     }
 
     private var options: some View {
@@ -158,14 +165,13 @@ struct ControlTray: View {
                 .animation(.smooth(duration: 0.18), value: armCountdown)
                 .animation(.smooth(duration: 0.18), value: armStage)
                 .tracking(0.8)
-                .foregroundStyle(armStage == 0 ? Palette.ink : Palette.accent)
+                .foregroundStyle(armStage == 0 ? Palette.ink : Palette.braunOrange)
                 .padding(.horizontal, 10)
                 .frame(height: 28)
                 .background(Palette.ink.opacity(0.08), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(armStage != 0)
-        .accessibilityLabel("Set arm offset")
     }
 
     private func startArmCalibration() {
@@ -216,7 +222,7 @@ struct EngravedChoice: View {
                         .overlay(alignment: .bottom) {
                             if selection == i {
                                 Rectangle()
-                                    .fill(Palette.accent)
+                                    .fill(Palette.braunOrange)
                                     .frame(height: 1.5)
                                     .matchedGeometryEffect(id: "choiceUnderline", in: underlineNamespace)
                             }
@@ -226,7 +232,6 @@ struct EngravedChoice: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == i ? .isSelected : [])
             }
         }
     }
@@ -264,6 +269,5 @@ private struct MiniStepper: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 }
