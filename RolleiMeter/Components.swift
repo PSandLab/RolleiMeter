@@ -11,6 +11,7 @@ private let accentRed = Palette.accent
 private let goldenGreen = Palette.green
 private let warnRed = accentRed
 
+// Clean, functional Braun panel with honest hairline borders
 struct Panel: ViewModifier {
     var stroke: Color = Palette.hairline
     var lineWidth: CGFloat = 1
@@ -18,19 +19,10 @@ struct Panel: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(LinearGradient(colors: [Palette.bezelTop, Palette.paper],
-                                     startPoint: .top, endPoint: .bottom))
+                .fill(Palette.paper)
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
-                            lineWidth: 1
-                        )
-                        .padding(1)
-                )
                 .compositingGroup()
-                .shadow(color: Palette.cast, radius: 10, x: 0, y: 3)
+                .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
         }
     }
 }
@@ -41,9 +33,10 @@ private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGF
     return t * t * (3 - 2 * t)
 }
 
+// Precision recessed well inspired by Braun calculator displays
 private struct WindowInset: ViewModifier {
-    var radius: CGFloat = 12
-    var bezel: CGFloat = 5
+    var radius: CGFloat = 8
+    var bezel: CGFloat = 3
 
     private var inner: CGFloat { max(radius - bezel, 3) }
 
@@ -53,32 +46,22 @@ private struct WindowInset: ViewModifier {
                 RoundedRectangle(cornerRadius: inner, style: .continuous)
                     .fill(Palette.well)
                     .overlay {
-                        LinearGradient(
-                            stops: [
-                                .init(color: Palette.recess, location: 0),
-                                .init(color: Palette.recess.opacity(0), location: 0.26)
-                            ],
-                            startPoint: .top, endPoint: .bottom)
-                        .mask(RoundedRectangle(cornerRadius: inner, style: .continuous))
-                    }
-                    .overlay {
                         RoundedRectangle(cornerRadius: inner, style: .continuous)
-                            .strokeBorder(Palette.ink.opacity(0.13), lineWidth: 1)
+                            .strokeBorder(Palette.ink.opacity(0.08), lineWidth: 1)
                     }
             }
             .padding(bezel)
             .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
-                                         startPoint: .top, endPoint: .bottom))
+                    .fill(Palette.bezelTop)
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Palette.ink.opacity(0.07), lineWidth: 1)
+                    .strokeBorder(Palette.hairline, lineWidth: 1)
             }
             .compositingGroup()
-            .shadow(color: Palette.cast, radius: 7, x: 0, y: 2)
+            .shadow(color: Palette.cast, radius: 3, x: 0, y: 1)
     }
 }
 
@@ -92,6 +75,8 @@ private struct PointerTriangle: Shape {
         return p
     }
 }
+
+// MARK: - Camera preview
 
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
@@ -125,6 +110,8 @@ struct CameraPreview: UIViewRepresentable {
     }
 }
 
+// MARK: - EV badge
+
 private struct NeedleGauge: View {
     let ev: Double
 
@@ -148,7 +135,7 @@ private struct NeedleGauge: View {
             var needle = Path()
             needle.move(to: c)
             needle.addLine(to: point(needleAngle, r - 1))
-            ctx.stroke(needle, with: .color(accentRed), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            ctx.stroke(needle, with: .color(Palette.braunOrange), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
             ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
         }
         .frame(width: 34, height: 19)
@@ -184,6 +171,8 @@ struct EVBadge: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
     }
 }
+
+// MARK: - Simple exposure and focus
 
 private struct SimpleApertureColumn: View {
     @ObservedObject var damp: Damper
@@ -228,7 +217,7 @@ private struct SimpleApertureColumn: View {
             Text(exposureStatus)
                 .font(AppTypography.next(size: 10, weight: .medium))
                 .tracking(0.7)
-                .foregroundStyle(stateInk.opacity(0.72))
+                .foregroundStyle(stateInk.opacity(0.85))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
@@ -286,7 +275,7 @@ struct SimpleExposurePair: View {
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .compositingGroup()
-        .shadow(color: Palette.cast, radius: 10, x: 0, y: 3)
+        .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
     }
 }
 
@@ -309,7 +298,6 @@ private struct SimpleFocusColumn: View {
             .padding(.top, 8)
             .padding(.bottom, 4)
 
-            // Fix NO LIDAR insult glitch: check actual hardware capability first
             if !hasLiDAR {
                 Text("NO LIDAR")
                     .font(AppTypography.next(size: 11, weight: .medium))
@@ -325,7 +313,6 @@ private struct SimpleFocusColumn: View {
                 FocusRingScale(distance: distance, aperture: aperture, feet: feet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // Phone has LiDAR, but subject is farther than 5m / infinity
                 VStack(spacing: 3) {
                     Text("—")
                         .font(AppTypography.mono(size: 34, weight: .medium))
@@ -437,11 +424,11 @@ private struct FocusDialFace: View, Animatable {
                 Path(roundedRect: CGRect(x: left, y: bandTop, width: width,
                                          height: baseline - bandTop + 2),
                      cornerRadius: 3),
-                with: .color(goldenGreen.opacity(0.10)))
+                with: .color(goldenGreen.opacity(0.12)))
             context.fill(
                 Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: 3),
                      cornerRadius: 1.5),
-                with: .color(goldenGreen.opacity(0.70)))
+                with: .color(goldenGreen.opacity(0.80)))
         }
 
         let markPositions: [Double] = marks.map { $0.p }
@@ -488,9 +475,11 @@ private struct FocusDialFace: View, Animatable {
         tri.addLine(to: CGPoint(x: cx + 7, y: y0))
         tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
         tri.closeSubpath()
-        context.fill(tri, with: .color(accentRed))
+        context.fill(tri, with: .color(Palette.braunOrange))
     }
 }
+
+// MARK: - Scrub dial
 
 struct ScrubDial: View {
     let title: String
@@ -531,11 +520,11 @@ struct ScrubDial: View {
                 .frame(height: face)
                 .overlay(alignment: .trailing) {
                     PointerTriangle()
-                        .fill(accentRed)
+                        .fill(Palette.braunOrange)
                         .frame(width: 7, height: 11)
                         .padding(.trailing, 7)
                 }
-                .modifier(WindowInset(radius: 14, bezel: 5))
+                .modifier(WindowInset(radius: 10, bezel: 4))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
@@ -630,27 +619,21 @@ struct SetKeyStyle: ButtonStyle {
         configuration.label
             .background {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: configuration.isPressed
-                                ? [Palette.bezelBottom, Palette.paper]
-                                : [Palette.bezelTop, Palette.bezelBottom],
-                            startPoint: .topLeading, endPoint: .bottomTrailing))
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Palette.bezelTop)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Palette.ink)
                         .opacity(active ? 1 : 0)
                 }
                 .compositingGroup()
-                .shadow(color: Palette.cast,
-                        radius: active ? 2 : 6,
-                        x: 0, y: active ? 0.5 : 2)
+                .shadow(color: Palette.cast, radius: active ? 1 : 3, x: 0, y: active ? 0.5 : 1)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Palette.ink.opacity(active ? 0 : 0.10), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Palette.hairline, lineWidth: 1)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.2), value: active)
     }
@@ -677,7 +660,6 @@ struct AutoLamp: View {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
-                .shadow(color: color.opacity(0.55), radius: 3)
             Text("A")
                 .font(AppTypography.next(size: 8, weight: .medium))
                 .tracking(0.6)
@@ -699,7 +681,7 @@ struct ApertureDrum: View {
 
     private let width: CGFloat = 60
     private let height: CGFloat = 84
-    private let bezel: CGFloat = 4
+    private let bezel: CGFloat = 3
     private let pitch: CGFloat = 18.5
     private let homeIndex = 3
 
@@ -717,14 +699,14 @@ struct ApertureDrum: View {
         ZStack {
             DrumFace(position: position, pitch: pitch)
             PointerTriangle()
-                .fill(accentRed)
+                .fill(Palette.braunOrange)
                 .frame(width: 4.5, height: 9)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .offset(x: -3)
         }
         .frame(width: width - bezel * 2, height: height - bezel * 2)
-        .modifier(WindowInset(radius: 11, bezel: bezel))
-        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .modifier(WindowInset(radius: 8, bezel: bezel))
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .gesture(dragGesture)
             .onAppear {
                 position = Double(index)
@@ -861,6 +843,8 @@ private struct DrumFace: View, Animatable {
     }
 }
 
+// MARK: - Metering mode
+
 struct MeterDrum: View {
     let modes: [MeterMode]
     let index: Int
@@ -869,7 +853,7 @@ struct MeterDrum: View {
 
     private let width: CGFloat = 82
     private let height: CGFloat = 84
-    private let bezel: CGFloat = 4
+    private let bezel: CGFloat = 3
     private let pitch: CGFloat = 19
 
     @State private var position: Double = 0
@@ -893,8 +877,8 @@ struct MeterDrum: View {
             }
         )
         .frame(width: width - bezel * 2, height: height - bezel * 2)
-        .modifier(WindowInset(radius: 11, bezel: bezel))
-        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .modifier(WindowInset(radius: 8, bezel: bezel))
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .gesture(dragGesture)
         .onAppear {
             position = Double(index)
@@ -961,11 +945,13 @@ struct MeterDrum: View {
     }
 }
 
+// MARK: - Dieter Rams Iconic Frameless Orange Shutter Button
+
 private struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.55), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: configuration.isPressed)
     }
 }
 
@@ -976,40 +962,33 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
+                // Pure frameless circular button in legendary Braun Orange
                 Circle()
-                    .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 84, height: 84)
-                    .shadow(color: Palette.cast, radius: 8, x: 0, y: 2.5)
-                Circle().fill(hairline).frame(width: 68, height: 68)
+                    .fill(Palette.braunOrange)
+                    .frame(width: 70, height: 70)
+                    .shadow(color: Palette.braunOrange.opacity(frozen ? 0.25 : 0.40),
+                            radius: frozen ? 4 : 8, x: 0, y: frozen ? 1.5 : 3)
+
+                // Crisp molded matte rim highlight
                 Circle()
-                    .fill(paper)
-                    .overlay {
-                        LinearGradient(
-                            stops: [
-                                .init(color: Palette.recess.opacity(0.85), location: 0),
-                                .init(color: Palette.recess.opacity(0), location: 0.34)
-                            ],
-                            startPoint: .top, endPoint: .bottom)
-                        .clipShape(Circle())
-                    }
-                    .frame(width: 68, height: 68)
-                    .scaleEffect(frozen ? 0.96 : 1)
-                Circle()
-                    .stroke(frozen ? accentRed : mutedInk, lineWidth: frozen ? 4 : 1)
-                    .frame(width: 68, height: 68)
-                    .scaleEffect(frozen ? 0.96 : 1)
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                    .frame(width: 70, height: 70)
+
                 Image(systemName: frozen ? "pause.fill" : "viewfinder")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(frozen ? accentRed : mutedInk)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.white)
                     .contentTransition(.symbolEffect(.replace))
                     .accessibilityHidden(true)
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.6), value: frozen)
+            .scaleEffect(frozen ? 0.96 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: frozen)
         }
         .buttonStyle(PressStyle())
+        .accessibilityLabel(frozen ? "Unfreeze exposure" : "Freeze exposure")
     }
 }
+
+// MARK: - LiDAR marker
 
 private struct FocusPing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
