@@ -40,7 +40,6 @@ private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGF
     return t * t * (3 - 2 * t)
 }
 
-// Sunken window with authentic top shadow fading into bottom light
 struct WindowInset: ViewModifier {
     var radius: CGFloat = 11
     var bezel: CGFloat = 4
@@ -53,7 +52,6 @@ struct WindowInset: ViewModifier {
                 RoundedRectangle(cornerRadius: inner, style: .continuous)
                     .fill(Palette.well)
                     .overlay {
-                        // Shadow under top lip fading out by 30% down
                         LinearGradient(
                             stops: [
                                 .init(color: Palette.recess, location: 0),
@@ -385,6 +383,8 @@ private struct FocusRingScale: View {
     }
 }
 
+// MARK: - Focus Dial Face with Classic Agfa Sensor Zone Pictograms
+
 private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
@@ -413,13 +413,24 @@ private struct FocusDialFace: View, Animatable {
         return min(max(wanted, width * 1.15), width * 8)
     }
 
+    // Agfa Sensor Zone Focus Symbol matching
+    private func agfaSymbol(for label: String) -> String? {
+        switch label {
+        case "1.2", "4": return "person.fill"         // Portrait (1.2m / 4ft)
+        case "3", "10": return "person.2.fill"        // Group / Street (3m / 10ft)
+        case "∞": return "mountain.2.fill"           // Landscape / Infinity
+        default: return nil
+        }
+    }
+
     private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
         let cx: CGFloat = size.width / 2
         let groupHeight: CGFloat = 104
         let y0: CGFloat = max(0, (size.height - groupHeight) / 2)
-        let numberY: CGFloat = y0 + 30
-        let markTop: CGFloat = y0 + 50
-        let baseline: CGFloat = y0 + 92
+        let numberY: CGFloat = y0 + 25
+        let iconY: CGFloat = y0 + 40
+        let markTop: CGFloat = y0 + 52
+        let baseline: CGFloat = y0 + 94
         let fadeWidth: CGFloat = 44
         let ppu: CGFloat = zoom(width: size.width)
         let fineRaw: CGFloat = (ppu / 60 - 4) / 3
@@ -479,21 +490,32 @@ private struct FocusDialFace: View, Animatable {
             tick.move(to: CGPoint(x: px, y: baseline))
             tick.addLine(to: CGPoint(x: px, y: markTop))
             context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
+
             let underPointer: Bool = abs(mark.p - position) < 0.012
             let label = Text(mark.label)
-                .font(AppTypography.bold(size: underPointer ? 29 : 24))
+                .font(AppTypography.bold(size: underPointer ? 26 : 22))
                 .foregroundColor(color.opacity(f))
             let text = context.resolve(label)
             let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
+
             guard underPointer || px - textWidth / 2 > lastRight + 5 else { continue }
             context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
+
+            // Render Agfa Zone Focus Pictogram right under the number
+            if let symbol = agfaSymbol(for: mark.label) {
+                let icon = Image(systemName: symbol)
+                    .font(.system(size: underPointer ? 12 : 10, weight: underPointer ? .bold : .medium))
+                    .foregroundColor(color.opacity(f * (underPointer ? 1.0 : 0.85)))
+                context.draw(context.resolve(icon), at: CGPoint(x: px, y: iconY), anchor: .center)
+            }
+
             lastRight = px + textWidth / 2
         }
 
         var tri = Path()
-        tri.move(to: CGPoint(x: cx - 7, y: y0))
-        tri.addLine(to: CGPoint(x: cx + 7, y: y0))
-        tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
+        tri.move(to: CGPoint(x: cx - 6, y: y0))
+        tri.addLine(to: CGPoint(x: cx + 6, y: y0))
+        tri.addLine(to: CGPoint(x: cx, y: y0 + 10))
         tri.closeSubpath()
         context.fill(tri, with: .color(Palette.braunOrange))
     }
@@ -508,7 +530,7 @@ struct HorizontalScrubDial: View {
     var resetIndex: Int? = nil
 
     private let pitch: CGFloat = 52
-    private let height: CGFloat = 60
+    private let height: CGFloat = 56
 
     @State private var base: Int?
     @State private var drag: CGFloat = 0
@@ -521,7 +543,7 @@ struct HorizontalScrubDial: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             HStack {
                 Text(title)
                     .font(AppTypography.next(size: 10, weight: .semibold))
@@ -538,7 +560,6 @@ struct HorizontalScrubDial: View {
                 HorizontalValueRail(position: position, labels: labels, pitch: pitch)
                     .frame(height: height)
 
-                // Central orange pointer tick
                 VStack(spacing: 0) {
                     Rectangle()
                         .fill(Palette.braunOrange)
@@ -595,8 +616,8 @@ private struct HorizontalValueRail: View, Animatable {
     var body: some View {
         Canvas { ctx, size in
             let cx = size.width / 2
-            let tickBaseline: CGFloat = 20
-            let textBaseline: CGFloat = 42
+            let tickBaseline: CGFloat = 18
+            let textBaseline: CGFloat = 38
             let fadeWidth: CGFloat = 40
 
             func fade(_ px: CGFloat) -> Double {
@@ -926,7 +947,7 @@ struct MeterDrum: View {
     }
 }
 
-// MARK: - Authentic Dieter Rams Shutter Button (Recessed Well + Top Shadow to Bottom Light)
+// MARK: - Dieter Rams / Agfa Sensor Shutter Button
 
 struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -943,7 +964,6 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                // Recessed outer circular bezel well
                 Circle()
                     .fill(Palette.well)
                     .frame(width: 80, height: 80)
@@ -962,7 +982,6 @@ struct FreezeButton: View {
                     )
                     .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
 
-                // Tactile round Braun button sitting inside well with mechanical latch depth
                 Circle()
                     .fill(
                         LinearGradient(

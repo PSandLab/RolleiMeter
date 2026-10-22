@@ -18,7 +18,7 @@ struct ControlTray: View {
     @Namespace private var tabNamespace
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             header
             if tab == 0 {
                 horizontalDials
@@ -27,8 +27,8 @@ struct ControlTray: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .frame(minHeight: 174, maxHeight: 174)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
         .modifier(Panel())
         .onDisappear {
             armTask?.cancel()
@@ -59,7 +59,7 @@ struct ControlTray: View {
     private func tabButton(_ title: String, _ index: Int) -> some View {
         Button {
             UISelectionFeedbackGenerator().selectionChanged()
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { tab = index }
+            withAnimation(.easeInOut(duration: 0.25)) { tab = index }
         } label: {
             Text(title)
                 .font(AppTypography.next(size: 11, weight: tab == index ? .bold : .regular))
@@ -80,7 +80,7 @@ struct ControlTray: View {
     }
 
     private var horizontalDials: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             HorizontalScrubDial(
                 title: "EV COMPENSATION",
                 selection: $evIndex,
@@ -137,7 +137,7 @@ struct ControlTray: View {
             Spacer(minLength: 8)
             content()
         }
-        .frame(height: 28)
+        .frame(height: 32)
     }
 
     private func boolBinding(_ source: Binding<Bool>) -> Binding<Int> {
@@ -166,7 +166,7 @@ struct ControlTray: View {
                 .tracking(0.8)
                 .foregroundStyle(armStage == 0 ? Palette.ink : Palette.braunOrange)
                 .padding(.horizontal, 10)
-                .frame(height: 24)
+                .frame(height: 26)
                 .background(Palette.ink.opacity(0.08), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -212,7 +212,7 @@ struct EngravedChoice: View {
                 Button {
                     guard selection != i else { return }
                     UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = i }
+                    withAnimation(.easeInOut(duration: 0.25)) { selection = i }
                 } label: {
                     Text(options[i])
                         .font(AppTypography.font(size: 11, weight: selection == i ? .bold : .regular))
@@ -227,7 +227,7 @@ struct EngravedChoice: View {
                             }
                         }
                         .padding(.horizontal, 8)
-                        .frame(minHeight: 26)
+                        .frame(minHeight: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

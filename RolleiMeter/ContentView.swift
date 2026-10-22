@@ -89,49 +89,40 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             topBar
+
+            // Settings Tray placed right under the top bar with easeInOut transition
+            if trayOpen {
+                ControlTray(
+                    evIndex: $evIndex,
+                    isoIndex: $isoIndex,
+                    useDIN: $useDIN,
+                    useFeet: $useFeet,
+                    calibration: $calibration,
+                    armOffset: $armOffset,
+                    rawDistance: { meter.distance },
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            trayOpen = false
+                        }
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: .move(edge: .top).combined(with: .opacity),
+                    removal: .move(edge: .top).combined(with: .opacity)
+                ))
+            }
+
             preview
 
-            // Fixed-Height Instrument Slot (174pt):
-            // Smoothly flips between the live exposure tiles and the settings dials.
-            // Shutter controls below and camera above NEVER move or get covered!
-            ZStack {
-                if trayOpen {
-                    ControlTray(
-                        evIndex: $evIndex,
-                        isoIndex: $isoIndex,
-                        useDIN: $useDIN,
-                        useFeet: $useFeet,
-                        calibration: $calibration,
-                        armOffset: $armOffset,
-                        rawDistance: { meter.distance },
-                        onClose: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                                trayOpen = false
-                            }
-                        }
-                    )
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.98)),
-                        removal: .opacity.combined(with: .scale(scale: 0.98))
-                    ))
-                } else {
-                    SimpleExposurePair(
-                        damp: evDamp, iso: iso, comp: comp,
-                        apertureIndex: resolvedApertureIndex,
-                        distance: shownDistance,
-                        hasLiDAR: meter.hasLiDAR,
-                        tooClose: tooClose, feet: useFeet
-                    )
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 1.02)),
-                        removal: .opacity.combined(with: .scale(scale: 1.02))
-                    ))
-                }
-            }
-            .frame(height: 174)
-            .clipped()
+            SimpleExposurePair(
+                damp: evDamp, iso: iso, comp: comp,
+                apertureIndex: resolvedApertureIndex,
+                distance: shownDistance,
+                hasLiDAR: meter.hasLiDAR,
+                tooClose: tooClose, feet: useFeet
+            )
 
             controls
         }
@@ -441,7 +432,7 @@ struct ContentView: View {
     private var trayKey: some View {
         Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            withAnimation(.easeInOut(duration: 0.35)) {
                 trayOpen.toggle()
             }
         } label: {
