@@ -156,69 +156,74 @@ struct RulerView: View {
         }
     }
 
+    /// Seven apertures can't split evenly, so they split 3 + 4 and each row fills the full width.
+    /// The three wide apertures get wider cells, the four small ones sit in the row below.
     var body: some View {
         let res = results
-        VStack(spacing: 2) {
-            // Shutter speed readings use only native Rollei markings.
-            HStack(spacing: 0) {
-                ForEach(Rollei.stops.indices, id: \.self) { i in
-                    let r = res[i]
-                    Text(r.deviation.map(Fmt.exposureAmount) ?? r.label)
-                        .font(AppTypography.font(size: r.deviation == nil ? 16 : 11, weight: i == golden ? .semibold : .medium))
-                        .foregroundStyle(shutterColor(r, golden: i == golden))
-                        .contentTransition(.numericText())
-                        .frame(maxWidth: .infinity)
-                        .background {
-                            // Pale band behind every aperture that gives a correct exposure right now.
-                            Rectangle()
-                                .fill(goldenGreen.opacity(r.deviation == nil ? 0.12 : 0))
-                                .padding(.vertical, -1)
-                        }
-                        .animation(.smooth(duration: 0.25), value: r.deviation == nil)
-                        .minimumScaleFactor(0.7)
-                        .animation(.smooth(duration: 0.2), value: r.deviation.map(Fmt.exposureAmount) ?? r.label)
-                }
-            }
-
-            HStack(spacing: 0) {
-                ForEach(Rollei.stops.indices, id: \.self) { _ in
-                    ZStack {
-                        Rectangle().fill(hairline).frame(height: 1)
-                        Rectangle().fill(mutedInk).frame(width: 1.5, height: 8)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-
-            // Apertures. Tap selects (drives the depth-of-field band), long-press sets the golden one.
-            HStack(spacing: 0) {
-                ForEach(Rollei.stops.indices, id: \.self) { i in
-                    Text("f/" + Rollei.stops[i].label)
-                        .font(AppTypography.font(size: 11, weight: i == golden ? .semibold : .regular))
-                        .foregroundStyle(i == golden ? goldenGreen : inkColor)
-                        .frame(height: 22)
-                        .overlay(alignment: .bottom) {
-                            if selected == i {
-                                Rectangle()
-                                    .fill(inkColor)
-                                    .frame(height: 1.5)
-                                    .matchedGeometryEffect(id: "apertureIndex", in: indexNamespace)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onSelect(i) }
-                        .onLongPressGesture(minimumDuration: 0.5) {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
-                            onToggleGolden(i)
-                        }
-                }
-            }
-            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
+        VStack(spacing: 12) {
+            row(0..<3, res)
+            row(3..<7, res)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
         .modifier(Panel())
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selected)
+    }
+
+    private func row(_ indices: Range<Int>, _ res: [ShutterResult]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(indices, id: \.self) { i in
+                column(i, res[i])
+            }
+        }
+    }
+
+    /// One aperture: the shutter speed it needs, a tick, and the aperture itself.
+    /// Tap selects (drives the focus depth of field), long-press sets the golden one.
+    private func column(_ i: Int, _ r: ShutterResult) -> some View {
+        let isGolden: Bool = i == golden
+        let reading: String = r.deviation.map(Fmt.exposureAmount) ?? r.label
+        let inRange: Bool = r.deviation == nil
+        return VStack(spacing: 4) {
+            Text(reading)
+                .font(AppTypography.font(size: inRange ? 26 : 16, weight: isGolden ? .semibold : .medium))
+                .foregroundStyle(shutterColor(r, golden: isGolden))
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .background {
+                    // Pale band behind every aperture that gives a correct exposure right now.
+                    Rectangle().fill(goldenGreen.opacity(inRange ? 0.12 : 0))
+                }
+                .animation(.smooth(duration: 0.25), value: inRange)
+                .animation(.smooth(duration: 0.2), value: reading)
+
+            ZStack {
+                Rectangle().fill(hairline).frame(height: 1)
+                Rectangle().fill(mutedInk).frame(width: 1.5, height: 8)
+            }
+
+            Text("f/" + Rollei.stops[i].label)
+                .font(AppTypography.font(size: 14, weight: isGolden ? .semibold : .regular))
+                .foregroundStyle(isGolden ? goldenGreen : inkColor)
+                .frame(height: 26)
+                .overlay(alignment: .bottom) {
+                    if selected == i {
+                        Rectangle()
+                            .fill(inkColor)
+                            .frame(height: 1.5)
+                            .matchedGeometryEffect(id: "apertureIndex", in: indexNamespace)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { onSelect(i) }
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onToggleGolden(i)
+                }
+        }
     }
 
     /// Orange-red for out of range, a warning tint for readings slower than 1/60 s, green for the golden aperture.
@@ -857,11 +862,11 @@ struct FocusPanel: View {
     var body: some View {
         VStack(spacing: 6) {
             dialArea
-                .frame(height: 108)
+                .frame(height: 96)
             readouts
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
         .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -933,7 +938,7 @@ struct FocusPanel: View {
                 .tracking(1)
                 .foregroundStyle(mutedInk)
             Text(value.map { Fmt.distance($0, feet: feet) } ?? "—")
-                .font(AppTypography.bold(size: 20))
+                .font(AppTypography.bold(size: 18))
                 .foregroundStyle(inkColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
