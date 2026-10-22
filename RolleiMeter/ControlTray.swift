@@ -16,8 +16,9 @@ struct ControlTray: View {
     let rawDistance: () -> Double?
 
     @State private var tab = 0
-    /// 0 = idle, otherwise the seconds left while the phone is brought to the eye.
+    /// 0 = idle, 1 = waiting for the phone to be moved to the eye.
     @State private var armStage = 0
+    @State private var armCountdown = 4
     @Namespace private var tabNamespace
 
     var body: some View {
@@ -38,8 +39,8 @@ struct ControlTray: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 2)
-        .padding(.bottom, 6)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
         .modifier(Panel())
     }
 
@@ -61,7 +62,7 @@ struct ControlTray: View {
                 .font(AppTypography.next(size: 11, weight: tab == index ? .semibold : .regular))
                 .tracking(1.1)
                 .foregroundStyle(tab == index ? Palette.ink : Palette.mutedInk)
-                .padding(.vertical, 3)
+                .padding(.vertical, 5)
                 .overlay(alignment: .bottom) {
                     if tab == index {
                         Rectangle()
@@ -70,7 +71,7 @@ struct ControlTray: View {
                             .matchedGeometryEffect(id: "tabUnderline", in: tabNamespace)
                     }
                 }
-                .frame(minHeight: 26)
+                .frame(minHeight: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -94,46 +95,50 @@ struct ControlTray: View {
 
     // MARK: Options
 
-    /// Two compact rows of labelled cells instead of a tall list, so the tray stays short.
     private var options: some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                cell("FILM SPEED") { EngravedChoice(options: ["ISO", "DIN"], selection: boolBinding($useDIN)) }
-                cell("DISTANCE") { EngravedChoice(options: ["M", "FT"], selection: boolBinding($useFeet)) }
-                cell("SIMPLE") { EngravedChoice(options: ["OFF", "ON"], selection: boolBinding($simpleMode)) }
+        VStack(spacing: 0) {
+            row("FILM SPEED") { EngravedChoice(options: ["ISO", "DIN"], selection: boolBinding($useDIN)) }
+            divider
+            row("DISTANCE") { EngravedChoice(options: ["M", "FT"], selection: boolBinding($useFeet)) }
+            divider
+            row("SIMPLE") { EngravedChoice(options: ["OFF", "ON"], selection: boolBinding($simpleMode)) }
+            divider
+            row("CALIBRATE") {
+                MiniStepper(
+                    text: Fmt.stops(calibration) + " EV",
+                    onMinus: { stepCalibration(-1) },
+                    onPlus: { stepCalibration(1) }
+                )
             }
-            HStack(alignment: .top, spacing: 8) {
-                cell("CALIBRATE") {
+            divider
+            row("ARM") {
+                HStack(spacing: 6) {
                     MiniStepper(
-                        text: Fmt.stops(calibration) + " EV",
-                        onMinus: { stepCalibration(-1) },
-                        onPlus: { stepCalibration(1) }
+                        text: Fmt.distance(armOffset, feet: useFeet),
+                        onMinus: { stepArm(-1) },
+                        onPlus: { stepArm(1) }
                     )
+                    armButton
                 }
-                cell("ARM") {
-                    HStack(spacing: 4) {
-                        MiniStepper(
-                            text: Fmt.distance(armOffset, feet: useFeet),
-                            onMinus: { stepArm(-1) },
-                            onPlus: { stepArm(1) }
-                        )
-                        armButton
-                    }
-                }
+                .padding(.trailing, 9)
             }
         }
-        .padding(.top, 2)
     }
 
-    private func cell<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 1) {
+    private var divider: some View {
+        Rectangle().fill(Palette.hairline.opacity(0.7)).frame(height: 1)
+    }
+
+    private func row<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack {
             Text(title)
-                .font(AppTypography.next(size: 9, weight: .medium))
+                .font(AppTypography.next(size: 10, weight: .medium))
                 .tracking(1)
                 .foregroundStyle(Palette.mutedInk)
+            Spacer(minLength: 8)
             content()
         }
-        .frame(maxWidth: .infinity)
+        .frame(height: 34)
     }
 
     private func boolBinding(_ source: Binding<Bool>) -> Binding<Int> {
@@ -158,15 +163,14 @@ struct ControlTray: View {
         Button {
             startArmCalibration()
         } label: {
-            Text(armStage == 0 ? "SET" : "\(armStage)")
+            Text(armStage == 0 ? "SET" : "HOLD AT EYE · \(armCountdown)")
                 .font(AppTypography.next(size: 11, weight: .semibold))
                 .contentTransition(.numericText())
+                .animation(.smooth(duration: 0.18), value: armCountdown)
                 .animation(.smooth(duration: 0.18), value: armStage)
                 .tracking(0.8)
                 .foregroundStyle(armStage == 0 ? Palette.ink : Palette.accent)
-                .contentTransition(.numericText())
-                .frame(minWidth: 26)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 10)
                 .frame(height: 28)
                 .background(Palette.ink.opacity(0.08), in: Capsule())
         }
@@ -180,15 +184,17 @@ struct ControlTray: View {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             return
         }
-        armStage = 4
+        armStage = 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task { @MainActor in
-            // Count down while the phone is brought to the eye.
             for remaining in stride(from: 4, through: 1, by: -1) {
-                withAnimation(.smooth(duration: 0.2)) { armStage = remaining }
+                armCountdown = remaining
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
-            defer { armStage = 0 }
+            defer {
+                armStage = 0
+                armCountdown = 4
+            }
             guard let second = rawDistance(), second > first + 0.05 else {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return
@@ -251,7 +257,7 @@ private struct MiniStepper: View {
             Text(text)
                 .font(AppTypography.font(size: 13, weight: .medium))
                 .foregroundStyle(Palette.ink)
-                .frame(minWidth: 46)
+                .frame(minWidth: 56)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .contentTransition(.numericText())
@@ -268,7 +274,7 @@ private struct MiniStepper: View {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Palette.ink)
-                .frame(width: 26, height: 28)
+                .frame(width: 28, height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
