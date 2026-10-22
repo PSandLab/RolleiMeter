@@ -600,7 +600,7 @@ struct AutoLamp: View {
                 .tracking(0.6)
                 .foregroundStyle(state == .off ? Color.clear : Palette.mutedInk)
         }
-        .frame(width: 16, alignment: .leading)
+        .frame(width: 16, alignment: .trailing)
         .opacity(state == .off ? 0 : 1)
         .animation(.easeOut(duration: 0.18), value: state)
         .accessibilityHidden(true)
@@ -641,8 +641,10 @@ struct ApertureDrum: View {
                 .allowsHitTesting(false)
 
             Text(Rollei.stops[nearest].label)
-                .font(AppTypography.bold(size: 32))
+                .font(AppTypography.bold(size: 30))
                 .foregroundStyle(inkColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .contentTransition(.numericText())
                 .animation(.smooth(duration: 0.15), value: nearest)
                 .allowsHitTesting(false)
