@@ -393,21 +393,25 @@ private struct FocusRingScale: View {
             position: Focus.position(distance),
             near: Focus.position(depthRange.near),
             far: Focus.position(depthRange.far),
-            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
+            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) },
+            currentDistance: distance,
+            feet: feet
         )
-        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
-        .animation(.spring(response: 0.62, dampingFraction: 0.86), value: aperture.n)
+        // Silk-smooth easeInOut zoom and rotation animation
+        .animation(.easeInOut(duration: 0.42), value: distance)
+        .animation(.easeInOut(duration: 0.48), value: aperture.n)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
+        .accessibilityLabel("Focus ring. Set \(recommendedFocus).")
     }
 }
 
-// Pure Typographic Focus Dial (Agfa pictograms removed per request)
 private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
     var far: Double
     let marks: [(label: String, p: Double)]
+    let currentDistance: Double
+    let feet: Bool
 
     var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
         get { AnimatablePair(position, AnimatablePair(near, far)) }
@@ -420,74 +424,59 @@ private struct FocusDialFace: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            drawCurvedDial(&context, size)
+            drawCurvedZoomDial(&context, size)
         }
         .clipped()
     }
 
-    private func drawCurvedDial(_ context: inout GraphicsContext, _ size: CGSize) {
+    private func drawCurvedZoomDial(_ context: inout GraphicsContext, _ size: CGSize) {
         let cx = size.width / 2
-        let radius: CGFloat = 112
-        let apexY: CGFloat = 34
+        // Generous open radius eliminates cramped feel
+        let radius: CGFloat = 132
+        let apexY: CGFloat = 22
         let cy = apexY + radius
         let center = CGPoint(x: cx, y: cy)
 
-        // Arc spread across focus range (gives numbers generous breathing room)
-        let angularSpan: Double = 1.95
-        let maxAngleDev: Double = 1.05 // Visible arc span ~60 degrees each side
+        // -------------------------------------------------------------
+        // Dynamic Zoom based on Depth-of-Field (far - near)
+        // -------------------------------------------------------------
+        let rawDof = abs(far - near)
+        // Intelligent clamp: at fast apertures (tiny DOF), we clamp the minimum
+        // span to 0.14 so nearby lens marks (e.g. 2 and 3) ALWAYS remain visible!
+        let effectiveSpan = max(rawDof, 0.14)
+        // Angular spread (radians per 1.0 position): scales smoothly with aperture
+        let spread = min(max(1.15 / effectiveSpan, 1.8), 8.2)
+
+        let maxDev: Double = 0.88 // ~50 degrees visible on each side
 
         func angle(for p: Double) -> Double {
-            -Double.pi / 2.0 + (p - position) * angularSpan
+            -Double.pi / 2.0 + (p - position) * spread
         }
 
-        // 1. Subtle base circular arc track
-        let trackStart = -Double.pi / 2.0 - maxAngleDev
-        let trackEnd = -Double.pi / 2.0 + maxAngleDev
+        // 1. Subtle hairline arc track (no colored bars)
+        let trackStart = -Double.pi / 2.0 - maxDev
+        let trackEnd = -Double.pi / 2.0 + maxDev
         var baseArc = Path()
         baseArc.addArc(center: center, radius: radius,
                        startAngle: Angle(radians: trackStart),
                        endAngle: Angle(radians: trackEnd),
                        clockwise: false)
-        context.stroke(baseArc, with: .color(Palette.mutedInk.opacity(0.22)), lineWidth: 1.2)
+        context.stroke(baseArc, with: .color(Palette.mutedInk.opacity(0.24)), lineWidth: 1.2)
 
-        // 2. Depth-of-Field (DOF) Curved Band (Wide at f/8, Narrow at f/2.8)
-        let leftP = min(near, far)
-        let rightP = max(near, far)
-        let rawLeftAngle = angle(for: leftP)
-        let rawRightAngle = angle(for: rightP)
-        let dofStart = min(max(rawLeftAngle, trackStart), trackEnd)
-        let dofEnd = min(max(rawRightAngle, trackStart), trackEnd)
-
-        if dofEnd - dofStart > 0.02 {
-            var dofPath = Path()
-            dofPath.addArc(center: center, radius: radius,
-                           startAngle: Angle(radians: dofStart),
-                           endAngle: Angle(radians: dofEnd),
-                           clockwise: false)
-
-            // Luminous soft green glow
-            context.stroke(dofPath, with: .color(Palette.green.opacity(0.16)), lineWidth: 11)
-            // Crisp depth indicator band
-            context.stroke(dofPath, with: .color(Palette.green.opacity(0.85)),
-                           style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
-        }
-
-        // 3. Minor ticks radiating along the curve
-        let minorCount = 48
+        // 2. Minor subdivision ticks along the curve
+        let minorCount = 44
         let markPositions = marks.map { $0.p }
         for i in 0...minorCount {
             let p = Double(i) / Double(minorCount)
-            if markPositions.contains(where: { abs($0 - p) < 0.006 }) { continue }
+            if markPositions.contains(where: { abs($0 - p) < 0.007 }) { continue }
 
             let a = angle(for: p)
             let dev = abs(a - (-Double.pi / 2.0))
-            if dev > maxAngleDev { continue }
-            let fade = max(0, min(1, (maxAngleDev - dev) / 0.25))
+            if dev > maxDev { continue }
+            let fade = max(0, min(1, (maxDev - dev) / 0.22))
 
             let isMajor = i % 4 == 0
-            let tickLen: CGFloat = isMajor ? 9 : 5
-            let inDof = p >= leftP - 0.003 && p <= rightP + 0.003
-            let color = inDof ? Palette.green.opacity(0.70) : Palette.mutedInk.opacity(0.35)
+            let tickLen: CGFloat = isMajor ? 8 : 4.5
 
             let cosA = CGFloat(cos(a))
             let sinA = CGFloat(sin(a))
@@ -497,46 +486,52 @@ private struct FocusDialFace: View, Animatable {
             var tick = Path()
             tick.move(to: p1)
             tick.addLine(to: p2)
-            context.stroke(tick, with: .color(color.opacity(fade)), lineWidth: isMajor ? 1.4 : 1.0)
+            context.stroke(tick, with: .color(Palette.mutedInk.opacity(fade * (isMajor ? 0.45 : 0.25))),
+                           lineWidth: isMajor ? 1.3 : 1.0)
         }
 
-        // 4. Major distance marks (Numbers curved with generous vertical/horizontal space)
+        // 3. Major lens distance marks (Numbers smoothly curve below ticks with ample space)
         for mark in marks {
             let a = angle(for: mark.p)
             let dev = abs(a - (-Double.pi / 2.0))
-            if dev > maxAngleDev + 0.12 { continue }
-            let fade = max(0, min(1, (maxAngleDev + 0.12 - dev) / 0.28))
-
-            let inDof = mark.p >= leftP - 0.005 && mark.p <= rightP + 0.005
-            let color = inDof ? Palette.green : Palette.ink
+            if dev > maxDev + 0.10 { continue }
+            let fade = max(0, min(1, (maxDev + 0.10 - dev) / 0.24))
 
             let cosA = CGFloat(cos(a))
             let sinA = CGFloat(sin(a))
 
-            // Major tick line radiating across the arc
-            let p1 = CGPoint(x: cx + (radius - 12) * cosA, y: cy + (radius - 12) * sinA)
-            let p2 = CGPoint(x: cx + (radius + 3) * cosA, y: cy + (radius + 3) * sinA)
+            // Major tick line crossing the arc
+            let p1 = CGPoint(x: cx + (radius - 11) * cosA, y: cy + (radius - 11) * sinA)
+            let p2 = CGPoint(x: cx + (radius + 2) * cosA, y: cy + (radius + 2) * sinA)
             var tick = Path()
             tick.move(to: p1)
             tick.addLine(to: p2)
-            context.stroke(tick, with: .color(color.opacity(fade)), lineWidth: inDof ? 2.8 : 2.0)
+            context.stroke(tick, with: .color(Palette.ink.opacity(fade * 0.85)), lineWidth: 2.0)
 
-            // Numbers sit cleanly below the tick curve without overlapping
-            let isUnderPointer = dev < 0.08
-            let labelPos = CGPoint(x: cx + (radius - 28) * cosA, y: cy + (radius - 28) * sinA)
+            // Number label positioned cleanly under the tick
+            let isUnderPointer = dev < 0.07
+            let labelPos = CGPoint(x: cx + (radius - 23) * cosA, y: cy + (radius - 23) * sinA)
 
             let label = Text(mark.label)
-                .font(AppTypography.next(size: isUnderPointer ? 22 : 17, weight: isUnderPointer ? .bold : .semibold))
-                .foregroundColor(color.opacity(fade))
+                .font(AppTypography.next(size: isUnderPointer ? 17 : 14, weight: isUnderPointer ? .bold : .medium))
+                .foregroundColor(Palette.ink.opacity(fade * (isUnderPointer ? 0.95 : 0.65)))
 
             context.draw(context.resolve(label), at: labelPos, anchor: .center)
         }
 
+        // 4. Center Live Readout: Always shows exact measured distance
+        // Guarantees that at fast apertures where you land between marks, distance is crystal clear!
+        let distText = Fmt.distance(currentDistance, feet: feet)
+        let readout = Text(distText)
+            .font(AppTypography.mono(size: 13, weight: .bold))
+            .foregroundColor(Palette.ink.opacity(0.85))
+        context.draw(context.resolve(readout), at: CGPoint(x: cx, y: apexY + 20), anchor: .center)
+
         // 5. Classic Braun Orange Pointer at Apex (12 o'clock)
         var tri = Path()
-        tri.move(to: CGPoint(x: cx - 5.5, y: apexY - 14))
-        tri.addLine(to: CGPoint(x: cx + 5.5, y: apexY - 14))
-        tri.addLine(to: CGPoint(x: cx, y: apexY - 3))
+        tri.move(to: CGPoint(x: cx - 5, y: apexY - 11))
+        tri.addLine(to: CGPoint(x: cx + 5, y: apexY - 11))
+        tri.addLine(to: CGPoint(x: cx, y: apexY - 2))
         tri.closeSubpath()
         context.fill(tri, with: .color(Palette.braunOrange))
     }
