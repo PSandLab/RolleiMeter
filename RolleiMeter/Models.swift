@@ -3,11 +3,14 @@ import Foundation
 enum MeterMode: String, CaseIterable {
     case matrix, spot, highlight
 
+    /// One short word each: they have to turn past in a window the width of two thumbs. The cases
+    /// keep their algorithm names, so a saved setting still means the same thing; only the word on
+    /// the wheel is short — multi for the whole scene, bright for the highlights, spot for one point.
     var title: String {
         switch self {
-        case .matrix: return "Matrix"
+        case .matrix: return "Multi"
         case .spot: return "Spot"
-        case .highlight: return "Highlight"
+        case .highlight: return "Bright"
         }
     }
 }

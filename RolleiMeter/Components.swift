@@ -10,8 +10,6 @@ private let hairline = Palette.hairline
 private let accentRed = Palette.accent
 private let goldenGreen = Palette.green
 private let warnRed = accentRed
-private let inRangeGreen = goldenGreen
-private let warningAmber = Palette.amber
 
 /// Paper panel: hairline edge, a faint light edge along the top, and a very soft shadow.
 struct Panel: ViewModifier {
@@ -33,7 +31,7 @@ struct Panel: ViewModifier {
                         .padding(1)
                 )
                 .compositingGroup()
-                .shadow(color: Palette.cast, radius: 4, x: 0, y: 2)
+                .shadow(color: Palette.cast, radius: 10, x: 0, y: 3)
         }
     }
 }
@@ -47,34 +45,49 @@ private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGF
     return t * t * (3 - 2 * t)
 }
 
-/// A window set into the plate: a bezel that stands proud of the paper, and a floor that sinks away
-/// from the light — shadow gathering under the top lip, a bright line where the bottom lip catches it.
+/// A window set into the plate: a bezel that stands a hair proud of the paper, and a floor that sinks
+/// away from the light. The shadow sits under the top lip and fades out before it reaches the middle,
+/// so the floor is lit from above rather than shaded evenly all the way round.
 /// Every value you turn or slide in this app lives in one of these.
 private struct WindowInset: ViewModifier {
     var radius: CGFloat = 12
     var bezel: CGFloat = 5
 
+    private var inner: CGFloat { max(radius - bezel, 3) }
+
     func body(content: Content) -> some View {
         content
             .background {
-                RoundedRectangle(cornerRadius: max(radius - bezel, 3), style: .continuous)
-                    .fill(Palette.well
-                        .shadow(.inner(color: Palette.shade, radius: 4, x: 0, y: 2))
-                        .shadow(.inner(color: Palette.lip, radius: 1.5, x: 0, y: -1)))
+                RoundedRectangle(cornerRadius: inner, style: .continuous)
+                    .fill(Palette.well)
+                    .overlay {
+                        // Light from above: gone by a quarter of the way down the window.
+                        LinearGradient(
+                            stops: [
+                                .init(color: Palette.recess, location: 0),
+                                .init(color: Palette.recess.opacity(0), location: 0.26)
+                            ],
+                            startPoint: .top, endPoint: .bottom)
+                        .mask(RoundedRectangle(cornerRadius: inner, style: .continuous))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: inner, style: .continuous)
+                            .strokeBorder(Palette.ink.opacity(0.13), lineWidth: 1)
+                    }
             }
             .padding(bezel)
             .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                                         startPoint: .top, endPoint: .bottom))
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
+                    .strokeBorder(Palette.ink.opacity(0.07), lineWidth: 1)
             }
             .compositingGroup()
-            .shadow(color: Palette.cast, radius: 3, x: 0, y: 2)
+            .shadow(color: Palette.cast, radius: 7, x: 0, y: 2)
     }
 }
 
@@ -214,29 +227,30 @@ private struct SimpleApertureColumn: View {
             Text("SHUTTER")
                 .font(AppTypography.next(size: 12, weight: .medium))
                 .tracking(0.9)
-                .foregroundStyle(paper)
+                .foregroundStyle(mutedInk)
                 .frame(maxWidth: .infinity)
             Spacer(minLength: 10)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 if reading.deviation == nil {
                     Text("1/")
                         .font(AppTypography.mono(size: 30, weight: .medium))
-                        .foregroundStyle(paper.opacity(0.78))
+                        .foregroundStyle(mutedInk)
                 }
                 Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
                     .font(AppTypography.bold(size: 80))
                     .monospacedDigit()
-                    .foregroundStyle(paper)
+                    .foregroundStyle(stateInk)
                     .contentTransition(.numericText())
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
+            .animation(.easeInOut(duration: 0.25), value: stateID)
             Text(exposureStatus)
                 .font(AppTypography.next(size: 10, weight: .medium))
                 .tracking(0.7)
-                .foregroundStyle(paper)
+                .foregroundStyle(stateInk.opacity(0.72))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
@@ -248,7 +262,19 @@ private struct SimpleApertureColumn: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(minHeight: 174, maxHeight: 174)
-        .background(outOfRange ? accentRed : (slow ? warningAmber : inRangeGreen))
+    }
+
+    /// The verdict is carried by the type, not by a painted panel: the page stays paper and the
+    /// number is the only thing that changes temperature.
+    private var stateInk: Color {
+        if outOfRange { return Palette.accent }
+        return slow ? Palette.amber : Palette.green
+    }
+
+    /// 0 good, 1 slow, 2 impossible. Whole numbers animate reliably; a `Color` does not.
+    private var stateID: Int {
+        if outOfRange { return 2 }
+        return slow ? 1 : 0
     }
 
     private var outOfRange: Bool { reading.deviation != nil }
@@ -286,7 +312,7 @@ struct SimpleExposurePair: View {
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .compositingGroup()
-        .shadow(color: Palette.cast, radius: 4, x: 0, y: 2)
+        .shadow(color: Palette.cast, radius: 10, x: 0, y: 3)
     }
 }
 
@@ -356,11 +382,12 @@ private struct FocusRingScale: View {
             position: Focus.position(distance),
             near: Focus.position(depthRange.near),
             far: Focus.position(depthRange.far),
-            sharpLabel: Focus.advice(subject: distance, aperture: aperture.n, feet: feet).sharp
-                ? Focus.advice(subject: distance, aperture: aperture.n, feet: feet).label : nil,
             marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
         .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
+        // Stopping down widens the depth of field, and the scale pulls back to fit it. Opening up
+        // pushes the scale in. Slow and heavy, so it reads as glass moving, not as numbers changing.
+        .animation(.spring(response: 0.62, dampingFraction: 0.86), value: aperture.n)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
@@ -370,7 +397,6 @@ private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
     var far: Double
-    let sharpLabel: String?
     let marks: [(label: String, p: Double)]
 
     var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
@@ -389,15 +415,13 @@ private struct FocusDialFace: View, Animatable {
         .clipped()
     }
 
-    /// Points of travel per unit of focus ring. A shallow depth of field zooms in on a few ticks, a deep one
-    /// pulls out to show more numbers. It is capped so the nearest engraved number is always in view, and it
-    /// depends only on the depth of field, never on where the pointer sits, so it doesn't pump while you move.
+    /// Points of travel per unit of focus ring. A shallow depth of field magnifies the scale; a deep
+    /// one pulls back until nearly the whole ring is in view. Tied to the depth of field and to
+    /// nothing else, so it never pumps while you move the point.
     private func zoom(width: CGFloat) -> CGFloat {
-        let span = max(far - near, 0.01)
-        let wanted: CGFloat = width / CGFloat(span * 1.8)
-        let clamped: CGFloat = min(max(wanted, 380), 1400)
-        let cap: CGFloat = width * 2.3
-        return min(clamped, cap)
+        let span = max(far - near, 0.006)
+        let wanted: CGFloat = width * 0.55 / CGFloat(span)
+        return min(max(wanted, width * 1.15), width * 8)
     }
 
     private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
@@ -422,6 +446,27 @@ private struct FocusDialFace: View, Animatable {
             return Double(min(max(edge / fadeWidth, 0), 1))
         }
 
+        // Depth of field, drawn across the scale: the stretch that is sharp at this aperture.
+        // A sliver round the pointer at f/2.8, most of the ruler at f/22.
+        let nearX: CGFloat = x(near)
+        let farX: CGFloat = x(far)
+        let left: CGFloat = min(nearX, farX)
+        let right: CGFloat = max(nearX, farX)
+        let bandTop: CGFloat = markTop - 7
+        if right - left > 1.5 {
+            let width: CGFloat = right - left
+            context.fill(
+                Path(roundedRect: CGRect(x: left, y: bandTop, width: width,
+                                         height: baseline - bandTop + 2),
+                     cornerRadius: 3),
+                with: .color(goldenGreen.opacity(0.10)))
+            context.fill(
+                // Never thinner than an index line, however narrow the band really is.
+                Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: 3),
+                     cornerRadius: 1.5),
+                with: .color(goldenGreen.opacity(0.70)))
+        }
+
         // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
         let markPositions: [Double] = marks.map { $0.p }
         for i in 0...60 {
@@ -440,11 +485,13 @@ private struct FocusDialFace: View, Animatable {
             context.stroke(tick, with: .color(mutedInk.opacity(f * strength)), lineWidth: 1.5)
         }
 
+        var lastRight: CGFloat = -CGFloat.greatestFiniteMagnitude
         for mark in marks {
             let px: CGFloat = x(mark.p)
             let f: Double = fade(px)
             if f <= 0 { continue }
-            let green: Bool = mark.label == sharpLabel
+            // Every mark inside the depth of field is sharp, so every one of them turns green.
+            let green: Bool = mark.p >= near - 0.004 && mark.p <= far + 0.004
             let color: Color = green ? goldenGreen : inkColor
             var tick = Path()
             tick.move(to: CGPoint(x: px, y: baseline))
@@ -456,7 +503,12 @@ private struct FocusDialFace: View, Animatable {
                 .font(AppTypography.bold(size: underPointer ? 29 : 24))
                 .foregroundColor(color.opacity(f))
             let text = context.resolve(label)
+            let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
+            // A crowded stretch of the ring drops numbers rather than letting them run together.
+            // The tick is always there, so you never lose the position of a mark.
+            guard underPointer || px - textWidth / 2 > lastRight + 5 else { continue }
             context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
+            lastRight = px + textWidth / 2
         }
 
         // Fixed pointer
@@ -511,7 +563,7 @@ struct ScrubDial: View {
                 size: 16.5,
                 weight: .bold,
                 shrink: 0.20,
-                alpha: { d in 0.28 + 0.72 * (1 - smoothstep(0.2, 2.3, d)) }
+                alpha: { d in 0.22 + 0.78 * (1 - smoothstep(0.10, 2.00, d)) }
             )
                 .frame(maxWidth: .infinity)
                 .frame(height: face)
@@ -601,7 +653,7 @@ private struct ValueRail: View, Animatable {
                 let scale = 1 - shrink * smoothstep(0, 1.6, abs(d))
                 let text = Text(labels[i])
                     .font(AppTypography.mono(size: size, weight: weight))
-                    .foregroundColor(inkColor.opacity(a))
+                    .foregroundColor(Palette.engraved.opacity(a))
                 var sub = ctx
                 sub.translateBy(x: cx, y: y)
                 sub.scaleBy(x: scale, y: scale)
@@ -636,7 +688,7 @@ struct SetKeyStyle: ButtonStyle {
                 }
                 .compositingGroup()
                 .shadow(color: Palette.cast,
-                        radius: active ? 1 : 3,
+                        radius: active ? 2 : 6,
                         x: 0, y: active ? 0.5 : 2)
             }
             .overlay {
@@ -863,7 +915,7 @@ private struct DrumFace: View, Animatable {
                 let scale = 1 - 0.26 * smoothstep(0, 1.6, ad)
                 let text = Text(Rollei.stops[i].label)
                     .font(AppTypography.bold(size: 19.5))
-                    .foregroundColor(inkColor.opacity(a))
+                    .foregroundColor(Palette.engraved.opacity(a))
                 var sub = ctx
                 sub.translateBy(x: cx, y: y)
                 sub.scaleBy(x: scale, y: scale)
@@ -908,7 +960,7 @@ struct MeterDrum: View {
             position: position,
             labels: labels,
             row: pitch,
-            size: 12,
+            size: 13.5,
             weight: .bold,
             shrink: 0.20,
             alpha: { d in
@@ -1006,10 +1058,20 @@ struct FreezeButton: View {
                     .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 84, height: 84)
-                    .shadow(color: Palette.cast, radius: 4, x: 0, y: 2)
+                    .shadow(color: Palette.cast, radius: 8, x: 0, y: 2.5)
                 Circle().fill(hairline).frame(width: 68, height: 68)
                 Circle()
-                    .fill(paper.shadow(.inner(color: Palette.shade, radius: 3, x: 0, y: 2)))
+                    .fill(paper)
+                    .overlay {
+                        // Same fall of light as the windows: shadow at the top, clean below.
+                        LinearGradient(
+                            stops: [
+                                .init(color: Palette.recess.opacity(0.85), location: 0),
+                                .init(color: Palette.recess.opacity(0), location: 0.34)
+                            ],
+                            startPoint: .top, endPoint: .bottom)
+                        .clipShape(Circle())
+                    }
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
@@ -1030,18 +1092,6 @@ struct FreezeButton: View {
 
 // MARK: - LiDAR marker (on the viewfinder)
 
-private struct FocusBrackets: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        let l = r.width * 0.3
-        p.move(to: CGPoint(x: r.minX, y: r.minY + l)); p.addLine(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.minX + l, y: r.minY))
-        p.move(to: CGPoint(x: r.maxX - l, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY + l))
-        p.move(to: CGPoint(x: r.maxX, y: r.maxY - l)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.maxX - l, y: r.maxY))
-        p.move(to: CGPoint(x: r.minX + l, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY - l))
-        return p
-    }
-}
-
 /// A short, expanding ring confirms a new focus point without obscuring the camera image.
 private struct FocusPing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1051,9 +1101,9 @@ private struct FocusPing: View {
     var body: some View {
         Circle()
             .stroke(tooClose ? warnRed : Palette.lensLight, lineWidth: 1)
-            .frame(width: 30, height: 30)
-            .scaleEffect(expanded ? 1.8 : 0.45)
-            .opacity(expanded ? 0 : 0.7)
+            .frame(width: 26, height: 26)
+            .scaleEffect(expanded ? 1.7 : 0.5)
+            .opacity(expanded ? 0 : 0.55)
             .onAppear {
                 if reduceMotion {
                     expanded = true
@@ -1075,16 +1125,17 @@ struct FocusMarker: View {
             if pulseID > 0 {
                 FocusPing(tooClose: tooClose).id(pulseID)
             }
-            FocusBrackets()
-                .stroke(tooClose ? warnRed : Palette.lensLight,
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                .frame(width: 30, height: 30)
-                .scaleEffect(tooClose ? 0.88 : 1)
+            Circle()
+                .stroke(tooClose ? warnRed : Palette.lensLight.opacity(0.92),
+                        style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+                .frame(width: 26, height: 26)
+                .scaleEffect(tooClose ? 0.86 : 1)
             Circle()
                 .fill(tooClose ? warnRed : Palette.lensLight)
-                .frame(width: 3, height: 3)
+                .frame(width: 2.5, height: 2.5)
         }
         .frame(width: 30, height: 30)
+        .shadow(color: Palette.lensDark.opacity(0.45), radius: 1.5)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }

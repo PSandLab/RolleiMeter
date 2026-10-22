@@ -2,20 +2,15 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 
+/// The spot meter mark: one thin ring with a point in the middle. The crosshair arms are gone —
+/// a reticle built from arms reads as a computer overlay, and this is meant to feel engraved.
 private struct SpotReticle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let radius = min(rect.width, rect.height) * 0.47
+        let radius = min(rect.width, rect.height) / 2 - 0.5
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        path.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-        let inner = radius * 0.72
-        let outer = radius * 0.98
-        path.move(to: CGPoint(x: center.x - outer, y: center.y)); path.addLine(to: CGPoint(x: center.x - inner, y: center.y))
-        path.move(to: CGPoint(x: center.x + inner, y: center.y)); path.addLine(to: CGPoint(x: center.x + outer, y: center.y))
-        path.move(to: CGPoint(x: center.x, y: center.y - outer)); path.addLine(to: CGPoint(x: center.x, y: center.y - inner))
-        path.move(to: CGPoint(x: center.x, y: center.y + inner)); path.addLine(to: CGPoint(x: center.x, y: center.y + outer))
-        let dot = min(2.2, max(1.2, radius * 0.055))
-        path.addEllipse(in: CGRect(x: center.x - dot, y: center.y - dot, width: dot * 2, height: dot * 2))
+        path.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius,
+                                   width: radius * 2, height: radius * 2))
         return path
     }
 }
@@ -331,9 +326,16 @@ struct ContentView: View {
 
                 if spotActive {
                     let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
-                    SpotReticle()
-                        .stroke(Palette.lensLight.opacity(0.96), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-                        .shadow(color: Palette.lensDark.opacity(0.45), radius: 1.5)
+                    ZStack {
+                        // A whisper of cream inside the ring, so you can see the area being metered
+                        // without hiding the tone you are metering.
+                        Circle().fill(Palette.lensLight.opacity(0.05))
+                        SpotReticle()
+                            .stroke(Palette.lensLight.opacity(0.95),
+                                    style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
+                        Circle().fill(Palette.lensLight).frame(width: 2.5, height: 2.5)
+                    }
+                        .shadow(color: Palette.lensDark.opacity(0.40), radius: 1.5)
                         .frame(width: d, height: d)
                         .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
                         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
@@ -344,11 +346,9 @@ struct ContentView: View {
                     // How far the spot sits from the overall scene, in stops.
                     if let delta = meter.spotDelta {
                         Text(Fmt.stops(delta))
-                            .font(AppTypography.font(size: 12, weight: .medium))
+                            .font(AppTypography.font(size: 13, weight: .medium))
                             .foregroundStyle(Palette.lensLight)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Palette.lensDark.opacity(0.62), in: Capsule())
+                            .shadow(color: Palette.lensDark.opacity(0.8), radius: 2)
                             .contentTransition(.numericText())
                             .position(x: spot.x * geo.size.width, y: max(14, spot.y * geo.size.height - d / 2 - 14))
                             .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
@@ -409,8 +409,8 @@ struct ContentView: View {
             .overlay {
                 // The image sits in the plate, not on it: a soft shadow gathers round the inside edge.
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Palette.lensDark.opacity(0.55), lineWidth: 5)
-                    .blur(radius: 4)
+                    .strokeBorder(Palette.lensDark.opacity(0.42), lineWidth: 6)
+                    .blur(radius: 5)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .allowsHitTesting(false)
             }
@@ -461,7 +461,7 @@ struct ContentView: View {
 
     // MARK: - Metering mode
 
-    /// The order the wheel turns in: matrix, then highlight, then spot, then round again.
+    /// The order the wheel turns in: multi, then bright, then spot, then round again.
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
 
     /// What the wheel shows: spot wins while a spot is placed, otherwise matrix or highlight.

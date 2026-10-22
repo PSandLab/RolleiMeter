@@ -20,6 +20,9 @@ enum Palette {
     static let paper = dynamic(0xF1EEE6, 0x1C1B19)
     static let ink = dynamic(0x262626, 0xE9E5DB)
     static let mutedInk = dynamic(0x8B8982, 0x8E8B83)
+    /// Type inside a window. A shade off the body ink and a little warmer, so a column of numbers
+    /// reads as print on paper rather than as a screen.
+    static let engraved = dynamic(0x3A3833, 0xDCD7CD)
     static let hairline = dynamic(0xD4D0C7, 0x3B3935)
     static let accent = dynamic(0xB32631, 0xE2575F)
     static let green = dynamic(0x4C6B52, 0x86AE8D)
@@ -30,33 +33,30 @@ enum Palette {
     static let highlight = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 1, alpha: 0.06)
-            : UIColor(white: 1, alpha: 0.6)
+            : UIColor(white: 1, alpha: 0.42)
     })
 
     // MARK: - Depth
 
     /// A bezel standing proud of the plate: paper lit from the top left.
-    static let bezelTop = dynamic(0xFCFAF3, 0x2F2E28)
-    static let bezelBottom = dynamic(0xE5E1D5, 0x1E1D1A)
+    static let bezelTop = dynamic(0xF8F5EC, 0x2F2E28)
+    static let bezelBottom = dynamic(0xE7E3D7, 0x1E1D1A)
     /// The floor of a sunken window.
-    static let well = dynamic(0xEAE6DB, 0x141311)
-    /// Shadow gathered in a recess.
-    static let shade = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(white: 0, alpha: 0.55)
-            : UIColor(white: 0.12, alpha: 0.15)
-    })
-    /// Light caught on the lower lip of a recess.
-    static let lip = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(white: 1, alpha: 0.07)
-            : UIColor(white: 1, alpha: 0.85)
-    })
-    /// Soft shadow cast by anything raised off the plate.
+    static let well = dynamic(0xEDE9DF, 0x141311)
+    /// Soft shadow cast by anything raised off the plate. Kept light and wide: a tight, dark shadow
+    /// is what makes a surface look like a cheap imitation of a real one.
     static let cast = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
-            ? UIColor(white: 0, alpha: 0.5)
-            : UIColor(white: 0.15, alpha: 0.12)
+            ? UIColor(white: 0, alpha: 0.40)
+            : UIColor(white: 0.20, alpha: 0.09)
+    })
+
+    /// The shadow under the top lip of a recess. It has to fade out on the way down, or the floor
+    /// reads as a flat vignette instead of something lit from above. Used as a gradient, never a ring.
+    static let recess = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor(white: 0, alpha: 0.50)
+            : UIColor(white: 0.18, alpha: 0.13)
     })
 
     /// Fixed colours for things drawn on top of the camera image. They never flip with the theme.
