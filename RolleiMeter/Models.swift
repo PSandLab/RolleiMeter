@@ -99,16 +99,16 @@ enum Exposure {
 }
 
 enum Fmt {
-    /// Stop difference as +1⅓ / −⅔ / 0.
+    /// One decimal, a real minus sign. The bundled mono has no ⅓ or ⅔ glyph, so fractions would be
+    /// drawn in a fallback face at a different width — which is what made the values jump sideways.
+    private static func signedThirds(_ thirds: Int) -> String {
+        (thirds > 0 ? "+" : "−") + String(format: "%.1f", Double(abs(thirds)) / 3.0)
+    }
+
+    /// Stop difference as +0.3 / −0.7 / 0.
     static func stops(_ v: Double) -> String {
-        let n = Int((abs(v) * 3).rounded())
-        if n == 0 { return "0" }
-        let whole = n / 3
-        let rem = n % 3
-        var s = whole > 0 ? "\(whole)" : ""
-        if rem == 1 { s += "⅓" }
-        if rem == 2 { s += "⅔" }
-        return (v > 0 ? "+" : "−") + s
+        let thirds = Int((v * 3).rounded())
+        return thirds == 0 ? "0" : signedThirds(thirds)
     }
 
     /// Signed exposure error in stops, quantized to the nearest third for a calm readout.
@@ -116,16 +116,11 @@ enum Fmt {
         exposureAmount(stops) + " EV"
     }
 
-    /// Signed stop amount without a unit, rounded in 1/3-stop steps.
+    /// Signed stop amount without a unit, rounded in 1/3-stop steps. An out-of-range reading always
+    /// shows at least a third, so a hair past the limit doesn't read as no error at all.
     static func exposureAmount(_ stops: Double) -> String {
-        guard stops != 0 else { return "0" }
         let thirds = max(1, Int((abs(stops) * 3).rounded()))
-        let whole = thirds / 3
-        let remainder = thirds % 3
-        var amount = whole > 0 ? "\(whole)" : ""
-        if remainder == 1 { amount += "⅓" }
-        if remainder == 2 { amount += "⅔" }
-        return (stops < 0 ? "−" : "+") + amount
+        return (stops < 0 ? "−" : "+") + String(format: "%.1f", Double(thirds) / 3.0)
     }
 
     /// LiDAR distance. `m` is metres; nil shows a dash.

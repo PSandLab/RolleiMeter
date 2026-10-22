@@ -33,6 +33,32 @@ enum Palette {
             : UIColor(white: 1, alpha: 0.6)
     })
 
+    // MARK: - Depth
+
+    /// A bezel standing proud of the plate: paper lit from the top left.
+    static let bezelTop = dynamic(0xFCFAF3, 0x2F2E28)
+    static let bezelBottom = dynamic(0xE5E1D5, 0x1E1D1A)
+    /// The floor of a sunken window.
+    static let well = dynamic(0xEAE6DB, 0x141311)
+    /// Shadow gathered in a recess.
+    static let shade = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor(white: 0, alpha: 0.55)
+            : UIColor(white: 0.12, alpha: 0.15)
+    })
+    /// Light caught on the lower lip of a recess.
+    static let lip = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor(white: 1, alpha: 0.07)
+            : UIColor(white: 1, alpha: 0.85)
+    })
+    /// Soft shadow cast by anything raised off the plate.
+    static let cast = Color(UIColor { trait in
+        trait.userInterfaceStyle == .dark
+            ? UIColor(white: 0, alpha: 0.5)
+            : UIColor(white: 0.15, alpha: 0.12)
+    })
+
     /// Fixed colours for things drawn on top of the camera image. They never flip with the theme.
     static let lensLight = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
     static let lensDark = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)

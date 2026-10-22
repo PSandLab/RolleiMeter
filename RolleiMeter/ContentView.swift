@@ -409,6 +409,14 @@ struct ContentView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                // The image sits in the plate, not on it: a soft shadow gathers round the inside edge.
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Palette.lensDark.opacity(0.55), lineWidth: 5)
+                    .blur(radius: 4)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .allowsHitTesting(false)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)

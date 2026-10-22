@@ -21,7 +21,8 @@ struct Panel: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Palette.paper)
+                .fill(LinearGradient(colors: [Palette.bezelTop, Palette.paper],
+                                     startPoint: .top, endPoint: .bottom))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(stroke, lineWidth: lineWidth))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -31,8 +32,61 @@ struct Panel: ViewModifier {
                         )
                         .padding(1)
                 )
-                .shadow(color: Palette.lensDark.opacity(0.07), radius: 3, y: 1)
+                .compositingGroup()
+                .shadow(color: Palette.cast, radius: 4, x: 0, y: 2)
         }
+    }
+}
+
+// MARK: - Depth
+
+/// 0 below `edge0`, 1 above `edge1`, easing in between.
+private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
+    guard edge1 > edge0 else { return x < edge0 ? 0 : 1 }
+    let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
+    return t * t * (3 - 2 * t)
+}
+
+/// A window set into the plate: a bezel that stands proud of the paper, and a floor that sinks away
+/// from the light — shadow gathering under the top lip, a bright line where the bottom lip catches it.
+/// Every value you turn or slide in this app lives in one of these.
+private struct WindowInset: ViewModifier {
+    var radius: CGFloat = 12
+    var bezel: CGFloat = 5
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: max(radius - bezel, 3), style: .continuous)
+                    .fill(Palette.well
+                        .shadow(.inner(color: Palette.shade, radius: 4, x: 0, y: 2))
+                        .shadow(.inner(color: Palette.lip, radius: 1.5, x: 0, y: -1)))
+            }
+            .padding(bezel)
+            .background {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
+            }
+            .compositingGroup()
+            .shadow(color: Palette.cast, radius: 3, x: 0, y: 2)
+    }
+}
+
+/// The small triangle that sits against the window and says "this one".
+private struct PointerTriangle: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.midY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -128,7 +182,9 @@ struct EVBadge: View {
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
             Text("EV " + evText)
+                .monospacedDigit()
                 .contentTransition(.numericText())
+                .frame(width: 46, alignment: .leading)
         }
         .font(AppTypography.font(size: 13, weight: .medium))
         .foregroundStyle(inkColor)
@@ -170,6 +226,7 @@ private struct SimpleApertureColumn: View {
                 }
                 Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
                     .font(AppTypography.bold(size: 80))
+                    .monospacedDigit()
                     .foregroundStyle(paper)
                     .contentTransition(.numericText())
                     .lineLimit(1)
@@ -229,6 +286,8 @@ struct SimpleExposurePair: View {
         .background(paper)
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .compositingGroup()
+        .shadow(color: Palette.cast, radius: 4, x: 0, y: 2)
     }
 }
 
@@ -413,7 +472,9 @@ private struct FocusDialFace: View, Animatable {
 
 // MARK: - Scrub dial
 
-/// A horizontal ruler you drag under a fixed pointer. One haptic tick per step.
+/// A window of engraved values. Drag it up or down and the strip turns through the window: the value
+/// under the pointer darkens and swells while its neighbours shrink and fade towards the rim, so you
+/// watch one number become the next instead of seeing it replaced.
 struct ScrubDial: View {
     let title: String
     @Binding var selection: Int
@@ -421,40 +482,48 @@ struct ScrubDial: View {
     /// The "home" value (0 compensation, ISO 100). Landing on it clicks harder; double-tap returns to it.
     var resetIndex: Int? = nil
 
-    private let spacing: CGFloat = 15
+    /// Points of travel between two neighbouring values.
+    private let row: CGFloat = 15.5
+    /// Height of the glass, inside the bezel.
+    private let face: CGFloat = 78
+
     @State private var base: Int?
     @State private var drag: CGFloat = 0
 
     private var safeSelection: Int { min(max(selection, 0), max(labels.count - 1, 0)) }
 
-    /// Fractional index under the pointer. Follows the finger while dragging.
+    /// Fractional index under the pointer. Follows the finger exactly while dragging.
     private var position: Double {
         guard let base else { return Double(safeSelection) }
-        return min(max(Double(base) - Double(drag / spacing), 0), Double(max(labels.count - 1, 0)))
+        return min(max(Double(base) - Double(drag / row), 0), Double(max(labels.count - 1, 0)))
     }
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 5) {
             Text(title)
                 .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(1)
+                .tracking(1.2)
                 .foregroundStyle(mutedInk)
-            Text(labels.isEmpty ? "" : labels[safeSelection])
-                .font(AppTypography.bold(size: 28))
-                .foregroundStyle(inkColor)
-                .contentTransition(.numericText())
-                .animation(.smooth(duration: 0.15), value: selection)
-            DialFace(position: position, count: labels.count, spacing: spacing, home: resetIndex)
-                .frame(height: 30)
+
+            ValueRail(position: position, labels: labels, row: row)
+                .frame(maxWidth: .infinity)
+                .frame(height: face)
+                .overlay(alignment: .trailing) {
+                    PointerTriangle()
+                        .fill(accentRed)
+                        .frame(width: 7, height: 11)
+                        .padding(.trailing, 7)
+                }
+                .modifier(WindowInset(radius: 14, bezel: 5))
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     if base == nil { base = safeSelection }
-                    drag = value.translation.width
+                    drag = value.translation.height
                     let index = Int(position.rounded())
                     if index != selection {
                         selection = index
@@ -466,7 +535,7 @@ struct ScrubDial: View {
                     }
                 }
                 .onEnded { _ in
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         base = nil
                         drag = 0
                     }
@@ -492,11 +561,12 @@ struct ScrubDial: View {
     }
 }
 
-private struct DialFace: View, Animatable {
+/// The strip of values drawn inside a window. Everything is one piece: the number at the centre of
+/// the window is the same drawing as the numbers above and below it, only closer to the light.
+private struct ValueRail: View, Animatable {
     var position: Double
-    let count: Int
-    let spacing: CGFloat
-    var home: Int? = nil
+    let labels: [String]
+    let row: CGFloat
 
     var animatableData: Double {
         get { position }
@@ -504,46 +574,59 @@ private struct DialFace: View, Animatable {
     }
 
     var body: some View {
-        Canvas { context, size in
+        Canvas { ctx, size in
             let cx = size.width / 2
-            for i in 0..<count {
-                let x = cx + CGFloat(Double(i) - position) * spacing
-                let fade = Double(min(1, max(0, min(x, size.width - x) / 30)))
-                if fade <= 0 { continue }
-                // Third-stop steps: every third tick is a full stop.
-                let major = i % 3 == 0
-                var tick = Path()
-                tick.move(to: CGPoint(x: x, y: size.height))
-                tick.addLine(to: CGPoint(x: x, y: size.height - (major ? 17 : 9)))
-                let isHome = i == home
-                context.stroke(tick, with: .color((isHome ? inkColor : mutedInk).opacity(fade)),
-                               lineWidth: isHome ? 2.4 : (major ? 1.8 : 1.2))
+            let midY = size.height / 2
+            let half = max(size.height / 2, 1)
+            for i in labels.indices {
+                let d = CGFloat(Double(i) - position)
+                let y = midY + d * row
+                if y < -row || y > size.height + row { continue }
+                // Distance from the middle of the window, 0 at the pointer and 1 at the rim.
+                let r = min(abs(d * row) / half, 1.3)
+                let rim = 1 - smoothstep(0.70, 1.05, r)
+                if rim <= 0.02 { continue }
+                let near = 1 - smoothstep(0, 0.9, r)
+                let text = Text(labels[i])
+                    .font(AppTypography.mono(size: 16.5, weight: .bold))
+                    .foregroundColor(inkColor.opacity(rim * (0.34 + 0.66 * near)))
+                var sub = ctx
+                sub.translateBy(x: cx, y: y)
+                sub.scaleBy(x: 1 - 0.22 * smoothstep(0, 0.95, r), y: 1 - 0.22 * smoothstep(0, 0.95, r))
+                sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
             }
-            var pointer = Path()
-            pointer.move(to: CGPoint(x: cx - 5, y: 0))
-            pointer.addLine(to: CGPoint(x: cx + 5, y: 0))
-            pointer.addLine(to: CGPoint(x: cx, y: 8))
-            pointer.closeSubpath()
-            context.fill(pointer, with: .color(accentRed))
         }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
 // MARK: - Paper keys (the square buttons beside the shutter)
 
+/// A key standing off the plate: lit along its top-left edge, casting a soft shadow underneath.
+/// Pressed, it loses the light and sinks a little.
 struct PaperKeyStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(configuration.isPressed ? Palette.hairline : Palette.paper)
-            )
-            .overlay(
+                    .fill(LinearGradient(
+                        colors: configuration.isPressed
+                            ? [Palette.bezelBottom, Palette.paper]
+                            : [Palette.bezelTop, Palette.bezelBottom],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .compositingGroup()
+                    .shadow(color: Palette.cast,
+                            radius: configuration.isPressed ? 1 : 3,
+                            x: 0, y: configuration.isPressed ? 0.5 : 2)
+            }
+            .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Palette.ink.opacity(0.16), lineWidth: 1)
-            )
+                    .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
+            }
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
@@ -554,17 +637,31 @@ struct SetKeyStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: configuration.isPressed
+                                ? [Palette.bezelBottom, Palette.paper]
+                                : [Palette.bezelTop, Palette.bezelBottom],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Palette.ink)
+                        .opacity(active ? 1 : 0)
+                }
+                .compositingGroup()
+                .shadow(color: Palette.cast,
+                        radius: active ? 1 : 3,
+                        x: 0, y: active ? 0.5 : 2)
+            }
+            .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(active ? Palette.ink : (configuration.isPressed ? Palette.hairline : Palette.paper))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Palette.ink.opacity(active ? 0 : 0.16), lineWidth: 1)
-            )
+                    .strokeBorder(Palette.ink.opacity(active ? 0 : 0.10), lineWidth: 1)
+            }
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.2), value: active)
     }
 }
 
@@ -621,8 +718,10 @@ struct ApertureDrum: View {
 
     private let width: CGFloat = 60
     private let height: CGFloat = 84
+    /// Thickness of the bezel around the glass.
+    private let bezel: CGFloat = 4
     /// Points of finger travel per stop.
-    private let pitch: CGFloat = 28
+    private let pitch: CGFloat = 22
     private let homeIndex = 3
 
     @State private var position: Double = 0
@@ -636,58 +735,31 @@ struct ApertureDrum: View {
     private var nearest: Int { min(max(Int(position.rounded()), 0), stopCount - 1) }
 
     var body: some View {
-        ZStack {
-            DrumTicks(position: position, pitch: pitch)
-                .allowsHitTesting(false)
-
-            Text(Rollei.stops[nearest].label)
-                .font(AppTypography.bold(size: 30))
-                .foregroundStyle(inkColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .contentTransition(.numericText())
-                .animation(.smooth(duration: 0.15), value: nearest)
-                .allowsHitTesting(false)
-        }
-        .frame(width: width, height: height)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(paper)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(inkColor.opacity(0.16), lineWidth: 1)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
-                    lineWidth: 1
-                )
-                .padding(1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .gesture(dragGesture)
-        .onAppear {
-            position = Double(index)
-            lastDetent = index
-        }
-        .onChange(of: index) { newValue in
-            guard base == nil else { return }
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                position = Double(newValue)
+        DrumFace(position: position, pitch: pitch)
+            .frame(width: width - bezel * 2, height: height - bezel * 2)
+            .modifier(WindowInset(radius: 11, bezel: bezel))
+            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .gesture(dragGesture)
+            .onAppear {
+                position = Double(index)
+                lastDetent = index
             }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Aperture")
-        .accessibilityValue("f/" + Rollei.stops[nearest].label + (auto ? ", auto" : ", manual"))
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: onPick(min(nearest + 1, stopCount - 1))
-            case .decrement: onPick(max(nearest - 1, 0))
-            @unknown default: break
+            .onChange(of: index) { newValue in
+                guard base == nil else { return }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                    position = Double(newValue)
+                }
             }
-        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Aperture")
+            .accessibilityValue("f/" + Rollei.stops[nearest].label + (auto ? ", auto" : ", manual"))
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: onPick(min(nearest + 1, stopCount - 1))
+                case .decrement: onPick(max(nearest - 1, 0))
+                @unknown default: break
+                }
+            }
     }
 
     private var dragGesture: some Gesture {
@@ -767,9 +839,10 @@ struct ApertureDrum: View {
     }
 }
 
-/// The neighbouring stops, scrolling behind the fixed window. The one at the centre is hidden —
-/// the big number lives there instead.
-private struct DrumTicks: View, Animatable {
+/// The ring of stops turning behind the window. Every stop is drawn the same way; the one at the
+/// pointer is simply nearer the light and a little larger, so a drag reads as the ring turning and
+/// not as one number being swapped for another.
+private struct DrumFace: View, Animatable {
     var position: Double
     let pitch: CGFloat
 
@@ -779,23 +852,31 @@ private struct DrumTicks: View, Animatable {
     }
 
     var body: some View {
-        Canvas { context, size in
+        Canvas { ctx, size in
+            let cx = size.width / 2
             let midY = size.height / 2
+            let half = max(size.height / 2, 1)
             for i in Rollei.stops.indices {
-                let d = Double(i) - position
-                if abs(d) > 1.8 { continue }
-                let inner = min(max((abs(d) - 0.5) / 0.5, 0), 1)
-                let edge = min(max((1.6 - abs(d)) / 0.5, 0), 1)
-                let alpha = 0.36 * inner * edge
-                if alpha <= 0.01 { continue }
-                let label = Text(Rollei.stops[i].label)
-                    .font(AppTypography.mono(size: 13, weight: .medium))
-                    .foregroundColor(inkColor.opacity(alpha))
-                let y = midY + CGFloat(d) * pitch
-                context.draw(context.resolve(label), at: CGPoint(x: size.width / 2, y: y), anchor: .center)
+                let d = CGFloat(Double(i) - position)
+                let y = midY + d * pitch
+                if y < -pitch || y > size.height + pitch { continue }
+                let r = min(abs(d * pitch) / half, 1.3)
+                let rim = 1 - smoothstep(0.68, 1.02, r)
+                if rim <= 0.02 { continue }
+                let near = 1 - smoothstep(0, 0.95, r)
+                let text = Text(Rollei.stops[i].label)
+                    .font(AppTypography.bold(size: 20))
+                    .foregroundColor(inkColor.opacity(rim * (0.34 + 0.66 * near)))
+                let scale = 1 - 0.26 * smoothstep(0, 0.98, r)
+                var sub = ctx
+                sub.translateBy(x: cx, y: y)
+                sub.scaleBy(x: scale, y: scale)
+                sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
             }
         }
         .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -860,9 +941,14 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                Circle().fill(hairline).frame(width: 84, height: 84)
                 Circle()
-                    .fill(paper)
+                    .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 84, height: 84)
+                    .shadow(color: Palette.cast, radius: 4, x: 0, y: 2)
+                Circle().fill(hairline).frame(width: 68, height: 68)
+                Circle()
+                    .fill(paper.shadow(.inner(color: Palette.shade, radius: 3, x: 0, y: 2)))
                     .frame(width: 68, height: 68)
                     .scaleEffect(frozen ? 0.96 : 1)
                 Circle()
