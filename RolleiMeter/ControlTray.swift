@@ -1,23 +1,19 @@
 import SwiftUI
 import UIKit
 
-/// One tray for everything adjustable, in the app's own paper UI: the exposure dials on one tab,
-/// the rarely touched options on the other. No system sheet, no system form.
 struct ControlTray: View {
     @Binding var evIndex: Int
     @Binding var isoIndex: Int
     @Binding var useDIN: Bool
     @Binding var useFeet: Bool
     @Binding var calibration: Double
-    /// Metres between where the phone is held and where the Rollei's film plane sits (your eye).
     @Binding var armOffset: Double
-    /// Latest raw LiDAR distance in metres, without the arm offset.
     let rawDistance: () -> Double?
 
     @State private var tab = 0
-    /// 0 = idle, 1 = waiting for the phone to be moved to the eye.
     @State private var armStage = 0
     @State private var armCountdown = 4
+    @State private var armTask: Task<Void, Never>?
     @Namespace private var tabNamespace
 
     var body: some View {
@@ -41,9 +37,13 @@ struct ControlTray: View {
         .padding(.top, 4)
         .padding(.bottom, 6)
         .modifier(Panel())
+        .onDisappear {
+            // Cancel countdown task if tray is dismissed
+            armTask?.cancel()
+            armStage = 0
+            armCountdown = 4
+        }
     }
-
-    // MARK: Tabs
 
     private var tabs: some View {
         HStack(spacing: 24) {
@@ -77,8 +77,6 @@ struct ControlTray: View {
         .accessibilityAddTraits(tab == index ? .isSelected : [])
     }
 
-    // MARK: Dials
-
     private var dials: some View {
         HStack(spacing: 0) {
             ScrubDial(title: "EV", selection: $evIndex, labels: EVComp.labels, resetIndex: EVComp.zeroIndex)
@@ -91,8 +89,6 @@ struct ControlTray: View {
             )
         }
     }
-
-    // MARK: Options
 
     private var options: some View {
         VStack(spacing: 0) {
@@ -152,10 +148,6 @@ struct ControlTray: View {
         armOffset = min(max((next * 100).rounded() / 100, 0), 0.8)
     }
 
-    // MARK: Arm calibration
-
-    /// Tap with the phone held the way you naturally hold it, then bring it to your eye and hold still.
-    /// Four seconds later the second distance is read and the difference becomes the offset.
     private var armButton: some View {
         Button {
             startArmCalibration()
@@ -183,8 +175,9 @@ struct ControlTray: View {
         }
         armStage = 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        Task { @MainActor in
+        armTask = Task { @MainActor in
             for remaining in stride(from: 4, through: 1, by: -1) {
+                if Task.isCancelled { return }
                 armCountdown = remaining
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -192,6 +185,7 @@ struct ControlTray: View {
                 armStage = 0
                 armCountdown = 4
             }
+            if Task.isCancelled { return }
             guard let second = rawDistance(), second > first + 0.05 else {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return
@@ -202,9 +196,6 @@ struct ControlTray: View {
     }
 }
 
-// MARK: - Engraved choice
-
-/// Two or three engraved words with a sliding underline. Stands in for a segmented picker.
 struct EngravedChoice: View {
     let options: [String]
     @Binding var selection: Int
@@ -240,8 +231,6 @@ struct EngravedChoice: View {
         }
     }
 }
-
-// MARK: - Mini stepper
 
 private struct MiniStepper: View {
     let text: String

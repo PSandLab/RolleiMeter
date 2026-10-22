@@ -11,7 +11,6 @@ private let accentRed = Palette.accent
 private let goldenGreen = Palette.green
 private let warnRed = accentRed
 
-/// Paper panel: hairline edge, a faint light edge along the top, and a very soft shadow.
 struct Panel: ViewModifier {
     var stroke: Color = Palette.hairline
     var lineWidth: CGFloat = 1
@@ -35,8 +34,6 @@ struct Panel: ViewModifier {
         }
     }
 }
-
-// MARK: - Depth
 
 private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
     guard edge1 > edge0 else { return x < edge0 ? 0 : 1 }
@@ -96,8 +93,6 @@ private struct PointerTriangle: Shape {
     }
 }
 
-// MARK: - Camera preview
-
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
@@ -129,8 +124,6 @@ struct CameraPreview: UIViewRepresentable {
         uiView.onPress = onVolumePress
     }
 }
-
-// MARK: - EV badge
 
 private struct NeedleGauge: View {
     let ev: Double
@@ -192,9 +185,6 @@ struct EVBadge: View {
     }
 }
 
-// MARK: - Simple exposure and focus
-
-// Observes damp directly so only this column updates when the needle moves
 private struct SimpleApertureColumn: View {
     @ObservedObject var damp: Damper
     let iso: Double
@@ -267,12 +257,12 @@ private struct SimpleApertureColumn: View {
 }
 
 struct SimpleExposurePair: View {
-    // Does NOT observe damp directly, preventing the focus dial from redrawing needlessly!
     let damp: Damper
     let iso: Double
     let comp: Double
     let apertureIndex: Int
     let distance: Double?
+    let hasLiDAR: Bool
     let tooClose: Bool
     let feet: Bool
 
@@ -286,6 +276,7 @@ struct SimpleExposurePair: View {
             Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
             SimpleFocusColumn(
                 distance: distance,
+                hasLiDAR: hasLiDAR,
                 aperture: activeAperture,
                 tooClose: tooClose,
                 feet: feet
@@ -301,6 +292,7 @@ struct SimpleExposurePair: View {
 
 private struct SimpleFocusColumn: View {
     let distance: Double?
+    let hasLiDAR: Bool
     let aperture: (label: String, n: Double)
     let tooClose: Bool
     let feet: Bool
@@ -317,7 +309,14 @@ private struct SimpleFocusColumn: View {
             .padding(.top, 8)
             .padding(.bottom, 4)
 
-            if tooClose {
+            // Fix NO LIDAR insult glitch: check actual hardware capability first
+            if !hasLiDAR {
+                Text("NO LIDAR")
+                    .font(AppTypography.next(size: 11, weight: .medium))
+                    .tracking(0.7)
+                    .foregroundStyle(mutedInk)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if tooClose {
                 Text("0")
                     .font(AppTypography.bold(size: 68))
                     .foregroundStyle(warnRed)
@@ -326,11 +325,17 @@ private struct SimpleFocusColumn: View {
                 FocusRingScale(distance: distance, aperture: aperture, feet: feet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Text("NO LIDAR")
-                    .font(AppTypography.next(size: 11, weight: .medium))
-                    .tracking(0.7)
-                    .foregroundStyle(mutedInk)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Phone has LiDAR, but subject is farther than 5m / infinity
+                VStack(spacing: 3) {
+                    Text("—")
+                        .font(AppTypography.mono(size: 34, weight: .medium))
+                        .foregroundStyle(mutedInk)
+                    Text("OUT OF RANGE")
+                        .font(AppTypography.next(size: 9, weight: .medium))
+                        .tracking(0.6)
+                        .foregroundStyle(mutedInk.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity)
@@ -487,8 +492,6 @@ private struct FocusDialFace: View, Animatable {
     }
 }
 
-// MARK: - Scrub dial
-
 struct ScrubDial: View {
     let title: String
     @Binding var selection: Int
@@ -620,8 +623,6 @@ private struct ValueRail: View, Animatable {
     }
 }
 
-// MARK: - Paper keys
-
 struct SetKeyStyle: ButtonStyle {
     let active: Bool
 
@@ -654,8 +655,6 @@ struct SetKeyStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.2), value: active)
     }
 }
-
-// MARK: - Aperture drum
 
 enum AutoLampState {
     case off, good, slow, bad
@@ -862,8 +861,6 @@ private struct DrumFace: View, Animatable {
     }
 }
 
-// MARK: - Metering mode
-
 struct MeterDrum: View {
     let modes: [MeterMode]
     let index: Int
@@ -964,8 +961,6 @@ struct MeterDrum: View {
     }
 }
 
-// MARK: - Freeze button
-
 private struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -1015,8 +1010,6 @@ struct FreezeButton: View {
         .buttonStyle(PressStyle())
     }
 }
-
-// MARK: - LiDAR marker
 
 private struct FocusPing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

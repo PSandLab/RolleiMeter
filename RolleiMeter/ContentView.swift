@@ -2,8 +2,6 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 
-/// The spot meter mark: one thin ring with a point in the middle. The crosshair arms are gone —
-/// a reticle built from arms reads as a computer overlay, and this is meant to feel engraved.
 private struct SpotReticle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -16,34 +14,31 @@ private struct SpotReticle: Shape {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var meter = CameraMeter()
 
-    // Held in @State, not @StateObject, so 60 fps value changes only redraw the views that watch them.
-    // The EV needle starts low and winds up to the first reading.
     @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 70, damping: 12)
 
-    @AppStorage("mode") private var mode: MeterMode = .matrix   // matrix or highlight
-    @AppStorage("isoIndex") private var isoIndex = 6      // ISO 100
-    @AppStorage("evIndex") private var evIndex = 6        // 0 compensation
+    @AppStorage("mode") private var mode: MeterMode = .matrix
+    @AppStorage("isoIndex") private var isoIndex = 6
+    @AppStorage("evIndex") private var evIndex = 6
     @AppStorage("useDIN") private var useDIN = false
     @AppStorage("useFeet") private var useFeet = false
-    @AppStorage("simpleAperture") private var apertureStop = 0     // 0 = f/2.8 … 6 = f/22
+    @AppStorage("simpleAperture") private var apertureStop = 0
     @AppStorage("autoAperture") private var autoAperture = false
     @AppStorage("calibration") private var calibration = 0.0
-    /// Metres from the phone (held at a natural distance) back to the eye. Added silently to LiDAR readings.
     @AppStorage("armOffset") private var armOffset = 0.0
 
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
     @State private var trayOpen = false
-    /// Spot metering only happens after a hold in the viewfinder. Tapping a mode chip goes back.
     @State private var spotActive = false
-    @State private var spot = CGPoint(x: 0.5, y: 0.5)      // spot meter point (press and hold), viewfinder coordinates
-    @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)   // the same point in camera-frame coordinates
-    @State private var focus = CGPoint(x: 0.5, y: 0.5)     // LiDAR distance point (tap), viewfinder coordinates
+    @State private var spot = CGPoint(x: 0.5, y: 0.5)
+    @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)
+    @State private var focus = CGPoint(x: 0.5, y: 0.5)
     @State private var focusPulse = 0
-    @State private var focusBuf = CGPoint(x: 0.5, y: 0.5)  // the same point in camera-frame coordinates
+    @State private var focusBuf = CGPoint(x: 0.5, y: 0.5)
     @State private var spotGestureLive = false
     @State private var suppressTap = false
     @State private var showHint = false
@@ -56,11 +51,8 @@ struct ContentView: View {
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
-    /// The stop on the drum.
     private var apertureIndex: Int { min(max(apertureStop, 0), Rollei.stops.count - 1) }
 
-    /// Auto: the widest stop whose shutter is no faster than the camera's top speed. Wider always
-    /// means faster, so it is the first stop from f/2.8 that isn't blown.
     private var autoApertureIndex: Int {
         let reading = ev
         for i in Rollei.stops.indices {
@@ -70,7 +62,6 @@ struct ContentView: View {
         return Rollei.stops.count - 1
     }
 
-    /// What the drum, the shutter panel and the focus scale all agree on.
     private var resolvedApertureIndex: Int { autoAperture ? autoApertureIndex : apertureIndex }
     private var resolvedAperture: (label: String, n: Double) { Rollei.stops[resolvedApertureIndex] }
 
@@ -79,7 +70,6 @@ struct ContentView: View {
     private var liveEV: Double { meter.sceneEV + calibration }
     private var ev: Double { frozenEV ?? liveEV }
 
-    /// LiDAR distance plus the arm offset, so it is the distance from the film plane, not from the phone.
     private var shownDistance: Double? {
         guard let raw = frozenEV != nil ? frozenDist : meter.distance else { return nil }
         return raw + armOffset
@@ -119,7 +109,9 @@ struct ContentView: View {
             SimpleExposurePair(
                 damp: evDamp, iso: iso, comp: comp,
                 apertureIndex: resolvedApertureIndex,
-                distance: shownDistance, tooClose: tooClose, feet: useFeet
+                distance: shownDistance,
+                hasLiDAR: meter.hasLiDAR,
+                tooClose: tooClose, feet: useFeet
             )
 
             controls
@@ -133,7 +125,7 @@ struct ContentView: View {
         .persistentSystemOverlays(.hidden)
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
-            if mode == .spot { mode = .matrix }   // older versions could save spot as the mode
+            if mode == .spot { mode = .matrix }
             pushConfig()
             evDamp.set([ev])
             meter.start()
@@ -149,6 +141,16 @@ struct ContentView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             meter.stop()
         }
+        // Fix Battery Vampire Bug: stops camera when locked or backgrounded
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                UIApplication.shared.isIdleTimerDisabled = true
+                meter.start()
+            } else {
+                UIApplication.shared.isIdleTimerDisabled = false
+                meter.stop()
+            }
+        }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
         .onChange(of: spotBuf) { pushConfig() }
@@ -163,7 +165,6 @@ struct ContentView: View {
         .onChange(of: tooClose) {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
-        // A small click as the focus ring passes each engraved mark.
         .onChange(of: advice?.label) {
             if advice != nil { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.45) }
         }
@@ -173,8 +174,6 @@ struct ContentView: View {
         meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf)
     }
 
-    /// Switch to the dark palette in dim scenes, and back again in bright ones.
-    /// Needs a couple of seconds in the new light, so a quick glance at a dark corner does nothing.
     private func updateNight() {
         let wantNight = night ? liveEV < 6.5 : liveEV < 5.0
         if wantNight == night {
@@ -203,7 +202,6 @@ struct ContentView: View {
         }
     }
 
-    /// A very short dip to black and the camera shutter click, like a mirror slap.
     private func shutterBlink() {
         AudioServicesPlaySystemSound(1108)
         blink = true
@@ -222,7 +220,6 @@ struct ContentView: View {
         frozenPreviewImage = nil
     }
 
-    /// A stop picked by hand. Touching the drum always means "I'll take it".
     private func pickAperture(_ index: Int) {
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
@@ -246,8 +243,6 @@ struct ContentView: View {
         }
     }
 
-    /// The camera frame is 3:4 and the viewfinder fills its box, cropping whatever overflows.
-    /// Converts a point in the box (0...1) to a point in the camera frame (0...1).
     private func bufferPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
         let frame = 0.75
         let aspect = size.width / max(size.height, 1)
@@ -274,10 +269,12 @@ struct ContentView: View {
                         .transition(.opacity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                } else if frozenEV != nil {
+                    // Visual fallback to ensure preview looks paused even if raw buffer was busy
+                    Color.black.opacity(0.35)
+                        .allowsHitTesting(false)
                 }
 
-                // Tap = measure distance there (the crosshair).
-                // Press, hold and drag = spot meter there. Pinch = resize the spot.
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(
@@ -327,8 +324,6 @@ struct ContentView: View {
                 if spotActive {
                     let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
                     ZStack {
-                        // A whisper of cream inside the ring, so you can see the area being metered
-                        // without hiding the tone you are metering.
                         Circle().fill(Palette.lensLight.opacity(0.05))
                         SpotReticle()
                             .stroke(Palette.lensLight.opacity(0.95),
@@ -343,7 +338,6 @@ struct ContentView: View {
                         .transition(.scale(scale: 1.6).combined(with: .opacity))
                         .allowsHitTesting(false)
 
-                    // How far the spot sits from the overall scene, in stops.
                     if let delta = meter.spotDelta {
                         Text(Fmt.stops(delta))
                             .font(AppTypography.font(size: 13, weight: .medium))
@@ -399,7 +393,6 @@ struct ContentView: View {
                     .modifier(Panel())
                 }
 
-                // Shutter blink on freeze.
                 Color.black
                     .opacity(blink ? 0.9 : 0)
                     .allowsHitTesting(false)
@@ -407,7 +400,6 @@ struct ContentView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
-                // The image sits in the plate, not on it: a soft shadow gathers round the inside edge.
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Palette.lensDark.opacity(0.42), lineWidth: 6)
                     .blur(radius: 5)
@@ -429,7 +421,6 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// The tray key. A printed word, not a pictogram.
     private var trayKey: some View {
         Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
@@ -443,7 +434,6 @@ struct ContentView: View {
                 .foregroundStyle(trayOpen ? Palette.paper : Palette.ink.opacity(0.78))
                 .frame(width: 46, height: 46)
                 .overlay(alignment: .topTrailing) {
-                    // A small red dot while exposure compensation is on, so it can't be forgotten.
                     if safeEVIndex != EVComp.zeroIndex && !trayOpen {
                         Circle()
                             .fill(Palette.accent)
@@ -459,24 +449,16 @@ struct ContentView: View {
         .accessibilityValue(safeEVIndex != EVComp.zeroIndex ? "Exposure compensation on" : "")
     }
 
-    // MARK: - Metering mode
-
-    /// The order the wheel turns in: multi, then bright, then spot, then round again.
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
-
-    /// What the wheel shows: spot wins while a spot is placed, otherwise matrix or highlight.
     private var meterChoice: MeterMode { spotActive ? .spot : baseMode }
-
     private var meterIndex: Int { meterModes.firstIndex(of: meterChoice) ?? 0 }
 
-    /// A mode turned to on the wheel.
     private func pickMeterMode(_ index: Int) {
         let next = meterModes[min(max(index, 0), meterModes.count - 1)]
         guard next != meterChoice else { return }
         applyMeterMode(next)
     }
 
-    /// A tap on the wheel: one step on.
     private func cycleMeterMode() {
         UISelectionFeedbackGenerator().selectionChanged()
         applyMeterMode(meterModes[(meterIndex + 1) % meterModes.count])
@@ -494,8 +476,6 @@ struct ContentView: View {
         unfreeze()
     }
 
-    // MARK: - Controls
-
     private var controls: some View {
         ZStack {
             FreezeButton(frozen: frozenEV != nil) {
@@ -503,7 +483,6 @@ struct ContentView: View {
             }
 
             HStack(spacing: 0) {
-                // Metering lives on the left, under the EV badge it belongs to.
                 MeterDrum(
                     modes: meterModes,
                     index: meterIndex,
@@ -513,7 +492,6 @@ struct ContentView: View {
 
                 Spacer(minLength: 0)
 
-                // Aperture lives on the right, under the tray key.
                 HStack(spacing: 6) {
                     AutoLamp(state: autoLampState)
                     ApertureDrum(
@@ -528,7 +506,6 @@ struct ContentView: View {
         }
     }
 
-    /// The lamp repeats the shutter panel's verdict beside your thumb.
     private var autoLampState: AutoLampState {
         guard autoAperture else { return .off }
         let t = Exposure.idealShutter(ev100: ev, iso: iso, comp: comp,
