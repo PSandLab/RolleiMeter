@@ -16,40 +16,43 @@ enum Palette {
     }
 
     // Classic Braun matte light gray/cream & dark anthracite
-    static let paper = dynamic(0xF2EFE9, 0x1A1918)
+    static let paper = dynamic(0xF1EEE7, 0x1A1918)
     static let ink = dynamic(0x1F1F1F, 0xEBE7DF)
     static let mutedInk = dynamic(0x7D7A73, 0x949088)
     static let engraved = dynamic(0x2B2926, 0xD4CFC5)
-    static let hairline = dynamic(0xD8D4CB, 0x33312D)
+    static let hairline = dynamic(0xD5D1C7, 0x33312D)
     static let accent = dynamic(0xB32631, 0xE2575F)
     static let green = dynamic(0x3B6846, 0x76A37F)
     static let amber = dynamic(0x9E681A, 0xD99E43)
 
-    // The legendary Dieter Rams Braun Orange (ET66 equals button / T3 radio dial)
+    // Dieter Rams Braun Orange (with directional top-to-bottom lighting tones)
     static let braunOrange = dynamic(0xEB5528, 0xF06336)
+    static let braunOrangeTop = dynamic(0xDE4B1E, 0xE25325)
+    static let braunOrangeBottom = dynamic(0xF4683A, 0xF9774B)
 
     static let highlight = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
-            ? UIColor(white: 1, alpha: 0.04)
-            : UIColor(white: 1, alpha: 0.35)
+            ? UIColor(white: 1, alpha: 0.06)
+            : UIColor(white: 1, alpha: 0.45)
     })
 
-    // Clean, precision-molded industrial finishes
-    static let bezelTop = dynamic(0xF7F4EE, 0x242320)
-    static let bezelBottom = dynamic(0xEDE9E1, 0x171614)
-    static let well = dynamic(0xE5E1D7, 0x121110)
+    // Molded plastic bezels and wells
+    static let bezelTop = dynamic(0xF7F4EE, 0x252421)
+    static let bezelBottom = dynamic(0xE5E1D7, 0x161513)
+    static let well = dynamic(0xEAE6DC, 0x121110)
 
-    // Very soft, restrained contact shadows (no more heavy floaty shadows)
+    // Authentic physical contact shadows
     static let cast = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
-            ? UIColor(white: 0, alpha: 0.30)
-            : UIColor(white: 0, alpha: 0.05)
+            ? UIColor(white: 0, alpha: 0.35)
+            : UIColor(white: 0, alpha: 0.08)
     })
 
+    // Soft top shadow fading down into recesses
     static let recess = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
-            ? UIColor(white: 0, alpha: 0.30)
-            : UIColor(white: 0, alpha: 0.08)
+            ? UIColor(white: 0, alpha: 0.45)
+            : UIColor(white: 0.15, alpha: 0.16)
     })
 
     static let lensLight = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)

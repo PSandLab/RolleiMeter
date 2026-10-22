@@ -18,10 +18,18 @@ struct Panel: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Palette.paper)
+                .fill(LinearGradient(colors: [Palette.bezelTop, Palette.paper], startPoint: .top, endPoint: .bottom))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
+                            lineWidth: 1
+                        )
+                        .padding(1)
+                )
                 .compositingGroup()
-                .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 4)
+                .shadow(color: Palette.cast, radius: 8, x: 0, y: 3)
         }
     }
 }
@@ -32,9 +40,10 @@ private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGF
     return t * t * (3 - 2 * t)
 }
 
+// Sunken window with authentic top shadow fading into bottom light
 struct WindowInset: ViewModifier {
-    var radius: CGFloat = 8
-    var bezel: CGFloat = 3
+    var radius: CGFloat = 11
+    var bezel: CGFloat = 4
 
     private var inner: CGFloat { max(radius - bezel, 3) }
 
@@ -44,14 +53,26 @@ struct WindowInset: ViewModifier {
                 RoundedRectangle(cornerRadius: inner, style: .continuous)
                     .fill(Palette.well)
                     .overlay {
+                        // Shadow under top lip fading out by 30% down
+                        LinearGradient(
+                            stops: [
+                                .init(color: Palette.recess, location: 0),
+                                .init(color: Palette.recess.opacity(0), location: 0.32)
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .mask(RoundedRectangle(cornerRadius: inner, style: .continuous))
+                    }
+                    .overlay {
                         RoundedRectangle(cornerRadius: inner, style: .continuous)
-                            .strokeBorder(Palette.ink.opacity(0.06), lineWidth: 1)
+                            .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
                     }
             }
             .padding(bezel)
             .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(Palette.bezelTop)
+                    .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
+                                         startPoint: .top, endPoint: .bottom))
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
@@ -59,7 +80,7 @@ struct WindowInset: ViewModifier {
                     .strokeBorder(Palette.hairline, lineWidth: 1)
             }
             .compositingGroup()
-            .shadow(color: Palette.cast, radius: 2, x: 0, y: 1)
+            .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
     }
 }
 
@@ -269,11 +290,13 @@ struct SimpleExposurePair: View {
                 feet: feet
             )
         }
-        .background(paper)
+        .background(
+            LinearGradient(colors: [Palette.bezelTop, Palette.paper], startPoint: .top, endPoint: .bottom)
+        )
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .compositingGroup()
-        .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
+        .shadow(color: Palette.cast, radius: 6, x: 0, y: 2)
     }
 }
 
@@ -326,7 +349,6 @@ private struct SimpleFocusColumn: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 174, maxHeight: 174)
         .clipped()
-        .background(paper)
         .accessibilityElement(children: .contain)
     }
 }
@@ -477,7 +499,7 @@ private struct FocusDialFace: View, Animatable {
     }
 }
 
-// MARK: - Braun Horizontal Radio Tuning Scale (Free Horizontal Scroll)
+// MARK: - Braun Horizontal Radio Tuning Scale
 
 struct HorizontalScrubDial: View {
     let title: String
@@ -486,7 +508,7 @@ struct HorizontalScrubDial: View {
     var resetIndex: Int? = nil
 
     private let pitch: CGFloat = 52
-    private let height: CGFloat = 58
+    private let height: CGFloat = 60
 
     @State private var base: Int?
     @State private var drag: CGFloat = 0
@@ -499,7 +521,7 @@ struct HorizontalScrubDial: View {
     }
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             HStack {
                 Text(title)
                     .font(AppTypography.next(size: 10, weight: .semibold))
@@ -516,7 +538,7 @@ struct HorizontalScrubDial: View {
                 HorizontalValueRail(position: position, labels: labels, pitch: pitch)
                     .frame(height: height)
 
-                // Clean Braun orange needle marker
+                // Central orange pointer tick
                 VStack(spacing: 0) {
                     Rectangle()
                         .fill(Palette.braunOrange)
@@ -525,7 +547,7 @@ struct HorizontalScrubDial: View {
                 }
                 .frame(height: height)
             }
-            .modifier(WindowInset(radius: 8, bezel: 2))
+            .modifier(WindowInset(radius: 10, bezel: 3))
         }
         .contentShape(Rectangle())
         .gesture(
@@ -589,7 +611,6 @@ private struct HorizontalValueRail: View, Animatable {
                 let f = fade(x)
                 if f <= 0.02 { continue }
 
-                // Major tick under each value
                 var tick = Path()
                 tick.move(to: CGPoint(x: x, y: 0))
                 tick.addLine(to: CGPoint(x: x, y: tickBaseline))
@@ -651,7 +672,7 @@ struct ApertureDrum: View {
 
     private let width: CGFloat = 60
     private let height: CGFloat = 84
-    private let bezel: CGFloat = 3
+    private let bezel: CGFloat = 4
     private let pitch: CGFloat = 18.5
     private let homeIndex = 3
 
@@ -670,13 +691,13 @@ struct ApertureDrum: View {
             DrumFace(position: position, pitch: pitch)
             PointerTriangle()
                 .fill(Palette.braunOrange)
-                .frame(width: 4.5, height: 9)
+                .frame(width: 5, height: 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .offset(x: -3)
         }
         .frame(width: width - bezel * 2, height: height - bezel * 2)
-        .modifier(WindowInset(radius: 8, bezel: bezel))
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .modifier(WindowInset(radius: 11, bezel: bezel))
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .gesture(dragGesture)
             .onAppear {
                 position = Double(index)
@@ -812,7 +833,7 @@ struct MeterDrum: View {
 
     private let width: CGFloat = 82
     private let height: CGFloat = 84
-    private let bezel: CGFloat = 3
+    private let bezel: CGFloat = 4
     private let pitch: CGFloat = 19
 
     @State private var position: Double = 0
@@ -847,8 +868,8 @@ struct MeterDrum: View {
             }
         }
         .frame(width: width - bezel * 2, height: height - bezel * 2)
-        .modifier(WindowInset(radius: 8, bezel: bezel))
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .modifier(WindowInset(radius: 11, bezel: bezel))
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .gesture(dragGesture)
         .onAppear {
             position = Double(index)
@@ -905,7 +926,7 @@ struct MeterDrum: View {
     }
 }
 
-// MARK: - Authentic Dieter Rams Shutter Button (Clean Solid Matte Orange, NO Glow, NO Icon)
+// MARK: - Authentic Dieter Rams Shutter Button (Recessed Well + Top Shadow to Bottom Light)
 
 struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -922,20 +943,53 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                // Pure, solid, unadorned Braun Orange disc
+                // 1. Recessed outer circular bezel/well (just like in the reference photo)
                 Circle()
-                    .fill(Palette.braunOrange)
-                    .frame(width: 68, height: 68)
-                    // Honest, subtle neutral physical contact shadow (NO glowing halo)
-                    .shadow(color: Color.black.opacity(frozen ? 0.08 : 0.16),
-                            radius: frozen ? 2 : 4, x: 0, y: frozen ? 1 : 2)
+                    .fill(Palette.well)
+                    .frame(width: 80, height: 80)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: Palette.ink.opacity(0.18), location: 0),
+                                        .init(color: Palette.ink.opacity(0.04), location: 1)
+                                    ],
+                                    startPoint: .top, endPoint: .bottom
+                                ),
+                                lineWidth: 1.5
+                            )
+                    )
+                    .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
 
-                // Precision micro-bevel edge
+                // 2. The tactile round Braun button sitting inside the well
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                    .frame(width: 68, height: 68)
+                    .fill(
+                        LinearGradient(
+                            colors: [Palette.braunOrangeTop, Palette.braunOrangeBottom],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 66, height: 66)
+                    // Slight shadow on top, transition to light on bottom
+                    .overlay {
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color.black.opacity(0.15), location: 0),
+                                .init(color: Color.clear, location: 0.38),
+                                .init(color: Color.white.opacity(0.18), location: 1.0)
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .clipShape(Circle())
+                    }
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(frozen ? 0.08 : 0.16), radius: frozen ? 2 : 4, x: 0, y: frozen ? 1 : 2)
             }
-            .scaleEffect(frozen ? 0.94 : 1)
+            .scaleEffect(frozen ? 0.95 : 1)
             .animation(.spring(response: 0.28, dampingFraction: 0.75), value: frozen)
         }
         .buttonStyle(PressStyle())
