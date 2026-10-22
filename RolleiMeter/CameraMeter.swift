@@ -41,6 +41,10 @@ final class CameraMeter: NSObject, ObservableObject,
     private var focus = CGPoint(x: 0.5, y: 0.5)
     private var smoothed: Double?
     private var deltaSmoothed: Double?
+    /// The EV and spot delta the UI actually sees. They sit on a 1/3-stop grid and only move once the
+    /// light has really changed, so hand shake can't make the readouts flip back and forth.
+    private var steadyEV: Double?
+    private var steadyDelta: Double?
     private var distSmoothed: Double?
     private var latestPreviewPixelBuffer: CVPixelBuffer?
     private let previewImageContext = CIContext()
@@ -61,6 +65,16 @@ final class CameraMeter: NSObject, ObservableObject,
         return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
     }
 
+    /// Snap `value` to the nearest 1/3 stop, but only leave the current step once the value is clearly past
+    /// the halfway point (a gap of about 0.2 stop to come back). Call with the lock held.
+    private static func settled(_ value: Double, _ current: inout Double?) -> Double {
+        let step = 1.0 / 3.0
+        if let cur = current, abs(value - cur) <= step * 0.5 + 0.1 { return cur }
+        let snapped = (value / step).rounded() * step
+        current = snapped
+        return snapped
+    }
+
     func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint) {
         lock.lock()
         self.mode = mode
@@ -68,6 +82,8 @@ final class CameraMeter: NSObject, ObservableObject,
         self.spotRadius = radius
         self.smoothed = nil
         self.deltaSmoothed = nil
+        self.steadyEV = nil
+        self.steadyDelta = nil
         if focus != self.focus { self.distSmoothed = nil }
         self.focus = focus
         lock.unlock()
@@ -302,7 +318,10 @@ final class CameraMeter: NSObject, ObservableObject,
         guard now - lastDepthPublish > 0.1 else { return }
         lastDepthPublish = now
         DispatchQueue.main.async { [weak self] in
-            self?.distance = out
+            guard let self else { return }
+            // Leave the reading alone for tiny moves (about 3 cm, or 2% of the distance).
+            if let new = out, let old = self.distance, abs(new - old) < max(0.03, 0.02 * old) { return }
+            self.distance = out
         }
     }
 
@@ -454,7 +473,7 @@ final class CameraMeter: NSObject, ObservableObject,
         } else {
             smoothed = ev
         }
-        let out = smoothed ?? ev
+        let out = CameraMeter.settled(smoothed ?? ev, &steadyEV)
         var deltaOut: Double?
         if let d = deltaNow {
             if let s = deltaSmoothed {
@@ -462,9 +481,10 @@ final class CameraMeter: NSObject, ObservableObject,
             } else {
                 deltaSmoothed = d
             }
-            deltaOut = deltaSmoothed
+            deltaOut = CameraMeter.settled(deltaSmoothed ?? d, &steadyDelta)
         } else {
             deltaSmoothed = nil
+            steadyDelta = nil
         }
         lock.unlock()
         let delta = deltaOut
