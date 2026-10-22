@@ -102,7 +102,8 @@ final class PreviewView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .clear // Eliminates black flashes during view resizing!
+        backgroundColor = .clear
+        clipsToBounds = true
     }
 
     required init?(coder: NSCoder) {
@@ -518,7 +519,7 @@ private struct FocusDialFace: View, Animatable {
     }
 }
 
-// MARK: - Braun Horizontal Radio Tuning Scale
+// MARK: - Braun Horizontal Radio Tuning Scale (Smooth Live Tracking)
 
 struct HorizontalScrubDial: View {
     let title: String
@@ -526,7 +527,7 @@ struct HorizontalScrubDial: View {
     let labels: [String]
     var resetIndex: Int? = nil
 
-    private let pitch: CGFloat = 48
+    private let pitch: CGFloat = 46
     private let height: CGFloat = 56
 
     @State private var position: Double = 0
@@ -561,43 +562,44 @@ struct HorizontalScrubDial: View {
                     Spacer()
                 }
                 .frame(height: height)
+                .allowsHitTesting(false)
             }
             .modifier(WindowInset(radius: 10, bezel: 3))
-        }
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    if base == nil { base = position }
-                    guard let start = base else { return }
-                    let raw = start - Double(value.translation.width / pitch)
-                    position = min(max(raw, -0.3), Double(maxIndex) + 0.3)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        if base == nil { base = position }
+                        guard let start = base else { return }
+                        let raw = start - Double(value.translation.width / pitch)
+                        position = min(max(raw, 0), Double(maxIndex))
 
-                    let currentDetent = min(max(Int(position.rounded()), 0), maxIndex)
-                    if currentDetent != lastDetent {
-                        lastDetent = currentDetent
-                        selection = currentDetent
-                        if currentDetent == resetIndex {
-                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-                        } else {
-                            UISelectionFeedbackGenerator().selectionChanged()
+                        let currentDetent = min(max(Int(position.rounded()), 0), maxIndex)
+                        if currentDetent != lastDetent {
+                            lastDetent = currentDetent
+                            selection = currentDetent
+                            if currentDetent == resetIndex {
+                                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                            } else {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
                         }
                     }
-                }
-                .onEnded { value in
-                    base = nil
-                    let flick = Double(value.predictedEndTranslation.width - value.translation.width) / (pitch * 2.5)
-                    let predicted = position - flick
-                    let target = Double(min(max(Int(predicted.rounded()), 0), maxIndex))
+                    .onEnded { value in
+                        base = nil
+                        let flick = Double(value.predictedEndTranslation.width - value.translation.width) / (pitch * 2.0)
+                        let predicted = position - flick
+                        let target = Double(min(max(Int(predicted.rounded()), 0), maxIndex))
 
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                        position = target
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.78)) {
+                            position = target
+                        }
+                        let finalIndex = Int(target)
+                        selection = finalIndex
+                        lastDetent = finalIndex
                     }
-                    let finalIndex = Int(target)
-                    selection = finalIndex
-                    lastDetent = finalIndex
-                }
-        )
+            )
+        }
         .onAppear {
             position = Double(safeSelection)
             lastDetent = safeSelection
@@ -606,7 +608,7 @@ struct HorizontalScrubDial: View {
             guard base == nil else { return }
             let clamped = Double(min(max(newValue, 0), maxIndex))
             if abs(position - clamped) > 0.001 {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.8)) {
                     position = clamped
                 }
             }
@@ -744,7 +746,7 @@ struct ApertureDrum: View {
     }
 
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 1)
             .onChanged { value in
                 if base == nil {
                     base = position
@@ -753,7 +755,8 @@ struct ApertureDrum: View {
                     scheduleHome()
                 }
                 guard !longPressFired else { return }
-                if !moved && abs(value.translation.height) > 3 {
+                // Raised threshold to 8pt so quick taps never get marked as drags
+                if !moved && abs(value.translation.height) > 8 {
                     moved = true
                     pressToken += 1
                 }
@@ -771,10 +774,14 @@ struct ApertureDrum: View {
                 longPressFired = false
 
                 if fired { return }
-                if !wasMoved {
+
+                // Solid tap check: if finger shifted less than 10 points, it's 100% a tap
+                let totalShift = hypot(value.translation.width, value.translation.height)
+                if !wasMoved || totalShift < 10 {
                     onTap()
                     return
                 }
+
                 let flick = Double(value.predictedEndTranslation.height - value.translation.height) / (pitch * 3.0)
                 let predicted = position - flick
                 let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))

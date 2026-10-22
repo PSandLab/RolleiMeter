@@ -107,6 +107,7 @@ struct ContentView: View {
                         }
                     }
                 )
+                .zIndex(10)
                 .transition(.asymmetric(
                     insertion: .move(edge: .top).combined(with: .opacity),
                     removal: .move(edge: .top).combined(with: .opacity)
@@ -269,6 +270,7 @@ struct ContentView: View {
                 CameraPreview(session: meter.session, onVolumePress: { toggleFreeze() })
                     .frame(width: geo.size.width, height: max(geo.size.height, geo.size.width * (4.0 / 3.0)))
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    .clipped()
 
                 if let frozenPreviewImage {
                     Image(uiImage: frozenPreviewImage)

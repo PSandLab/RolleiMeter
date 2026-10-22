@@ -44,14 +44,6 @@ struct ControlTray: View {
                 tabButton("OPTIONS", 1)
             }
             Spacer()
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Palette.mutedInk)
-                    .frame(width: 26, height: 26)
-                    .background(Palette.well, in: Circle())
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 2)
     }
