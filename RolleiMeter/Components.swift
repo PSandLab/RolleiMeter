@@ -503,10 +503,10 @@ private struct FocusDialFace: View, Animatable {
 
             // Render Agfa Zone Focus Pictogram right under the number
             if let symbol = agfaSymbol(for: mark.label) {
-                let icon = Image(systemName: symbol)
-                    .font(.system(size: underPointer ? 12 : 10, weight: underPointer ? .bold : .medium))
+                let iconText = Text(Image(systemName: symbol))
+                    .font(.system(size: underPointer ? 11 : 9, weight: underPointer ? .bold : .medium))
                     .foregroundColor(color.opacity(f * (underPointer ? 1.0 : 0.85)))
-                context.draw(context.resolve(icon), at: CGPoint(x: px, y: iconY), anchor: .center)
+                context.draw(context.resolve(iconText), at: CGPoint(x: px, y: iconY), anchor: .center)
             }
 
             lastRight = px + textWidth / 2
@@ -724,7 +724,7 @@ struct ApertureDrum: View {
                 position = Double(index)
                 lastDetent = index
             }
-            .onChange(of: index) { newValue in
+            .onChange(of: index) { _, newValue in
                 guard base == nil else { return }
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                     position = Double(newValue)
@@ -896,7 +896,7 @@ struct MeterDrum: View {
             position = Double(index)
             lastDetent = index
         }
-        .onChange(of: index) { newValue in
+        .onChange(of: index) { _, newValue in
             guard base == nil else { return }
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                 position = Double(newValue)
