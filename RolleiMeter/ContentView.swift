@@ -92,7 +92,6 @@ struct ContentView: View {
         VStack(spacing: 8) {
             topBar
 
-            // Settings Tray placed right under the top bar with easeInOut transition
             if trayOpen {
                 ControlTray(
                     evIndex: $evIndex,
@@ -261,12 +260,15 @@ struct ContentView: View {
         return CGPoint(x: p.x, y: 0.5 + (p.y - 0.5) * frame / aspect)
     }
 
-    // MARK: - Viewfinder
+    // MARK: - Viewfinder (Zero-Lag Smooth Window Masking)
 
     private var preview: some View {
         GeometryReader { geo in
             ZStack {
+                // Anchored to native 3:4 camera aspect ratio to eliminate resize lag and black flashes!
                 CameraPreview(session: meter.session, onVolumePress: { toggleFreeze() })
+                    .frame(width: geo.size.width, height: max(geo.size.height, geo.size.width * (4.0 / 3.0)))
+                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
 
                 if let frozenPreviewImage {
                     Image(uiImage: frozenPreviewImage)

@@ -17,11 +17,11 @@ struct Panel: ViewModifier {
 
     func body(content: Content) -> some View {
         content.background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(LinearGradient(colors: [Palette.bezelTop, Palette.paper], startPoint: .top, endPoint: .bottom))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(stroke, lineWidth: lineWidth))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(stroke, lineWidth: lineWidth))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
                         .strokeBorder(
                             LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
                             lineWidth: 1
@@ -93,12 +93,30 @@ private struct PointerTriangle: Shape {
     }
 }
 
-// MARK: - Camera preview
+// MARK: - Camera preview (Clear background & zero-lag layer sizing)
 
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onPress: () -> Void = {}
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear // Eliminates black flashes during view resizing!
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .clear
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        previewLayer.frame = bounds
+        CATransaction.commit()
+    }
 }
 
 struct CameraPreview: UIViewRepresentable {
@@ -109,7 +127,7 @@ struct CameraPreview: UIViewRepresentable {
         let v = PreviewView()
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspectFill
-        v.backgroundColor = .black
+        v.backgroundColor = .clear
         v.onPress = onVolumePress
 
         if #available(iOS 17.2, *) {
@@ -291,8 +309,8 @@ struct SimpleExposurePair: View {
         .background(
             LinearGradient(colors: [Palette.bezelTop, Palette.paper], startPoint: .top, endPoint: .bottom)
         )
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(hairline, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .compositingGroup()
         .shadow(color: Palette.cast, radius: 6, x: 0, y: 2)
     }
@@ -383,8 +401,7 @@ private struct FocusRingScale: View {
     }
 }
 
-// MARK: - Focus Dial Face with Classic Agfa Sensor Zone Pictograms
-
+// Pure Typographic Focus Dial (Agfa pictograms removed per request)
 private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
@@ -413,24 +430,13 @@ private struct FocusDialFace: View, Animatable {
         return min(max(wanted, width * 1.15), width * 8)
     }
 
-    // Agfa Sensor Zone Focus Symbol matching
-    private func agfaSymbol(for label: String) -> String? {
-        switch label {
-        case "1.2", "4": return "person.fill"         // Portrait (1.2m / 4ft)
-        case "3", "10": return "person.2.fill"        // Group / Street (3m / 10ft)
-        case "∞": return "mountain.2.fill"           // Landscape / Infinity
-        default: return nil
-        }
-    }
-
     private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
         let cx: CGFloat = size.width / 2
         let groupHeight: CGFloat = 104
         let y0: CGFloat = max(0, (size.height - groupHeight) / 2)
-        let numberY: CGFloat = y0 + 25
-        let iconY: CGFloat = y0 + 40
-        let markTop: CGFloat = y0 + 52
-        let baseline: CGFloat = y0 + 94
+        let numberY: CGFloat = y0 + 30
+        let markTop: CGFloat = y0 + 50
+        let baseline: CGFloat = y0 + 92
         let fadeWidth: CGFloat = 44
         let ppu: CGFloat = zoom(width: size.width)
         let fineRaw: CGFloat = (ppu / 60 - 4) / 3
@@ -493,22 +499,13 @@ private struct FocusDialFace: View, Animatable {
 
             let underPointer: Bool = abs(mark.p - position) < 0.012
             let label = Text(mark.label)
-                .font(AppTypography.bold(size: underPointer ? 26 : 22))
+                .font(AppTypography.bold(size: underPointer ? 29 : 24))
                 .foregroundColor(color.opacity(f))
             let text = context.resolve(label)
             let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
 
             guard underPointer || px - textWidth / 2 > lastRight + 5 else { continue }
             context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
-
-            // Render Agfa Zone Focus Pictogram right under the number
-            if let symbol = agfaSymbol(for: mark.label) {
-                let iconText = Text(Image(systemName: symbol))
-                    .font(.system(size: underPointer ? 11 : 9, weight: underPointer ? .bold : .medium))
-                    .foregroundColor(color.opacity(f * (underPointer ? 1.0 : 0.85)))
-                context.draw(context.resolve(iconText), at: CGPoint(x: px, y: iconY), anchor: .center)
-            }
-
             lastRight = px + textWidth / 2
         }
 
@@ -947,13 +944,13 @@ struct MeterDrum: View {
     }
 }
 
-// MARK: - Dieter Rams / Agfa Sensor Shutter Button
+// MARK: - Dieter Rams Shutter Button (Concentric, Perfectly Centered Vertically)
 
 struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
+            .animation(.spring(response: 0.20, dampingFraction: 0.70), value: configuration.isPressed)
     }
 }
 
@@ -963,7 +960,8 @@ struct FreezeButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
+            ZStack(alignment: .center) {
+                // 1. Concentric outer circular bezel well
                 Circle()
                     .fill(Palette.well)
                     .frame(width: 80, height: 80)
@@ -982,6 +980,7 @@ struct FreezeButton: View {
                     )
                     .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
 
+                // 2. Pure Braun Orange button - strictly concentric and centered vertically!
                 Circle()
                     .fill(
                         LinearGradient(
@@ -993,7 +992,7 @@ struct FreezeButton: View {
                     .overlay {
                         LinearGradient(
                             stops: [
-                                .init(color: Color.black.opacity(frozen ? 0.22 : 0.14), location: 0),
+                                .init(color: Color.black.opacity(frozen ? 0.20 : 0.13), location: 0),
                                 .init(color: Color.clear, location: 0.40),
                                 .init(color: Color.white.opacity(frozen ? 0.08 : 0.20), location: 1.0)
                             ],
@@ -1005,12 +1004,10 @@ struct FreezeButton: View {
                         Circle()
                             .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
                     )
-                    .offset(y: frozen ? 1.5 : 0)
                     .shadow(color: Color.black.opacity(frozen ? 0.06 : 0.16),
-                            radius: frozen ? 1.5 : 3.5, x: 0, y: frozen ? 0.8 : 2)
+                            radius: frozen ? 2 : 3.5, x: 0, y: frozen ? 1 : 2)
+                    .scaleEffect(frozen ? 0.96 : 1.0)
             }
-            .scaleEffect(frozen ? 0.96 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.75), value: frozen)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(frozen ? "Unfreeze exposure" : "Freeze exposure")
