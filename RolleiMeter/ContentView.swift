@@ -26,17 +26,13 @@ struct ContentView: View {
     // Held in @State, not @StateObject, so 60 fps value changes only redraw the views that watch them.
     // The EV needle starts low and winds up to the first reading.
     @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 70, damping: 12)
-    @State private var distDamp = Damper(count: 3, initial: 0.5, stiffness: 110, damping: 17)
 
-    @AppStorage("simpleMode") private var simpleMode = false
     @AppStorage("mode") private var mode: MeterMode = .matrix   // matrix or highlight
     @AppStorage("isoIndex") private var isoIndex = 6      // ISO 100
     @AppStorage("evIndex") private var evIndex = 6        // 0 compensation
     @AppStorage("useDIN") private var useDIN = false
     @AppStorage("useFeet") private var useFeet = false
-    @AppStorage("golden") private var golden = 2          // f/5.6, -1 = none
-    @AppStorage("aperture") private var selected = 2      // aperture used for depth of field
-    @AppStorage("simpleAperture") private var simpleAperture = 0
+    @AppStorage("simpleAperture") private var simpleAperture = 0   // 0 = f/2.8, 3 = f/8
     @AppStorage("calibration") private var calibration = 0.0
     /// Metres from the phone (held at a natural distance) back to the eye. Added silently to LiDAR readings.
     @AppStorage("armOffset") private var armOffset = 0.0
@@ -45,7 +41,6 @@ struct ContentView: View {
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
     @State private var trayOpen = false
-    @State private var distPrimed = false
     /// Spot metering only happens after a hold in the viewfinder. Tapping a mode chip goes back.
     @State private var spotActive = false
     @State private var spot = CGPoint(x: 0.5, y: 0.5)      // spot meter point (press and hold), viewfinder coordinates
@@ -53,7 +48,6 @@ struct ContentView: View {
     @State private var focus = CGPoint(x: 0.5, y: 0.5)     // LiDAR distance point (tap), viewfinder coordinates
     @State private var focusPulse = 0
     @State private var focusBuf = CGPoint(x: 0.5, y: 0.5)  // the same point in camera-frame coordinates
-    @State private var focusExpanded = false
     @State private var spotGestureLive = false
     @State private var suppressTap = false
     @State private var showHint = false
@@ -69,7 +63,8 @@ struct ContentView: View {
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
-    private var safeSelected: Int { min(max(selected, 0), DepthOfField.apertures.count - 1) }
+    /// The two apertures the app offers: f/2.8 and f/8.
+    private var apertureIndex: Int { simpleAperture == 3 ? 3 : 0 }
 
     private var iso: Double { Double(ISOScale.values[safeISOIndex]) }
     private var comp: Double { EVComp.values[safeEVIndex] }
@@ -90,14 +85,9 @@ struct ContentView: View {
         return d < Focus.nearest
     }
 
-    private var dof: (near: Double, far: Double)? {
-        guard let d = shownDistance, d >= Focus.nearest else { return nil }
-        return DepthOfField.range(subject: d, n: DepthOfField.apertures[safeSelected])
-    }
-
     private var advice: FocusAdvice? {
         guard let d = shownDistance, d >= Focus.nearest else { return nil }
-        return Focus.advice(subject: d, aperture: DepthOfField.apertures[safeSelected], feet: useFeet)
+        return Focus.advice(subject: d, aperture: Rollei.stops[apertureIndex].n, feet: useFeet)
     }
 
     var body: some View {
@@ -111,7 +101,6 @@ struct ContentView: View {
                     isoIndex: $isoIndex,
                     useDIN: $useDIN,
                     useFeet: $useFeet,
-                    simpleMode: $simpleMode,
                     calibration: $calibration,
                     armOffset: $armOffset,
                     rawDistance: { meter.distance }
@@ -119,34 +108,12 @@ struct ContentView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            if simpleMode {
-                SimpleExposurePair(
-                    damp: evDamp, iso: iso, comp: comp,
-                    apertureIndex: simpleAperture == 3 ? 3 : 0,
-                    distance: shownDistance, tooClose: tooClose, feet: useFeet,
-                    onToggleAperture: toggleSimpleAperture
-                )
-            } else {
-                RulerView(
-                    damp: evDamp,
-                    iso: iso,
-                    comp: comp,
-                    golden: golden,
-                    selected: safeSelected,
-                    onSelect: { i in
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = i }
-                        resetFocusToCenter()
-                    },
-                    onToggleGolden: { i in
-                        golden = (golden == i) ? -1 : i
-                    }
-                )
-            }
-
-            if meter.hasLiDAR && !simpleMode {
-                focusPanel(card: false)
-            }
+            SimpleExposurePair(
+                damp: evDamp, iso: iso, comp: comp,
+                apertureIndex: apertureIndex,
+                distance: shownDistance, tooClose: tooClose, feet: useFeet,
+                onToggleAperture: toggleSimpleAperture
+            )
 
             controls
         }
@@ -162,7 +129,6 @@ struct ContentView: View {
             if mode == .spot { mode = .matrix }   // older versions could save spot as the mode
             pushConfig()
             evDamp.set([ev])
-            syncDistance()
             meter.start()
             hintCount += 1
             if hintCount <= 3 {
@@ -187,12 +153,6 @@ struct ContentView: View {
         }
         .onChange(of: calibration) { evDamp.set([ev]) }
         .onChange(of: frozenEV) { evDamp.set([ev]) }
-        .onChange(of: shownDistance) { syncDistance() }
-        .onChange(of: selected) { syncDistance() }
-        .onChange(of: focusExpanded) {
-            if focusExpanded && trayOpen { withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { trayOpen = false } }
-        }
-        .onChange(of: simpleMode) { focusExpanded = false }
         .onChange(of: tooClose) {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
@@ -222,18 +182,6 @@ struct ContentView: View {
             withAnimation(.easeInOut(duration: 0.8)) { night = wantNight }
             nightSince = nil
         }
-    }
-
-    private func syncDistance() {
-        guard let d = shownDistance else {
-            distPrimed = false
-            return
-        }
-        let r = dof ?? (near: d, far: d)
-        let target = [Focus.position(d), Focus.position(r.near), Focus.position(r.far)]
-        // First reading after nothing: jump there instead of sweeping in from the left.
-        distDamp.set(target, snap: !distPrimed)
-        distPrimed = true
     }
 
     private func toggleFreeze() {
@@ -277,7 +225,6 @@ struct ContentView: View {
 
     private func toggleSimpleAperture() {
         simpleAperture = simpleAperture == 0 ? 3 : 0
-        selected = simpleAperture
         UISelectionFeedbackGenerator().selectionChanged()
         resetFocusToCenter()
     }
@@ -407,17 +354,6 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
 
-                // Tray and focus scale float over the bottom of the viewfinder. Nothing in the layout moves,
-                // so the live camera layer never resizes while they open and close.
-                VStack {
-                    Spacer()
-                    if focusExpanded && meter.hasLiDAR && !simpleMode && !trayOpen {
-                        focusPanel(card: true)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .padding(10)
-
                 if meter.denied {
                     VStack(spacing: 10) {
                         Text("Camera access is off")
@@ -460,27 +396,6 @@ struct ContentView: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
-    }
-
-    private func focusPanel(card: Bool) -> some View {
-        FocusPanel(
-            damp: distDamp,
-            distance: shownDistance,
-            near: dof?.near,
-            far: dof?.far,
-            advice: advice,
-            tooClose: tooClose,
-            feet: useFeet,
-            aperture: Rollei.stops[safeSelected].label,
-            showsAperturePicker: false,
-            expanded: $focusExpanded,
-            onToggleUnits: { useFeet.toggle() },
-            onSelectAperture: { index in
-                UISelectionFeedbackGenerator().selectionChanged()
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = index }
-            },
-            card: card
-        )
     }
 
     // MARK: - Metering mode
@@ -532,7 +447,6 @@ struct ContentView: View {
                     UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                         trayOpen.toggle()
-                        if trayOpen { focusExpanded = false }
                     }
                 } label: {
                     Image(systemName: trayOpen ? "chevron.down" : "slider.horizontal.3")
