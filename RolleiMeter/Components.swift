@@ -943,7 +943,7 @@ struct FreezeButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                // 1. Recessed outer circular bezel/well (just like in the reference photo)
+                // Recessed outer circular bezel well
                 Circle()
                     .fill(Palette.well)
                     .frame(width: 80, height: 80)
@@ -962,7 +962,7 @@ struct FreezeButton: View {
                     )
                     .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
 
-                // 2. The tactile round Braun button sitting inside the well
+                // Tactile round Braun button sitting inside well with mechanical latch depth
                 Circle()
                     .fill(
                         LinearGradient(
@@ -971,13 +971,12 @@ struct FreezeButton: View {
                         )
                     )
                     .frame(width: 66, height: 66)
-                    // Slight shadow on top, transition to light on bottom
                     .overlay {
                         LinearGradient(
                             stops: [
-                                .init(color: Color.black.opacity(0.15), location: 0),
-                                .init(color: Color.clear, location: 0.38),
-                                .init(color: Color.white.opacity(0.18), location: 1.0)
+                                .init(color: Color.black.opacity(frozen ? 0.22 : 0.14), location: 0),
+                                .init(color: Color.clear, location: 0.40),
+                                .init(color: Color.white.opacity(frozen ? 0.08 : 0.20), location: 1.0)
                             ],
                             startPoint: .top, endPoint: .bottom
                         )
@@ -987,9 +986,11 @@ struct FreezeButton: View {
                         Circle()
                             .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
                     )
-                    .shadow(color: Color.black.opacity(frozen ? 0.08 : 0.16), radius: frozen ? 2 : 4, x: 0, y: frozen ? 1 : 2)
+                    .offset(y: frozen ? 1.5 : 0)
+                    .shadow(color: Color.black.opacity(frozen ? 0.06 : 0.16),
+                            radius: frozen ? 1.5 : 3.5, x: 0, y: frozen ? 0.8 : 2)
             }
-            .scaleEffect(frozen ? 0.95 : 1)
+            .scaleEffect(frozen ? 0.96 : 1)
             .animation(.spring(response: 0.28, dampingFraction: 0.75), value: frozen)
         }
         .buttonStyle(PressStyle())

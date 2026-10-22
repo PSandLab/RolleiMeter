@@ -89,53 +89,54 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Main interface: rock-solid layout so the camera preview layer never resizes or stutters!
-            VStack(spacing: 10) {
-                topBar
-                preview
-                SimpleExposurePair(
-                    damp: evDamp, iso: iso, comp: comp,
-                    apertureIndex: resolvedApertureIndex,
-                    distance: shownDistance,
-                    hasLiDAR: meter.hasLiDAR,
-                    tooClose: tooClose, feet: useFeet
-                )
-                controls
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+        VStack(spacing: 10) {
+            topBar
+            preview
 
-            // Settings drawer: slides smoothly over the bottom tiles without moving the camera!
-            if trayOpen {
-                Color.black.opacity(0.35)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                            trayOpen = false
+            // Fixed-Height Instrument Slot (174pt):
+            // Smoothly flips between the live exposure tiles and the settings dials.
+            // Shutter controls below and camera above NEVER move or get covered!
+            ZStack {
+                if trayOpen {
+                    ControlTray(
+                        evIndex: $evIndex,
+                        isoIndex: $isoIndex,
+                        useDIN: $useDIN,
+                        useFeet: $useFeet,
+                        calibration: $calibration,
+                        armOffset: $armOffset,
+                        rawDistance: { meter.distance },
+                        onClose: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                trayOpen = false
+                            }
                         }
-                    }
-                    .transition(.opacity)
-
-                ControlTray(
-                    evIndex: $evIndex,
-                    isoIndex: $isoIndex,
-                    useDIN: $useDIN,
-                    useFeet: $useFeet,
-                    calibration: $calibration,
-                    armOffset: $armOffset,
-                    rawDistance: { meter.distance },
-                    onClose: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                            trayOpen = false
-                        }
-                    }
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                    )
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.98)),
+                        removal: .opacity.combined(with: .scale(scale: 0.98))
+                    ))
+                } else {
+                    SimpleExposurePair(
+                        damp: evDamp, iso: iso, comp: comp,
+                        apertureIndex: resolvedApertureIndex,
+                        distance: shownDistance,
+                        hasLiDAR: meter.hasLiDAR,
+                        tooClose: tooClose, feet: useFeet
+                    )
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 1.02)),
+                        removal: .opacity.combined(with: .scale(scale: 1.02))
+                    ))
+                }
             }
+            .frame(height: 174)
+            .clipped()
+
+            controls
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PaperBackground().ignoresSafeArea())
         .preferredColorScheme(night ? .dark : .light)
@@ -437,7 +438,6 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
     }
 
-    // Dieter Rams circular tactile push button with precision indicator dot
     private var trayKey: some View {
         Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
@@ -448,25 +448,25 @@ struct ContentView: View {
             ZStack {
                 Circle()
                     .fill(trayOpen ? Palette.ink : Palette.paper)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 38, height: 38)
                     .overlay(Circle().stroke(Palette.hairline, lineWidth: 1))
                     .shadow(color: Palette.cast, radius: 2, x: 0, y: 1)
 
-                Text("SET")
-                    .font(AppTypography.next(size: 11, weight: .semibold))
-                    .tracking(1.0)
+                Text(trayOpen ? "✕" : "SET")
+                    .font(AppTypography.next(size: trayOpen ? 12 : 11, weight: .bold))
+                    .tracking(trayOpen ? 0 : 1.0)
                     .foregroundStyle(trayOpen ? Palette.paper : Palette.ink)
 
                 if safeEVIndex != EVComp.zeroIndex && !trayOpen {
                     Circle()
                         .fill(Palette.braunOrange)
                         .frame(width: 6, height: 6)
-                        .offset(x: 11, y: -11)
+                        .offset(x: 10, y: -10)
                 }
             }
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel(trayOpen ? "Hide controls" : "Show controls")
+        .accessibilityLabel(trayOpen ? "Close settings" : "Open settings")
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]

@@ -18,7 +18,7 @@ struct ControlTray: View {
     @Namespace private var tabNamespace
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             header
             if tab == 0 {
                 horizontalDials
@@ -27,8 +27,8 @@ struct ControlTray: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
+        .padding(.vertical, 8)
+        .frame(minHeight: 174, maxHeight: 174)
         .modifier(Panel())
         .onDisappear {
             armTask?.cancel()
@@ -39,7 +39,7 @@ struct ControlTray: View {
 
     private var header: some View {
         HStack {
-            HStack(spacing: 18) {
+            HStack(spacing: 20) {
                 tabButton("DIALS", 0)
                 tabButton("OPTIONS", 1)
             }
@@ -48,11 +48,12 @@ struct ControlTray: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Palette.mutedInk)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 26, height: 26)
                     .background(Palette.well, in: Circle())
             }
             .buttonStyle(.plain)
         }
+        .padding(.horizontal, 2)
     }
 
     private func tabButton(_ title: String, _ index: Int) -> some View {
@@ -64,7 +65,7 @@ struct ControlTray: View {
                 .font(AppTypography.next(size: 11, weight: tab == index ? .bold : .regular))
                 .tracking(1.1)
                 .foregroundStyle(tab == index ? Palette.ink : Palette.mutedInk)
-                .padding(.vertical, 4)
+                .padding(.vertical, 3)
                 .overlay(alignment: .bottom) {
                     if tab == index {
                         Rectangle()
@@ -78,9 +79,8 @@ struct ControlTray: View {
         .buttonStyle(.plain)
     }
 
-    // Free horizontal scroll scales
     private var horizontalDials: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             HorizontalScrubDial(
                 title: "EV COMPENSATION",
                 selection: $evIndex,
@@ -94,7 +94,6 @@ struct ControlTray: View {
                 resetIndex: ISOScale.values.firstIndex(of: 100)
             )
         }
-        .padding(.vertical, 4)
     }
 
     private var options: some View {
@@ -138,7 +137,7 @@ struct ControlTray: View {
             Spacer(minLength: 8)
             content()
         }
-        .frame(height: 34)
+        .frame(height: 28)
     }
 
     private func boolBinding(_ source: Binding<Bool>) -> Binding<Int> {
@@ -167,7 +166,7 @@ struct ControlTray: View {
                 .tracking(0.8)
                 .foregroundStyle(armStage == 0 ? Palette.ink : Palette.braunOrange)
                 .padding(.horizontal, 10)
-                .frame(height: 28)
+                .frame(height: 24)
                 .background(Palette.ink.opacity(0.08), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -216,9 +215,9 @@ struct EngravedChoice: View {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = i }
                 } label: {
                     Text(options[i])
-                        .font(AppTypography.font(size: 12, weight: selection == i ? .semibold : .regular))
+                        .font(AppTypography.font(size: 11, weight: selection == i ? .bold : .regular))
                         .foregroundStyle(selection == i ? Palette.ink : Palette.mutedInk)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 3)
                         .overlay(alignment: .bottom) {
                             if selection == i {
                                 Rectangle()
@@ -227,8 +226,8 @@ struct EngravedChoice: View {
                                     .matchedGeometryEffect(id: "choiceUnderline", in: underlineNamespace)
                             }
                         }
-                        .padding(.horizontal, 9)
-                        .frame(minHeight: 30)
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -246,9 +245,9 @@ private struct MiniStepper: View {
         HStack(spacing: 2) {
             stepButton("minus", label: "Decrease", action: onMinus)
             Text(text)
-                .font(AppTypography.font(size: 13, weight: .medium))
+                .font(AppTypography.font(size: 12, weight: .medium))
                 .foregroundStyle(Palette.ink)
-                .frame(minWidth: 56)
+                .frame(minWidth: 54)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .contentTransition(.numericText())
@@ -263,9 +262,9 @@ private struct MiniStepper: View {
             action()
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Palette.ink)
-                .frame(width: 28, height: 30)
+                .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
