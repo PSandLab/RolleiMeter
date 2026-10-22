@@ -10,12 +10,11 @@ Actions tab > Build IPA > Run workflow. Download the `RolleiMeter-ipa` artifact,
 - **Tap the viewfinder** to measure distance there. A white bracket marks exactly where LiDAR is reading, with the distance next to it.
 - **Press, hold and drag** to spot meter that point (circle, badge shows SPOT; pinch resizes). The two points are independent: meter the face, focus on the eyes.
 - **Matrix / Highlight** chips leave spot and switch the metering.
-- Aperture bar: shutter speed above each aperture. An aperture turns **red when its shutter speed is slower than 1/60**. `500+` (orange) means even 1/500 can't hold back enough light. `<2` means slower than 1/2.
-- Tap an aperture to select it for depth of field. Long-press to set the golden aperture (green).
-- **Focus panel** (LiDAR iPhones): by default one line. The nearest mark on the Rollei's focus ring for the measured distance, plus `✓ sharp at ƒ5.6` if the subject is still inside the depth of field with the lens on that mark, or `set between 2 and 3` if not. The ring is continuous, so between marks is fine. Tap the panel to open the full scale with the depth-of-field band and a m/ft switch. Closest focus (0.9 m / 3 ft) is green. Closer than that, the panel goes red and flashes TOO CLOSE.
+- Two tiles under the viewfinder. Left: the shutter speed for the selected aperture (f/2.8 or f/8; tap the tile to switch). The tile is green when the exposure is correct and red when it isn't (`OVEREXPOSED` / `UNDEREXPOSED`).
+- Right (LiDAR iPhones): a sliding focus scale with the Rollei's focus marks and the depth-of-field band for the selected aperture. Closer than 0.9 m / 3 ft it shows a red 0.
 - Round button, or a **volume button**, freezes exposure and distance. Press again to release.
 - Full-screen: status bar and home indicator are hidden (swipe up from the bottom edge to reach the home bar).
-- Gear: ISO/DIN, meters/feet, golden aperture, calibration.
+- Gear: EV compensation, ISO/DIN, meters/feet, calibration, arm offset.
 
 ## Metering
 - **Matrix:** centre-weighted average of the frame, placed at middle grey.

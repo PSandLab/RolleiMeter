@@ -8,7 +8,6 @@ struct ControlTray: View {
     @Binding var isoIndex: Int
     @Binding var useDIN: Bool
     @Binding var useFeet: Bool
-    @Binding var simpleMode: Bool
     @Binding var calibration: Double
     /// Metres between where the phone is held and where the Rollei's film plane sits (your eye).
     @Binding var armOffset: Double
@@ -100,8 +99,6 @@ struct ControlTray: View {
             row("FILM SPEED") { EngravedChoice(options: ["ISO", "DIN"], selection: boolBinding($useDIN)) }
             divider
             row("DISTANCE") { EngravedChoice(options: ["M", "FT"], selection: boolBinding($useFeet)) }
-            divider
-            row("SIMPLE") { EngravedChoice(options: ["OFF", "ON"], selection: boolBinding($simpleMode)) }
             divider
             row("CALIBRATE") {
                 MiniStepper(
