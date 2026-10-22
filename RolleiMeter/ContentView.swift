@@ -502,6 +502,7 @@ struct ContentView: View {
 
                 HStack(spacing: 6) {
                     AutoLamp(state: autoLampState)
+                    .onTapGesture { toggleAutoAperture() }
                     ApertureDrum(
                         index: resolvedApertureIndex,
                         auto: autoAperture,

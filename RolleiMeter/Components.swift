@@ -707,12 +707,15 @@ struct ApertureDrum: View {
     private let width: CGFloat = 60
     private let height: CGFloat = 84
     private let bezel: CGFloat = 4
-    private let pitch: CGFloat = 34
+    
+    // Tight visual spacing so adjacent numbers curve gracefully into view (no ugly gaps)
+    private let visualPitch: CGFloat = 19.5
+    // Finger travel needed to rotate 1 stop (gives realistic mechanical resistance)
+    private let dragSensitivity: CGFloat = 46.0
     private let homeIndex = 3
 
     @State private var position: Double = 0
     @State private var base: Double?
-    @State private var moved = false
     @State private var longPressFired = false
     @State private var pressToken = 0
     @State private var lastDetent = -1
@@ -722,17 +725,68 @@ struct ApertureDrum: View {
 
     var body: some View {
         ZStack {
-            DrumFace(position: position, pitch: pitch)
+            DrumFace(position: position, pitch: visualPitch)
+
+            // Distinct green AUTO badge when Auto mode is enabled
+            if auto {
+                Text("AUTO")
+                    .font(AppTypography.next(size: 7, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundStyle(Palette.green)
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1.5)
+                    .background(Palette.green.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .offset(x: 3, y: 3)
+                    .transition(.opacity)
+            }
+
+            // Pointer turns Green in Auto mode, Braun Orange in Manual mode
             PointerTriangle()
-                .fill(Palette.braunOrange)
+                .fill(auto ? Palette.green : Palette.braunOrange)
                 .frame(width: 5, height: 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .offset(x: -3)
+                .animation(.easeInOut(duration: 0.2), value: auto)
         }
         .frame(width: width - bezel * 2, height: height - bezel * 2)
         .modifier(WindowInset(radius: 11, bezel: bezel))
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .gesture(dragGesture)
+        // 1. Dedicated tap gesture guarantees 100% reliable Auto Mode toggling on tap
+        .onTapGesture {
+            onTap()
+        }
+        // 2. Drag gesture only engages when your finger moves at least 8 points
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    if base == nil {
+                        base = position
+                        longPressFired = false
+                        scheduleHome()
+                    }
+                    guard !longPressFired, let start = base else { return }
+                    let delta = Double(value.translation.height / dragSensitivity)
+                    position = rubber(start - delta)
+                    detent()
+                }
+                .onEnded { value in
+                    pressToken += 1
+                    let start = base ?? position
+                    let fired = longPressFired
+                    base = nil
+                    longPressFired = false
+
+                    if fired { return }
+
+                    let flick = Double(value.predictedEndTranslation.height - value.translation.height) / (dragSensitivity * 2.5)
+                    let predicted = position - flick
+                    let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
+                    detent()
+                    onPick(Int(target))
+                }
+        )
         .onAppear {
             position = Double(index)
             lastDetent = index
@@ -743,52 +797,6 @@ struct ApertureDrum: View {
                 position = Double(newValue)
             }
         }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                if base == nil {
-                    base = position
-                    moved = false
-                    longPressFired = false
-                    scheduleHome()
-                }
-                guard !longPressFired else { return }
-                // Raised threshold to 8pt so quick taps never get marked as drags
-                if !moved && abs(value.translation.height) > 8 {
-                    moved = true
-                    pressToken += 1
-                }
-                guard moved, let start = base else { return }
-                position = rubber(start - Double(value.translation.height / pitch))
-                detent()
-            }
-            .onEnded { value in
-                pressToken += 1
-                let start = base ?? position
-                let wasMoved = moved
-                let fired = longPressFired
-                base = nil
-                moved = false
-                longPressFired = false
-
-                if fired { return }
-
-                // Solid tap check: if finger shifted less than 10 points, it's 100% a tap
-                let totalShift = hypot(value.translation.width, value.translation.height)
-                if !wasMoved || totalShift < 10 {
-                    onTap()
-                    return
-                }
-
-                let flick = Double(value.predictedEndTranslation.height - value.translation.height) / (pitch * 3.0)
-                let predicted = position - flick
-                let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
-                detent()
-                onPick(Int(target))
-            }
     }
 
     private func rubber(_ v: Double) -> Double {
@@ -813,8 +821,8 @@ struct ApertureDrum: View {
     private func scheduleHome() {
         pressToken += 1
         let token = pressToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-            guard token == pressToken, base != nil, !moved else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard token == pressToken, base != nil else { return }
             longPressFired = true
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -848,11 +856,11 @@ private struct DrumFace: View, Animatable {
                 let mid = 1 - smoothstep(0.80, 1.90, ad)
                 let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
                 if a <= 0.02 { continue }
-                let scale = 1 - 0.22 * smoothstep(0, 1.6, ad)
+                let scale = 1 - 0.20 * smoothstep(0, 1.6, ad)
 
                 let text = Text(Rollei.stops[i].label)
-                    .font(AppTypography.next(size: 19, weight: .bold))
-                    .foregroundColor(Palette.ink.opacity(a * 0.78))
+                    .font(AppTypography.next(size: 18.5, weight: .bold))
+                    .foregroundColor(Palette.ink.opacity(a * 0.76))
 
                 var sub = ctx
                 sub.translateBy(x: cx, y: y)
