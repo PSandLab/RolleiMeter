@@ -7,11 +7,6 @@ import UIKit
 
 /// Runs the back camera and turns each frame into a scene EV (ISO 100).
 /// On LiDAR phones it also reads distance at the metered point.
-///
-/// Per frame: EV of the exposure the frame was actually shot at
-/// + log2(measured luminance / reference). A slow servo on the camera's exposure bias
-/// (`steerExposure`) holds the metered reference near mid-grey, so the preview shows
-/// the metered exposure and Apple's tone curve matters least.
 final class CameraMeter: NSObject, ObservableObject,
     AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureDepthDataOutputDelegate {
 
@@ -37,12 +32,9 @@ final class CameraMeter: NSObject, ObservableObject,
     private var mode: MeterMode = .matrix
     private var spot = CGPoint(x: 0.5, y: 0.5)
     private var spotRadius: CGFloat = 0.05
-    /// Where LiDAR measures distance. Separate from the spot meter.
     private var focus = CGPoint(x: 0.5, y: 0.5)
     private var smoothed: Double?
     private var deltaSmoothed: Double?
-    /// The EV and spot delta the UI actually sees. They sit on a 1/3-stop grid and only move once the
-    /// light has really changed, so hand shake can't make the readouts flip back and forth.
     private var steadyEV: Double?
     private var steadyDelta: Double?
     private var distSmoothed: Double?
@@ -51,22 +43,47 @@ final class CameraMeter: NSObject, ObservableObject,
     private var lastPublish: CFTimeInterval = 0
     private var lastDepthPublish: CFTimeInterval = 0
 
-    /// Highlight mode: the bright end of the scene (98th percentile) is not allowed to
-    /// land more than this many stops above middle grey.
     private let highlightStops = 1.5
 
-    /// Exposure-bias servo state. Only touched from the frame queue. See `steerExposure`.
     private var currentBias: Float = 0
     private var lastBiasUpdate: CFTimeInterval = 0
 
-    /// sRGB decoding curve. We request the sRGB colour space, so this is the right inverse.
+    /// sRGB decoding curve.
     private static let lut: [Double] = (0..<256).map { i in
         let v = Double(i) / 255.0
         return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
     }
 
-    /// Snap `value` to the nearest 1/3 stop, but only leave the current step once the value is clearly past
-    /// the halfway point (a gap of about 0.2 stop to come back). Call with the lock held.
+    // MARK: - Precomputed Matrix Weights
+    // Pre-calculate the 36x48 points once so the phone does zero heavy math per frame.
+    private struct MatrixGridPoint {
+        let fx: Double
+        let fy: Double
+        let weight: Double
+    }
+
+    private static let matrixGrid: [MatrixGridPoint] = {
+        let gx = 36
+        let gy = 48
+        var points: [MatrixGridPoint] = []
+        points.reserveCapacity(gx * gy)
+        for j in 0..<gy {
+            let fy = (Double(j) + 0.5) / Double(gy)
+            let dy = fy - 0.5
+            for i in 0..<gx {
+                let fx = (Double(i) + 0.5) / Double(gx)
+                let dx = fx - 0.5
+                let w = 0.35 + 0.65 * exp(-(dx * dx + dy * dy) / 0.18)
+                points.append(MatrixGridPoint(fx: fx, fy: fy, weight: w))
+            }
+        }
+        return points
+    }()
+
+    private static let matrixWeightTotal: Double = {
+        matrixGrid.reduce(0) { $0 + $1.weight }
+    }()
+
     private static func settled(_ value: Double, _ current: inout Double?) -> Double {
         let step = 1.0 / 3.0
         if let cur = current, abs(value - cur) <= step * 0.5 + 0.1 { return cur }
@@ -116,7 +133,6 @@ final class CameraMeter: NSObject, ObservableObject,
 
     private func configureAndRun() {
         if !configured {
-            // LiDAR camera first, plain wide camera as the fallback.
             configured = buildSession(lidar: true) || buildSession(lidar: false)
             if configured, let dev = device { tune(dev) }
         }
@@ -152,7 +168,6 @@ final class CameraMeter: NSObject, ObservableObject,
         let type: AVCaptureDevice.DeviceType = lidar ? .builtInLiDARDepthCamera : .builtInWideAngleCamera
         guard let dev = AVCaptureDevice.default(type, for: .video, position: .back) else { return false }
 
-        // Don't let the session switch the camera to wide colour behind our back.
         session.automaticallyConfiguresCaptureDeviceForWideColor = false
 
         session.beginConfiguration()
@@ -173,6 +188,9 @@ final class CameraMeter: NSObject, ObservableObject,
                 try dev.lockForConfiguration()
                 dev.activeFormat = pick.video
                 dev.activeDepthDataFormat = pick.depth
+                // Lock to 30 fps so the phone runs cool
+                dev.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
+                dev.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
                 dev.unlockForConfiguration()
             } catch {
                 return fail()
@@ -205,7 +223,6 @@ final class CameraMeter: NSObject, ObservableObject,
         return true
     }
 
-    /// Turn off the processing that would bend the readings: HDR tone mapping, low-light boost, wide gamut.
     private func tune(_ dev: AVCaptureDevice) {
         do {
             try dev.lockForConfiguration()
@@ -231,24 +248,14 @@ final class CameraMeter: NSObject, ObservableObject,
         }
     }
 
-    /// Steer camera exposure toward the metered reference quickly at startup, then settle gently.
-    ///
-    /// Two reasons:
-    /// 1. The preview becomes the picture the film would get. Tap a bright spot and the whole view
-    ///    darkens by the same number of stops the shutter speed moves. Highlight mode darkens by exactly
-    ///    the protection it applies. Picture and reading can't disagree.
-    /// 2. The pixels that define the reading always sit near mid-grey, where Apple's tone curve
-    ///    does the least damage. Errors in the curve cancel out.
     private func steerExposure(refY: Double) {
         let now = CACurrentMediaTime()
         let isFirstCorrection = lastBiasUpdate == 0
         guard now - lastBiasUpdate > (isFirstCorrection ? 0 : 0.15) else { return }
         lastBiasUpdate = now
 
-        let err = log2(refY / 0.18)           // stops above mid-grey
+        let err = log2(refY / 0.18)
         guard abs(err) > 0.1 else { return }
-        // Correct most of the startup error immediately to avoid a long white/black preview.
-        // Later updates have a smaller gain and step cap so the image doesn't visibly breathe.
         let gain: Float = isFirstCorrection ? 0.9 : 0.35
         let maxStep: Float = isFirstCorrection ? 4 : 1.25
         let step = min(max(Float(err) * gain, -maxStep), maxStep)
@@ -265,9 +272,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let pt = focus
         lock.unlock()
 
-        // Distance is read at the focus point (the crosshair), independent of the spot meter.
         let r = 0.03
-
         let converted = depthData.depthDataType == kCVPixelFormatType_DepthFloat32
             ? depthData
             : depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
@@ -280,7 +285,6 @@ final class CameraMeter: NSObject, ObservableObject,
         let h = CVPixelBufferGetHeight(map)
         let bpr = CVPixelBufferGetBytesPerRow(map)
 
-        // The depth map is in sensor (landscape) orientation. Portrait (px, py) -> sensor (py, 1 - px).
         let sx = Double(pt.y)
         let sy = 1.0 - Double(pt.x)
 
@@ -319,7 +323,6 @@ final class CameraMeter: NSObject, ObservableObject,
         lastDepthPublish = now
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Leave the reading alone for tiny moves (about 3 cm, or 2% of the distance).
             if let new = out, let old = self.distance, abs(new - old) < max(0.03, 0.02 * old) { return }
             self.distance = out
         }
@@ -327,8 +330,6 @@ final class CameraMeter: NSObject, ObservableObject,
 
     // MARK: - Frame processing (exposure)
 
-    /// Exposure the frame was actually shot at. Reads the frame's own metadata, which stays in step with
-    /// the pixels even while auto exposure is moving, and falls back to the device's current values.
     private func frameExposure(_ sb: CMSampleBuffer, _ dev: AVCaptureDevice) -> (t: Double, iso: Double, n: Double) {
         var t = CMTimeGetSeconds(dev.exposureDuration)
         var iso = Double(dev.iso)
@@ -344,8 +345,6 @@ final class CameraMeter: NSObject, ObservableObject,
         return (t, iso, n)
     }
 
-    /// Copy the most recent camera frame for the held viewfinder image.
-    /// Rendering happens only when the user presses the shutter control.
     func previewSnapshot() -> UIImage? {
         lock.lock()
         let pixelBuffer = latestPreviewPixelBuffer
@@ -394,31 +393,21 @@ final class CameraMeter: NSObject, ObservableObject,
             return 0.2126 * r + 0.7152 * g + 0.0722 * b
         }
 
-        /// Centre-weighted average over the whole frame.
-        /// Also hands back every sample so highlight mode can find the bright end.
-        func matrixSample() -> (y: Double, ys: [Double]) {
-            let gx = 36
-            let gy = 48
+        func matrixSample(needPoints: Bool) -> (y: Double, ys: [Double]) {
+            let grid = CameraMeter.matrixGrid
             var ys: [Double] = []
-            ys.reserveCapacity(gx * gy)
+            if needPoints { ys.reserveCapacity(grid.count) }
             var sum = 0.0
-            var wsum = 0.0
-            for j in 0..<gy {
-                let fy = (Double(j) + 0.5) / Double(gy)
-                let py = min(max(Int(fy * Double(h)), 0), h - 1)
-                for i in 0..<gx {
-                    let fx = (Double(i) + 0.5) / Double(gx)
-                    let px = min(max(Int(fx * Double(w)), 0), w - 1)
-                    let y = lum(px, py)
-                    let dx = fx - 0.5
-                    let dy = fy - 0.5
-                    let weight = 0.35 + 0.65 * exp(-(dx * dx + dy * dy) / 0.18)
-                    ys.append(y)
-                    sum += weight * y
-                    wsum += weight
-                }
+            let dw = Double(w)
+            let dh = Double(h)
+            for pt in grid {
+                let px = min(max(Int(pt.fx * dw), 0), w - 1)
+                let py = min(max(Int(pt.fy * dh), 0), h - 1)
+                let y = lum(px, py)
+                if needPoints { ys.append(y) }
+                sum += pt.weight * y
             }
-            return (sum / wsum, ys)
+            return (sum / CameraMeter.matrixWeightTotal, ys)
         }
 
         let yRaw: Double
@@ -444,23 +433,18 @@ final class CameraMeter: NSObject, ObservableObject,
                 }
             }
             yRaw = count > 0 ? sum / count : 0.18
-            deltaNow = log2(max(yRaw, 0.0005) / max(matrixSample().y, 0.0005))
+            deltaNow = log2(max(yRaw, 0.0005) / max(matrixSample(needPoints: false).y, 0.0005))
 
-        case .matrix, .highlight:
-            let sample = matrixSample()
+        case .matrix:
+            yRaw = matrixSample(needPoints: false).y
+
+        case .highlight:
+            let sample = matrixSample(needPoints: true)
             var ys = sample.ys
             let yMatrix = sample.y
-
-            if m == .matrix {
-                yRaw = yMatrix
-            } else {
-                // Highlight: protect the bright end. It may only ever ask for LESS exposure than matrix.
-                // A bright area sitting more than `highlightStops` above grey pulls the reading brighter
-                // (faster shutter); a flat scene falls back to matrix instead of over-exposing.
-                ys.sort()
-                let p98 = ys[Int(Double(ys.count - 1) * 0.98)]
-                yRaw = max(yMatrix, p98 / pow(2.0, highlightStops))
-            }
+            ys.sort()
+            let p98 = ys[Int(Double(ys.count - 1) * 0.98)]
+            yRaw = max(yMatrix, p98 / pow(2.0, highlightStops))
         }
 
         let yRef = max(yRaw, 0.0005)

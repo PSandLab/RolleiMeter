@@ -43,16 +43,14 @@ enum Palette {
     static let bezelBottom = dynamic(0xE7E3D7, 0x1E1D1A)
     /// The floor of a sunken window.
     static let well = dynamic(0xEDE9DF, 0x141311)
-    /// Soft shadow cast by anything raised off the plate. Kept light and wide: a tight, dark shadow
-    /// is what makes a surface look like a cheap imitation of a real one.
+    /// Soft shadow cast by anything raised off the plate.
     static let cast = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 0, alpha: 0.40)
             : UIColor(white: 0.20, alpha: 0.09)
     })
 
-    /// The shadow under the top lip of a recess. It has to fade out on the way down, or the floor
-    /// reads as a flat vignette instead of something lit from above. Used as a gradient, never a ring.
+    /// The shadow under the top lip of a recess.
     static let recess = Color(UIColor { trait in
         trait.userInterfaceStyle == .dark
             ? UIColor(white: 0, alpha: 0.50)
@@ -84,20 +82,18 @@ private enum PaperGrain {
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
                 provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
         else { return UIImage() }
-        // Scale 3 so one noise pixel is one physical pixel.
         return UIImage(cgImage: cg, scale: 3, orientation: .up)
     }()
 }
 
-/// Flat paper with a very faint grain.
+/// Flat paper with a very faint grain (optimized for cooler GPU running).
 struct PaperBackground: View {
     var body: some View {
         ZStack {
             Palette.paper
             Image(uiImage: PaperGrain.image)
                 .resizable(resizingMode: .tile)
-                .blendMode(.overlay)
-                .opacity(0.08)
+                .opacity(0.04)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)

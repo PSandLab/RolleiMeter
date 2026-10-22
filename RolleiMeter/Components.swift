@@ -38,17 +38,12 @@ struct Panel: ViewModifier {
 
 // MARK: - Depth
 
-/// 0 below `edge0`, 1 above `edge1`, easing in between.
 private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
     guard edge1 > edge0 else { return x < edge0 ? 0 : 1 }
     let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
     return t * t * (3 - 2 * t)
 }
 
-/// A window set into the plate: a bezel that stands a hair proud of the paper, and a floor that sinks
-/// away from the light. The shadow sits under the top lip and fades out before it reaches the middle,
-/// so the floor is lit from above rather than shaded evenly all the way round.
-/// Every value you turn or slide in this app lives in one of these.
 private struct WindowInset: ViewModifier {
     var radius: CGFloat = 12
     var bezel: CGFloat = 5
@@ -61,7 +56,6 @@ private struct WindowInset: ViewModifier {
                 RoundedRectangle(cornerRadius: inner, style: .continuous)
                     .fill(Palette.well)
                     .overlay {
-                        // Light from above: gone by a quarter of the way down the window.
                         LinearGradient(
                             stops: [
                                 .init(color: Palette.recess, location: 0),
@@ -91,7 +85,6 @@ private struct WindowInset: ViewModifier {
     }
 }
 
-/// The small triangle that sits against the window and says "this one".
 private struct PointerTriangle: Shape {
     func path(in r: CGRect) -> Path {
         var p = Path()
@@ -108,7 +101,6 @@ private struct PointerTriangle: Shape {
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
-    /// Called when a volume button is released.
     var onPress: () -> Void = {}
 }
 
@@ -123,7 +115,6 @@ struct CameraPreview: UIViewRepresentable {
         v.backgroundColor = .black
         v.onPress = onVolumePress
 
-        // Volume buttons act like the shutter button. The system routes them to us while the camera is in use.
         if #available(iOS 17.2, *) {
             let interaction = AVCaptureEventInteraction { [weak v] event in
                 if event.phase == .ended { v?.onPress() }
@@ -141,7 +132,6 @@ struct CameraPreview: UIViewRepresentable {
 
 // MARK: - EV badge
 
-/// A small match-needle gauge. The needle rides the same spring as the numbers, so it overshoots a touch.
 private struct NeedleGauge: View {
     let ev: Double
 
@@ -153,7 +143,6 @@ private struct NeedleGauge: View {
                 let a = angle * .pi / 180
                 return CGPoint(x: c.x + CGFloat(cos(a)) * len, y: c.y + CGFloat(sin(a)) * len)
             }
-            // Ticks every 3 EV across a 110 degree arc, straight up being -90.
             for i in 0...6 {
                 let angle = -90.0 - 55.0 + 110.0 * Double(i) / 6.0
                 var tick = Path()
@@ -161,8 +150,6 @@ private struct NeedleGauge: View {
                 tick.addLine(to: point(angle, r))
                 ctx.stroke(tick, with: .color(mutedInk), lineWidth: i % 2 == 0 ? 1.4 : 1)
             }
-            // Keep the needle inside the engraved 0–18 EV arc so it stays aligned
-            // with the end ticks instead of drifting past them at either extreme.
             let norm = min(max(ev, 0), 18) / 18.0
             let needleAngle = -145.0 + 110.0 * norm
             var needle = Path()
@@ -207,8 +194,9 @@ struct EVBadge: View {
 
 // MARK: - Simple exposure and focus
 
+// Observes damp directly so only this column updates when the needle moves
 private struct SimpleApertureColumn: View {
-    let damp: Damper
+    @ObservedObject var damp: Damper
     let iso: Double
     let comp: Double
     let aperture: (label: String, n: Double)
@@ -264,28 +252,23 @@ private struct SimpleApertureColumn: View {
         .frame(minHeight: 174, maxHeight: 174)
     }
 
-    /// The verdict is carried by the type, not by a painted panel: the page stays paper and the
-    /// number is the only thing that changes temperature.
     private var stateInk: Color {
         if outOfRange { return Palette.accent }
         return slow ? Palette.amber : Palette.green
     }
 
-    /// 0 good, 1 slow, 2 impossible. Whole numbers animate reliably; a `Color` does not.
     private var stateID: Int {
         if outOfRange { return 2 }
         return slow ? 1 : 0
     }
 
     private var outOfRange: Bool { reading.deviation != nil }
-
-    /// Correct exposure, but slower than the hand-holdable line. Amber, not red: nothing is wrong
-    /// with the exposure, only with your chances of holding it still.
     private var slow: Bool { reading.deviation == nil && reading.isSlow }
 }
 
 struct SimpleExposurePair: View {
-    @ObservedObject var damp: Damper
+    // Does NOT observe damp directly, preventing the focus dial from redrawing needlessly!
+    let damp: Damper
     let iso: Double
     let comp: Double
     let apertureIndex: Int
@@ -358,7 +341,6 @@ private struct SimpleFocusColumn: View {
     }
 }
 
-/// A straight focus scale. The pointer is fixed at the top; the ruler slides beneath it. Only the marks near the pointer are numbered (left / middle / right).
 private struct FocusRingScale: View {
     let distance: Double
     let aperture: (label: String, n: Double)
@@ -385,8 +367,6 @@ private struct FocusRingScale: View {
             marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
         .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
-        // Stopping down widens the depth of field, and the scale pulls back to fit it. Opening up
-        // pushes the scale in. Slow and heavy, so it reads as glass moving, not as numbers changing.
         .animation(.spring(response: 0.62, dampingFraction: 0.86), value: aperture.n)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
@@ -415,9 +395,6 @@ private struct FocusDialFace: View, Animatable {
         .clipped()
     }
 
-    /// Points of travel per unit of focus ring. A shallow depth of field magnifies the scale; a deep
-    /// one pulls back until nearly the whole ring is in view. Tied to the depth of field and to
-    /// nothing else, so it never pumps while you move the point.
     private func zoom(width: CGFloat) -> CGFloat {
         let span = max(far - near, 0.006)
         let wanted: CGFloat = width * 0.55 / CGFloat(span)
@@ -426,7 +403,6 @@ private struct FocusDialFace: View, Animatable {
 
     private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
         let cx: CGFloat = size.width / 2
-        // Pointer, number and ticks stacked as one group, centred in the tile.
         let groupHeight: CGFloat = 104
         let y0: CGFloat = max(0, (size.height - groupHeight) / 2)
         let numberY: CGFloat = y0 + 30
@@ -434,7 +410,6 @@ private struct FocusDialFace: View, Animatable {
         let baseline: CGFloat = y0 + 92
         let fadeWidth: CGFloat = 44
         let ppu: CGFloat = zoom(width: size.width)
-        // Fine ticks thin out as they get crowded; the longer ones always stay.
         let fineRaw: CGFloat = (ppu / 60 - 4) / 3
         let fine: Double = Double(min(max(fineRaw, 0), 1))
 
@@ -446,8 +421,6 @@ private struct FocusDialFace: View, Animatable {
             return Double(min(max(edge / fadeWidth, 0), 1))
         }
 
-        // Depth of field, drawn across the scale: the stretch that is sharp at this aperture.
-        // A sliver round the pointer at f/2.8, most of the ruler at f/22.
         let nearX: CGFloat = x(near)
         let farX: CGFloat = x(far)
         let left: CGFloat = min(nearX, farX)
@@ -461,13 +434,11 @@ private struct FocusDialFace: View, Animatable {
                      cornerRadius: 3),
                 with: .color(goldenGreen.opacity(0.10)))
             context.fill(
-                // Never thinner than an index line, however narrow the band really is.
                 Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: 3),
                      cornerRadius: 1.5),
                 with: .color(goldenGreen.opacity(0.70)))
         }
 
-        // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
         let markPositions: [Double] = marks.map { $0.p }
         for i in 0...60 {
             let p: Double = Double(i) / 60.0
@@ -490,28 +461,23 @@ private struct FocusDialFace: View, Animatable {
             let px: CGFloat = x(mark.p)
             let f: Double = fade(px)
             if f <= 0 { continue }
-            // Every mark inside the depth of field is sharp, so every one of them turns green.
             let green: Bool = mark.p >= near - 0.004 && mark.p <= far + 0.004
             let color: Color = green ? goldenGreen : inkColor
             var tick = Path()
             tick.move(to: CGPoint(x: px, y: baseline))
             tick.addLine(to: CGPoint(x: px, y: markTop))
             context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
-            // The mark under the pointer grows a little, like a detent.
             let underPointer: Bool = abs(mark.p - position) < 0.012
             let label = Text(mark.label)
                 .font(AppTypography.bold(size: underPointer ? 29 : 24))
                 .foregroundColor(color.opacity(f))
             let text = context.resolve(label)
             let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
-            // A crowded stretch of the ring drops numbers rather than letting them run together.
-            // The tick is always there, so you never lose the position of a mark.
             guard underPointer || px - textWidth / 2 > lastRight + 5 else { continue }
             context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
             lastRight = px + textWidth / 2
         }
 
-        // Fixed pointer
         var tri = Path()
         tri.move(to: CGPoint(x: cx - 7, y: y0))
         tri.addLine(to: CGPoint(x: cx + 7, y: y0))
@@ -523,19 +489,13 @@ private struct FocusDialFace: View, Animatable {
 
 // MARK: - Scrub dial
 
-/// A window of engraved values. Drag it up or down and the strip turns through the window: the value
-/// under the pointer darkens and swells while its neighbours shrink and fade towards the rim, so you
-/// watch one number become the next instead of seeing it replaced.
 struct ScrubDial: View {
     let title: String
     @Binding var selection: Int
     let labels: [String]
-    /// The "home" value (0 compensation, ISO 100). Landing on it clicks harder; double-tap returns to it.
     var resetIndex: Int? = nil
 
-    /// Points of travel between two neighbouring values.
     private let row: CGFloat = 15.5
-    /// Height of the glass, inside the bezel.
     private let face: CGFloat = 78
 
     @State private var base: Int?
@@ -543,7 +503,6 @@ struct ScrubDial: View {
 
     private var safeSelection: Int { min(max(selection, 0), max(labels.count - 1, 0)) }
 
-    /// Fractional index under the pointer. Follows the finger exactly while dragging.
     private var position: Double {
         guard let base else { return Double(safeSelection) }
         return min(max(Double(base) - Double(drag / row), 0), Double(max(labels.count - 1, 0)))
@@ -620,19 +579,14 @@ struct ScrubDial: View {
     }
 }
 
-/// The strip of values drawn inside a window. Everything is one piece: the number at the centre of
-/// the window is the same drawing as the numbers above and below it, only nearer the light.
 private struct ValueRail: View, Animatable {
     var position: Double
     let labels: [String]
-    /// Points between two neighbouring values.
     let row: CGFloat
     let size: CGFloat
     let weight: Font.Weight
-    /// How much a value shrinks by the time it sits two rows away.
     let shrink: CGFloat
     var offsetX: CGFloat = 0
-    /// How much ink a value keeps, given how many rows it is from the pointer.
     let alpha: (CGFloat) -> CGFloat
 
     var animatableData: Double {
@@ -666,9 +620,8 @@ private struct ValueRail: View, Animatable {
     }
 }
 
-// MARK: - Paper keys (the square buttons beside the shutter)
+// MARK: - Paper keys
 
-/// A word-shaped key. Braun labels are printed words on the panel, not pictograms.
 struct SetKeyStyle: ButtonStyle {
     let active: Bool
 
@@ -704,13 +657,10 @@ struct SetKeyStyle: ButtonStyle {
 
 // MARK: - Aperture drum
 
-/// What the auto light is saying.
 enum AutoLampState {
     case off, good, slow, bad
 }
 
-/// The LED beside the drum. Green while the ring has room to work, amber when it is pinned wide
-/// open and the shutter has slipped past the hand-holdable line, red when even f/22 can't save it.
 struct AutoLamp: View {
     let state: AutoLampState
 
@@ -741,23 +691,16 @@ struct AutoLamp: View {
     }
 }
 
-/// The vertical aperture wheel in the bottom-right corner. The chosen stop sits in a fixed window
-/// and the strip turns behind it. Tap hands the aperture to the meter; a drag takes it back.
 struct ApertureDrum: View {
-    /// The stop the app wants shown: your choice, or auto's answer.
     let index: Int
     let auto: Bool
-    /// A stop picked by hand. Always leaves auto.
     let onPick: (Int) -> Void
     let onTap: () -> Void
-    /// Long press: back to f/8.
     let onHome: () -> Void
 
     private let width: CGFloat = 60
     private let height: CGFloat = 84
-    /// Thickness of the bezel around the glass.
     private let bezel: CGFloat = 4
-    /// Points of finger travel per stop.
     private let pitch: CGFloat = 18.5
     private let homeIndex = 3
 
@@ -774,7 +717,6 @@ struct ApertureDrum: View {
     var body: some View {
         ZStack {
             DrumFace(position: position, pitch: pitch)
-            // A small red mark against the stop you have set.
             PointerTriangle()
                 .fill(accentRed)
                 .frame(width: 4.5, height: 9)
@@ -819,7 +761,7 @@ struct ApertureDrum: View {
                 guard !longPressFired else { return }
                 if !moved && abs(value.translation.height) > 4 {
                     moved = true
-                    pressToken += 1      // the finger is scrolling, not holding
+                    pressToken += 1
                 }
                 guard moved, let start = base else { return }
                 position = rubber(start - Double(value.translation.height / pitch))
@@ -847,7 +789,6 @@ struct ApertureDrum: View {
             }
     }
 
-    /// Past either end the drum stretches a little and springs back.
     private func rubber(_ v: Double) -> Double {
         let lo = 0.0
         let hi = Double(stopCount - 1)
@@ -867,7 +808,6 @@ struct ApertureDrum: View {
         }
     }
 
-    /// Held still for a moment: the ring goes home to f/8.
     private func scheduleHome() {
         pressToken += 1
         let token = pressToken
@@ -884,9 +824,6 @@ struct ApertureDrum: View {
     }
 }
 
-/// The ring of stops turning behind the window. Every stop is drawn the same way; the one at the
-/// pointer is simply nearer the light and a little larger, so a drag reads as the ring turning and
-/// not as one number being swapped for another.
 private struct DrumFace: View, Animatable {
     var position: Double
     let pitch: CGFloat
@@ -898,7 +835,6 @@ private struct DrumFace: View, Animatable {
 
     var body: some View {
         Canvas { ctx, size in
-            // Optically centred in the space left of the pointer, not in the window.
             let cx = size.width / 2 - 3.5
             let midY = size.height / 2
             for i in Rollei.stops.indices {
@@ -906,8 +842,6 @@ private struct DrumFace: View, Animatable {
                 let y = midY + d * pitch
                 if y < -pitch || y > size.height + pitch { continue }
                 let ad = abs(d)
-                // Three stops read clearly; the next two only show where the window cuts them, so
-                // you can see there is more of the ring above and below.
                 let near = 1 - smoothstep(0.30, 1.10, ad)
                 let mid = 1 - smoothstep(0.80, 1.90, ad)
                 let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
@@ -930,21 +864,15 @@ private struct DrumFace: View, Animatable {
 
 // MARK: - Metering mode
 
-/// The metering mode in a window of its own, turned the same way as the aperture. The names are the
-/// wheel: the mode in use sits at the pointer, the other two wait above and below it.
 struct MeterDrum: View {
     let modes: [MeterMode]
-    /// The mode in use.
     let index: Int
-    /// A mode picked by turning the wheel.
     let onPick: (Int) -> Void
-    /// A tap. Steps on to the next mode.
     let onTap: () -> Void
 
     private let width: CGFloat = 82
     private let height: CGFloat = 84
     private let bezel: CGFloat = 4
-    /// Points of finger travel per mode.
     private let pitch: CGFloat = 19
 
     @State private var position: Double = 0
@@ -1021,7 +949,6 @@ struct MeterDrum: View {
             }
     }
 
-    /// Past either end the wheel stretches a little and springs back.
     private func rubber(_ v: Double) -> Double {
         let hi = Double(max(modes.count - 1, 0))
         if v < 0 { return max(-0.3, v * 0.3) }
@@ -1063,7 +990,6 @@ struct FreezeButton: View {
                 Circle()
                     .fill(paper)
                     .overlay {
-                        // Same fall of light as the windows: shadow at the top, clean below.
                         LinearGradient(
                             stops: [
                                 .init(color: Palette.recess.opacity(0.85), location: 0),
@@ -1090,9 +1016,8 @@ struct FreezeButton: View {
     }
 }
 
-// MARK: - LiDAR marker (on the viewfinder)
+// MARK: - LiDAR marker
 
-/// A short, expanding ring confirms a new focus point without obscuring the camera image.
 private struct FocusPing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
@@ -1115,7 +1040,6 @@ private struct FocusPing: View {
     }
 }
 
-/// Shows the LiDAR focus point as a clean cursor on the viewfinder.
 struct FocusMarker: View {
     let tooClose: Bool
     var pulseID: Int = 0
