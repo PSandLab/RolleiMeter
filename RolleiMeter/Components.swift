@@ -526,18 +526,15 @@ struct HorizontalScrubDial: View {
     let labels: [String]
     var resetIndex: Int? = nil
 
-    private let pitch: CGFloat = 52
+    private let pitch: CGFloat = 48
     private let height: CGFloat = 56
 
-    @State private var base: Int?
-    @State private var drag: CGFloat = 0
+    @State private var position: Double = 0
+    @State private var base: Double?
+    @State private var lastDetent: Int = -1
 
-    private var safeSelection: Int { min(max(selection, 0), max(labels.count - 1, 0)) }
-
-    private var position: Double {
-        guard let base else { return Double(safeSelection) }
-        return min(max(Double(base) - Double(drag / pitch), 0), Double(max(labels.count - 1, 0)))
-    }
+    private var maxIndex: Int { max(labels.count - 1, 0) }
+    private var safeSelection: Int { min(max(selection, 0), maxIndex) }
 
     var body: some View {
         VStack(spacing: 3) {
@@ -547,9 +544,9 @@ struct HorizontalScrubDial: View {
                     .tracking(1.2)
                     .foregroundStyle(Palette.mutedInk)
                 Spacer()
-                Text(labels.isEmpty ? "" : labels[safeSelection])
+                Text(labels.isEmpty ? "" : labels[min(max(Int(position.rounded()), 0), maxIndex)])
                     .font(AppTypography.mono(size: 11, weight: .bold))
-                    .foregroundStyle(Palette.ink)
+                    .foregroundStyle(Palette.ink.opacity(0.82))
             }
             .padding(.horizontal, 4)
 
@@ -569,34 +566,51 @@ struct HorizontalScrubDial: View {
         }
         .contentShape(Rectangle())
         .gesture(
-            DragGesture(minimumDistance: 0)
+            DragGesture(minimumDistance: 2)
                 .onChanged { value in
-                    if base == nil { base = safeSelection }
-                    drag = value.translation.width
-                    let index = Int(position.rounded())
-                    if index != selection {
-                        selection = index
-                        if index == resetIndex {
+                    if base == nil { base = position }
+                    guard let start = base else { return }
+                    let raw = start - Double(value.translation.width / pitch)
+                    position = min(max(raw, -0.3), Double(maxIndex) + 0.3)
+
+                    let currentDetent = min(max(Int(position.rounded()), 0), maxIndex)
+                    if currentDetent != lastDetent {
+                        lastDetent = currentDetent
+                        selection = currentDetent
+                        if currentDetent == resetIndex {
                             UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
                         } else {
                             UISelectionFeedbackGenerator().selectionChanged()
                         }
                     }
                 }
-                .onEnded { _ in
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        base = nil
-                        drag = 0
+                .onEnded { value in
+                    base = nil
+                    let flick = Double(value.predictedEndTranslation.width - value.translation.width) / (pitch * 2.5)
+                    let predicted = position - flick
+                    let target = Double(min(max(Int(predicted.rounded()), 0), maxIndex))
+
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                        position = target
                     }
+                    let finalIndex = Int(target)
+                    selection = finalIndex
+                    lastDetent = finalIndex
                 }
         )
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                guard let resetIndex, selection != resetIndex else { return }
-                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { selection = resetIndex }
+        .onAppear {
+            position = Double(safeSelection)
+            lastDetent = safeSelection
+        }
+        .onChange(of: selection) { _, newValue in
+            guard base == nil else { return }
+            let clamped = Double(min(max(newValue, 0), maxIndex))
+            if abs(position - clamped) > 0.001 {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                    position = clamped
+                }
             }
-        )
+        }
     }
 }
 
@@ -691,7 +705,7 @@ struct ApertureDrum: View {
     private let width: CGFloat = 60
     private let height: CGFloat = 84
     private let bezel: CGFloat = 4
-    private let pitch: CGFloat = 18.5
+    private let pitch: CGFloat = 34
     private let homeIndex = 3
 
     @State private var position: Double = 0
@@ -717,20 +731,20 @@ struct ApertureDrum: View {
         .modifier(WindowInset(radius: 11, bezel: bezel))
         .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .gesture(dragGesture)
-            .onAppear {
-                position = Double(index)
-                lastDetent = index
+        .onAppear {
+            position = Double(index)
+            lastDetent = index
+        }
+        .onChange(of: index) { _, newValue in
+            guard base == nil else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                position = Double(newValue)
             }
-            .onChange(of: index) { _, newValue in
-                guard base == nil else { return }
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                    position = Double(newValue)
-                }
-            }
+        }
     }
 
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 2)
             .onChanged { value in
                 if base == nil {
                     base = position
@@ -739,7 +753,7 @@ struct ApertureDrum: View {
                     scheduleHome()
                 }
                 guard !longPressFired else { return }
-                if !moved && abs(value.translation.height) > 4 {
+                if !moved && abs(value.translation.height) > 3 {
                     moved = true
                     pressToken += 1
                 }
@@ -761,7 +775,8 @@ struct ApertureDrum: View {
                     onTap()
                     return
                 }
-                let predicted = start - Double(value.predictedEndTranslation.height / pitch)
+                let flick = Double(value.predictedEndTranslation.height - value.translation.height) / (pitch * 3.0)
+                let predicted = position - flick
                 let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
                 detent()
@@ -826,10 +841,12 @@ private struct DrumFace: View, Animatable {
                 let mid = 1 - smoothstep(0.80, 1.90, ad)
                 let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
                 if a <= 0.02 { continue }
-                let scale = 1 - 0.26 * smoothstep(0, 1.6, ad)
+                let scale = 1 - 0.22 * smoothstep(0, 1.6, ad)
+
                 let text = Text(Rollei.stops[i].label)
-                    .font(AppTypography.bold(size: 19.5))
-                    .foregroundColor(Palette.engraved.opacity(a))
+                    .font(AppTypography.next(size: 19, weight: .bold))
+                    .foregroundColor(Palette.ink.opacity(a * 0.78))
+
                 var sub = ctx
                 sub.translateBy(x: cx, y: y)
                 sub.scaleBy(x: scale, y: scale)

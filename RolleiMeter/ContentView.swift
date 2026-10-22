@@ -449,13 +449,6 @@ struct ContentView: View {
                     .font(AppTypography.next(size: trayOpen ? 12 : 11, weight: .bold))
                     .tracking(trayOpen ? 0 : 1.0)
                     .foregroundStyle(trayOpen ? Palette.paper : Palette.ink)
-
-                if safeEVIndex != EVComp.zeroIndex && !trayOpen {
-                    Circle()
-                        .fill(Palette.braunOrange)
-                        .frame(width: 6, height: 6)
-                        .offset(x: 10, y: -10)
-                }
             }
         }
         .buttonStyle(PressStyle())
