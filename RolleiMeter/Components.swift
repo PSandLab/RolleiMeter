@@ -184,7 +184,6 @@ struct EVBadge: View {
             Text("EV " + evText)
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .frame(width: 46, alignment: .leading)
         }
         .font(AppTypography.font(size: 13, weight: .medium))
         .foregroundStyle(inkColor)
