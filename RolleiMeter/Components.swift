@@ -435,69 +435,88 @@ private struct FocusDialFace: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            let cx = size.width / 2
-            // Scale the ruler to the depth-of-field span: wider at small apertures,
-            // tighter at large apertures, while keeping the focused distance centered.
-            let depthSpan = max(far - near, 0.015)
-            let pointsPerUnit = CGFloat(min(max(Double(size.width) * 0.72 / depthSpan, 180), 1400))
-            // Pointer, number and ticks stacked as one group, centred in the tile.
-            let groupHeight: CGFloat = 104
-            let y0 = max(0, (size.height - groupHeight) / 2)
-            let numberY = y0 + 30
-            let markTop = y0 + 50
-            let baseline = y0 + 92
-            let fadeWidth: CGFloat = 44
-
-            func x(_ p: Double) -> CGFloat { cx + CGFloat(p - position) * pointsPerUnit }
-            func fade(_ x: CGFloat) -> Double {
-                let edge = min(x, size.width - x)
-                return Double(min(1, max(0, edge / fadeWidth)))
-            }
-
-            // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
-            let markPositions = marks.map { $0.p }
-            let n = 60
-            for i in 0...n {
-                let p = Double(i) / Double(n)
-                if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
-                let px = x(p)
-                let f = fade(px)
-                if f <= 0 { continue }
-                let h: CGFloat = i.isMultiple(of: 5) ? 28 : 18
-                var tick = Path()
-                tick.move(to: CGPoint(x: px, y: baseline))
-                tick.addLine(to: CGPoint(x: px, y: baseline - h))
-                context.stroke(tick, with: .color(inkColor.opacity(f * 0.78)), lineWidth: 1.5)
-            }
-            for mark in marks {
-                let px = x(mark.p)
-                let f = fade(px)
-                if f <= 0 { continue }
-                let color = inkColor
-                let a = f * 0.78
-                var tick = Path()
-                tick.move(to: CGPoint(x: px, y: baseline))
-                tick.addLine(to: CGPoint(x: px, y: markTop))
-                context.stroke(tick, with: .color(color.opacity(a)), lineWidth: 2.5)
-                // The mark under the pointer grows a little, like a detent.
-                let underPointer = abs(mark.p - position) < 0.012
-                let text = context.resolve(
-                    Text(mark.label)
-                        .font(AppTypography.bold(size: underPointer ? 29 : 24))
-                        .foregroundColor(color.opacity(a))
-                )
-                context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
-            }
-
-            // Fixed pointer
-            var tri = Path()
-            tri.move(to: CGPoint(x: cx - 7, y: y0))
-            tri.addLine(to: CGPoint(x: cx + 7, y: y0))
-            tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
-            tri.closeSubpath()
-            context.fill(tri, with: .color(accentRed))
+            drawDial(&context, size)
         }
         .clipped()
+    }
+
+    /// Points of travel per unit of focus ring. A shallow depth of field zooms in on a few ticks, a deep one
+    /// pulls out to show more numbers. It is capped so the nearest engraved number is always in view, and it
+    /// depends only on the depth of field, never on where the pointer sits, so it doesn't pump while you move.
+    private func zoom(width: CGFloat) -> CGFloat {
+        let span = max(far - near, 0.01)
+        let wanted: CGFloat = width / CGFloat(span * 1.8)
+        let clamped: CGFloat = min(max(wanted, 380), 1400)
+        let cap: CGFloat = width * 2.3
+        return min(clamped, cap)
+    }
+
+    private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
+        let cx: CGFloat = size.width / 2
+        // Pointer, number and ticks stacked as one group, centred in the tile.
+        let groupHeight: CGFloat = 104
+        let y0: CGFloat = max(0, (size.height - groupHeight) / 2)
+        let numberY: CGFloat = y0 + 30
+        let markTop: CGFloat = y0 + 50
+        let baseline: CGFloat = y0 + 92
+        let fadeWidth: CGFloat = 44
+        let ppu: CGFloat = zoom(width: size.width)
+        // Fine ticks thin out as they get crowded; the longer ones always stay.
+        let fineRaw: CGFloat = (ppu / 60 - 4) / 3
+        let fine: Double = Double(min(max(fineRaw, 0), 1))
+
+        func x(_ p: Double) -> CGFloat {
+            return cx + CGFloat(p - position) * ppu
+        }
+        func fade(_ px: CGFloat) -> Double {
+            let edge: CGFloat = min(px, size.width - px)
+            return Double(min(max(edge / fadeWidth, 0), 1))
+        }
+
+        // Ticks rise from the baseline: fine, every 5th taller, engraved marks tallest.
+        let markPositions: [Double] = marks.map { $0.p }
+        for i in 0...60 {
+            let p: Double = Double(i) / 60.0
+            if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
+            let major: Bool = i % 5 == 0
+            let strength: Double = major ? 1.0 : fine
+            if strength <= 0 { continue }
+            let px: CGFloat = x(p)
+            let f: Double = fade(px)
+            if f <= 0 { continue }
+            let h: CGFloat = major ? 28 : 18
+            var tick = Path()
+            tick.move(to: CGPoint(x: px, y: baseline))
+            tick.addLine(to: CGPoint(x: px, y: baseline - h))
+            context.stroke(tick, with: .color(mutedInk.opacity(f * strength)), lineWidth: 1.5)
+        }
+
+        for mark in marks {
+            let px: CGFloat = x(mark.p)
+            let f: Double = fade(px)
+            if f <= 0 { continue }
+            let green: Bool = mark.label == sharpLabel
+            let color: Color = green ? goldenGreen : inkColor
+            var tick = Path()
+            tick.move(to: CGPoint(x: px, y: baseline))
+            tick.addLine(to: CGPoint(x: px, y: markTop))
+            context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
+            // The mark under the pointer grows a little, like a detent.
+            let underPointer: Bool = abs(mark.p - position) < 0.012
+            let label = Text(mark.label)
+                .font(AppTypography.bold(size: underPointer ? 29 : 24))
+                .foregroundColor(color.opacity(f))
+            let text = context.resolve(label)
+            context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
+        }
+
+        // Fixed pointer
+        var tri = Path()
+        tri.move(to: CGPoint(x: cx - 7, y: y0))
+        tri.addLine(to: CGPoint(x: cx + 7, y: y0))
+        tri.addLine(to: CGPoint(x: cx, y: y0 + 11))
+        tri.closeSubpath()
+        context.fill(tri, with: .color(accentRed))
     }
 }
 
@@ -836,32 +855,91 @@ struct FocusPanel: View {
     private var unit: String { feet ? "ft" : "m" }
 
     var body: some View {
-        if card {
-            scale
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .frame(maxWidth: .infinity)
-                .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .onTapGesture {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded = false }
-                }
+        VStack(spacing: 6) {
+            dialArea
+                .frame(height: 108)
+            readouts
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .animation(.smooth(duration: 0.25), value: tooClose)
+    }
+
+    private var sharpLabel: String? {
+        guard let advice, advice.sharp else { return nil }
+        return advice.label
+    }
+
+    /// The same sliding dial as simple mode, full width: big numbers, a pointer, and zoom for depth of field.
+    @ViewBuilder
+    private var dialArea: some View {
+        if tooClose {
+            VStack(spacing: 4) {
+                Text("TOO CLOSE")
+                    .font(AppTypography.bold(size: 24))
+                    .foregroundStyle(warnRed)
+                Text("MIN " + (feet ? "3 FT" : "0.9 M"))
+                    .font(AppTypography.next(size: 11, weight: .medium))
+                    .tracking(1)
+                    .foregroundStyle(mutedInk)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if distance == nil {
+            Text("—")
+                .font(AppTypography.bold(size: 28))
+                .foregroundStyle(mutedInk)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            FocusDialFace(
+                position: damp.values[0],
+                near: damp.values[1],
+                far: damp.values[2],
+                sharpLabel: sharpLabel,
+                marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Focus ring. Depth of field at f/\(aperture).")
+        }
+    }
+
+    private var readouts: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            readout("NEAR", near, leading: true)
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) { expanded.toggle() }
+                onToggleUnits()
             } label: {
-                summary
+                Text(unit.uppercased())
+                    .font(AppTypography.bold(size: 12))
+                    .foregroundStyle(inkColor)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(inkColor.opacity(0.08), in: Capsule())
+                    .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity)
-            .modifier(Panel(stroke: tooClose ? warnRed : hairline, lineWidth: tooClose ? 1.5 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .animation(.smooth(duration: 0.25), value: tooClose)
+            .accessibilityLabel("Distance units, \(unit)")
+            readout("FAR", far, leading: false)
         }
+    }
+
+    private func readout(_ title: String, _ value: Double?, leading: Bool) -> some View {
+        VStack(alignment: leading ? .leading : .trailing, spacing: 0) {
+            Text(title)
+                .font(AppTypography.next(size: 9, weight: .medium))
+                .tracking(1)
+                .foregroundStyle(mutedInk)
+            Text(value.map { Fmt.distance($0, feet: feet) } ?? "—")
+                .font(AppTypography.bold(size: 20))
+                .foregroundStyle(inkColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity, alignment: leading ? .leading : .trailing)
     }
 
     // MARK: summary row
