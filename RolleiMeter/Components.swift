@@ -420,100 +420,123 @@ private struct FocusDialFace: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            drawDial(&context, size)
+            drawCurvedDial(&context, size)
         }
         .clipped()
     }
 
-    private func zoom(width: CGFloat) -> CGFloat {
-        let span = max(far - near, 0.006)
-        let wanted: CGFloat = width * 0.55 / CGFloat(span)
-        return min(max(wanted, width * 1.15), width * 8)
-    }
+    private func drawCurvedDial(_ context: inout GraphicsContext, _ size: CGSize) {
+        let cx = size.width / 2
+        let radius: CGFloat = 112
+        let apexY: CGFloat = 34
+        let cy = apexY + radius
+        let center = CGPoint(x: cx, y: cy)
 
-    private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
-        let cx: CGFloat = size.width / 2
-        let groupHeight: CGFloat = 104
-        let y0: CGFloat = max(0, (size.height - groupHeight) / 2)
-        let numberY: CGFloat = y0 + 30
-        let markTop: CGFloat = y0 + 50
-        let baseline: CGFloat = y0 + 92
-        let fadeWidth: CGFloat = 44
-        let ppu: CGFloat = zoom(width: size.width)
-        let fineRaw: CGFloat = (ppu / 60 - 4) / 3
-        let fine: Double = Double(min(max(fineRaw, 0), 1))
+        // Arc spread across focus range (gives numbers generous breathing room)
+        let angularSpan: Double = 1.95
+        let maxAngleDev: Double = 1.05 // Visible arc span ~60 degrees each side
 
-        func x(_ p: Double) -> CGFloat {
-            return cx + CGFloat(p - position) * ppu
-        }
-        func fade(_ px: CGFloat) -> Double {
-            let edge: CGFloat = min(px, size.width - px)
-            return Double(min(max(edge / fadeWidth, 0), 1))
+        func angle(for p: Double) -> Double {
+            -Double.pi / 2.0 + (p - position) * angularSpan
         }
 
-        let nearX: CGFloat = x(near)
-        let farX: CGFloat = x(far)
-        let left: CGFloat = min(nearX, farX)
-        let right: CGFloat = max(nearX, farX)
-        let bandTop: CGFloat = markTop - 7
-        if right - left > 1.5 {
-            let width: CGFloat = right - left
-            context.fill(
-                Path(roundedRect: CGRect(x: left, y: bandTop, width: width,
-                                         height: baseline - bandTop + 2),
-                     cornerRadius: 3),
-                with: .color(goldenGreen.opacity(0.12)))
-            context.fill(
-                Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: 3),
-                     cornerRadius: 1.5),
-                with: .color(goldenGreen.opacity(0.80)))
+        // 1. Subtle base circular arc track
+        let trackStart = -Double.pi / 2.0 - maxAngleDev
+        let trackEnd = -Double.pi / 2.0 + maxAngleDev
+        var baseArc = Path()
+        baseArc.addArc(center: center, radius: radius,
+                       startAngle: Angle(radians: trackStart),
+                       endAngle: Angle(radians: trackEnd),
+                       clockwise: false)
+        context.stroke(baseArc, with: .color(Palette.mutedInk.opacity(0.22)), lineWidth: 1.2)
+
+        // 2. Depth-of-Field (DOF) Curved Band (Wide at f/8, Narrow at f/2.8)
+        let leftP = min(near, far)
+        let rightP = max(near, far)
+        let rawLeftAngle = angle(for: leftP)
+        let rawRightAngle = angle(for: rightP)
+        let dofStart = min(max(rawLeftAngle, trackStart), trackEnd)
+        let dofEnd = min(max(rawRightAngle, trackStart), trackEnd)
+
+        if dofEnd - dofStart > 0.02 {
+            var dofPath = Path()
+            dofPath.addArc(center: center, radius: radius,
+                           startAngle: Angle(radians: dofStart),
+                           endAngle: Angle(radians: dofEnd),
+                           clockwise: false)
+
+            // Luminous soft green glow
+            context.stroke(dofPath, with: .color(Palette.green.opacity(0.16)), lineWidth: 11)
+            // Crisp depth indicator band
+            context.stroke(dofPath, with: .color(Palette.green.opacity(0.85)),
+                           style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
         }
 
-        let markPositions: [Double] = marks.map { $0.p }
-        for i in 0...60 {
-            let p: Double = Double(i) / 60.0
-            if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
-            let major: Bool = i % 5 == 0
-            let strength: Double = major ? 1.0 : fine
-            if strength <= 0 { continue }
-            let px: CGFloat = x(p)
-            let f: Double = fade(px)
-            if f <= 0 { continue }
-            let h: CGFloat = major ? 28 : 18
+        // 3. Minor ticks radiating along the curve
+        let minorCount = 48
+        let markPositions = marks.map { $0.p }
+        for i in 0...minorCount {
+            let p = Double(i) / Double(minorCount)
+            if markPositions.contains(where: { abs($0 - p) < 0.006 }) { continue }
+
+            let a = angle(for: p)
+            let dev = abs(a - (-Double.pi / 2.0))
+            if dev > maxAngleDev { continue }
+            let fade = max(0, min(1, (maxAngleDev - dev) / 0.25))
+
+            let isMajor = i % 4 == 0
+            let tickLen: CGFloat = isMajor ? 9 : 5
+            let inDof = p >= leftP - 0.003 && p <= rightP + 0.003
+            let color = inDof ? Palette.green.opacity(0.70) : Palette.mutedInk.opacity(0.35)
+
+            let cosA = CGFloat(cos(a))
+            let sinA = CGFloat(sin(a))
+            let p1 = CGPoint(x: cx + (radius - tickLen) * cosA, y: cy + (radius - tickLen) * sinA)
+            let p2 = CGPoint(x: cx + radius * cosA, y: cy + radius * sinA)
+
             var tick = Path()
-            tick.move(to: CGPoint(x: px, y: baseline))
-            tick.addLine(to: CGPoint(x: px, y: baseline - h))
-            context.stroke(tick, with: .color(mutedInk.opacity(f * strength)), lineWidth: 1.5)
+            tick.move(to: p1)
+            tick.addLine(to: p2)
+            context.stroke(tick, with: .color(color.opacity(fade)), lineWidth: isMajor ? 1.4 : 1.0)
         }
 
-        var lastRight: CGFloat = -CGFloat.greatestFiniteMagnitude
+        // 4. Major distance marks (Numbers curved with generous vertical/horizontal space)
         for mark in marks {
-            let px: CGFloat = x(mark.p)
-            let f: Double = fade(px)
-            if f <= 0 { continue }
-            let green: Bool = mark.p >= near - 0.004 && mark.p <= far + 0.004
-            let color: Color = green ? goldenGreen : inkColor
+            let a = angle(for: mark.p)
+            let dev = abs(a - (-Double.pi / 2.0))
+            if dev > maxAngleDev + 0.12 { continue }
+            let fade = max(0, min(1, (maxAngleDev + 0.12 - dev) / 0.28))
+
+            let inDof = mark.p >= leftP - 0.005 && mark.p <= rightP + 0.005
+            let color = inDof ? Palette.green : Palette.ink
+
+            let cosA = CGFloat(cos(a))
+            let sinA = CGFloat(sin(a))
+
+            // Major tick line radiating across the arc
+            let p1 = CGPoint(x: cx + (radius - 12) * cosA, y: cy + (radius - 12) * sinA)
+            let p2 = CGPoint(x: cx + (radius + 3) * cosA, y: cy + (radius + 3) * sinA)
             var tick = Path()
-            tick.move(to: CGPoint(x: px, y: baseline))
-            tick.addLine(to: CGPoint(x: px, y: markTop))
-            context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
+            tick.move(to: p1)
+            tick.addLine(to: p2)
+            context.stroke(tick, with: .color(color.opacity(fade)), lineWidth: inDof ? 2.8 : 2.0)
 
-            let underPointer: Bool = abs(mark.p - position) < 0.012
+            // Numbers sit cleanly below the tick curve without overlapping
+            let isUnderPointer = dev < 0.08
+            let labelPos = CGPoint(x: cx + (radius - 28) * cosA, y: cy + (radius - 28) * sinA)
+
             let label = Text(mark.label)
-                .font(AppTypography.bold(size: underPointer ? 29 : 24))
-                .foregroundColor(color.opacity(f))
-            let text = context.resolve(label)
-            let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
+                .font(AppTypography.next(size: isUnderPointer ? 22 : 17, weight: isUnderPointer ? .bold : .semibold))
+                .foregroundColor(color.opacity(fade))
 
-            guard underPointer || px - textWidth / 2 > lastRight + 5 else { continue }
-            context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
-            lastRight = px + textWidth / 2
+            context.draw(context.resolve(label), at: labelPos, anchor: .center)
         }
 
+        // 5. Classic Braun Orange Pointer at Apex (12 o'clock)
         var tri = Path()
-        tri.move(to: CGPoint(x: cx - 6, y: y0))
-        tri.addLine(to: CGPoint(x: cx + 6, y: y0))
-        tri.addLine(to: CGPoint(x: cx, y: y0 + 10))
+        tri.move(to: CGPoint(x: cx - 5.5, y: apexY - 14))
+        tri.addLine(to: CGPoint(x: cx + 5.5, y: apexY - 14))
+        tri.addLine(to: CGPoint(x: cx, y: apexY - 3))
         tri.closeSubpath()
         context.fill(tri, with: .color(Palette.braunOrange))
     }
