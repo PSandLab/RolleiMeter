@@ -2,6 +2,19 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 
+private struct GlassCircle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            content
+                .background(Circle().fill(Palette.panel))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
+        }
+    }
+}
+
 private struct SpotReticle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -145,6 +158,7 @@ struct ContentView: View {
                     .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
+                        .overlay(alignment: .topLeading) { settingsGear(k: k) }
                         .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
                 }
                 .frame(width: grid.size.width, height: grid.size.height)
@@ -530,10 +544,6 @@ struct ContentView: View {
                     .padding(10)
                     .allowsHitTesting(false)
 
-                settingsKey
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(10)
-
                 if trayOpen {
                     Color.black.opacity(0.6)
                         .contentShape(Rectangle())
@@ -564,32 +574,26 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var settingsKey: some View {
-        if #available(iOS 26.0, *) {
-            settingsKeyButton.buttonStyle(.plain)
-        } else {
-            settingsKeyButton.buttonStyle(PressStyle())
-        }
-    }
-
-    private var settingsKeyButton: some View {
-        Button {
+    /// Small Liquid Glass gear that lives in the HOLD panel, outside the viewfinder.
+    private func settingsGear(k: CGFloat) -> some View {
+        let d = 58 * k
+        return Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             withAnimation(.easeInOut(duration: 0.3)) { trayOpen.toggle() }
         } label: {
-            settingsKeyLabel
+            Image(systemName: trayOpen ? "xmark" : "gearshape")
+                .font(.system(size: 26 * k, weight: .medium))
+                .foregroundStyle(trayOpen ? Palette.accent : Palette.dim)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: d, height: d)
+                .modifier(GlassCircle())
+                .padding(8)
+                .contentShape(Circle())
         }
-    }
-
-    private var settingsKeyLabel: some View {
-        Text(trayOpen ? "\u{2715}" : "SET")
-            .font(AppTypography.next(size: 11, weight: .bold))
-            .tracking(trayOpen ? 0 : 1.0)
-            .foregroundStyle(Palette.text)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .padding(.leading, 9 * k)
+        .padding(.top, 8 * k)
+        .accessibilityLabel("Settings")
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
