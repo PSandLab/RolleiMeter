@@ -137,7 +137,7 @@ struct ContentView: View {
                         onTap: toggleAutoAperture,
                         onHome: returnHomeAperture
                     )
-                    .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
+                    .cell(grid, col: p ? 0 : 9, row: p ? 9 : 0, cols: 3, rows: 2)
 
                     FocusPanel(
                         position: focusPos,
@@ -157,10 +157,10 @@ struct ContentView: View {
                         onAuto: resumeAutoFocus,
                         onUnits: toggleUnits
                     )
-                    .cell(grid, col: p ? 0 : 9, row: p ? 9 : 2, cols: p ? 6 : 3, rows: 2)
+                    .cell(grid, col: p ? 0 : 9, row: p ? 11 : 2, cols: p ? 6 : 3, rows: 2)
 
-                    HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                        .cell(grid, col: p ? 1.5 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
+                    HoldControl(frozen: frozenEV != nil, k: k, tall: p, action: toggleFreeze)
+                        .cell(grid, col: p ? 3 : 9, row: p ? 7 : 4, cols: 3, rows: p ? 4 : 2)
 
                     // Last in the stack so the camera view (which overflows its cell) can't block taps.
                     topBar(k: k)
