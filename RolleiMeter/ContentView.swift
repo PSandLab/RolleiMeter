@@ -492,7 +492,7 @@ struct ContentView: View {
                             focusPulse &+= 1
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
                             if frozenEV != nil {
-                                if let dist = meter.sampleFrozenDepth(at: bufferPoint(p, in: previewSize)) {
+                                if let dist = meter.sampleFrozenDepth(at: bufferPoint(p, in: previewSize, rotationAngle: previewRotationAngle)) {
                                     frozenDist = dist
                                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 } else {
