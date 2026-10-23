@@ -6,25 +6,34 @@ import UIKit
 // MARK: - 12 × 6 grid
 
 struct LiquidGrid {
-    static let designWidth: CGFloat = 1460
-    static let designHeight: CGFloat = 665
-    private static let bodyWidth: CGFloat = 1646
-    private static let bodyHeight: CGFloat = 761
+    static let landscapeSize = CGSize(width: 1460, height: 665)   // 12 x 6 cells
+    static let portraitSize = CGSize(width: 706, height: 1498)    // 6 x 13 cells
     private static let colPitch: CGFloat = 126
     private static let rowPitch: CGFloat = 119
 
     let k: CGFloat
+    let portrait: Bool
+    /// Vertical shift that centres the grid between the top and bottom safe areas (portrait only).
+    let yShift: CGFloat
 
     init(screen: CGSize, insets: EdgeInsets) {
-        let sideInset = max(insets.leading, insets.trailing)
-        let usableWidth = max(screen.width - 2 * sideInset, 1)
-        k = max(0.2, min(screen.height / Self.bodyHeight,
-                         screen.width / Self.bodyWidth,
-                         usableWidth / Self.designWidth))
+        portrait = screen.height > screen.width
+        if portrait {
+            let usableHeight = max(screen.height - insets.top - insets.bottom, 1)
+            k = max(0.2, min(screen.width / (Self.portraitSize.width + 96),
+                             usableHeight / (Self.portraitSize.height + 24)))
+            yShift = (insets.top - insets.bottom) / 2
+        } else {
+            let sideInset = max(insets.leading, insets.trailing)
+            let usableWidth = max(screen.width - 2 * sideInset, 1)
+            k = max(0.2, min(screen.height / 761, screen.width / 1646, usableWidth / 1460))
+            yShift = 0
+        }
     }
 
     var size: CGSize {
-        CGSize(width: Self.designWidth * k, height: Self.designHeight * k)
+        let d = portrait ? Self.portraitSize : Self.landscapeSize
+        return CGSize(width: d.width * k, height: d.height * k)
     }
 
     func rect(col: Int, row: Int, cols: Int, rows: Int) -> CGRect {
@@ -144,9 +153,9 @@ final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onPress: () -> Void = {}
-    var onFlip: (Bool) -> Void = { _ in }
+    var onRotate: (ViewRotation) -> Void = { _ in }
 
-    private var flipped: Bool?
+    private var rotation: ViewRotation?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -185,17 +194,17 @@ final class PreviewView: UIView {
 
     private func applyOrientation() {
         guard let orientation = window?.windowScene?.interfaceOrientation else { return }
-        let isFlipped = orientation == .landscapeLeft
-        let angle: CGFloat = isFlipped ? 180 : 0
+        let newRotation = ViewRotation(orientation)
+        let angle = newRotation.videoAngle
         if let connection = previewLayer.connection,
            connection.isVideoRotationAngleSupported(angle),
            connection.videoRotationAngle != angle {
             connection.videoRotationAngle = angle
         }
-        if flipped != isFlipped {
-            flipped = isFlipped
-            let callback = onFlip
-            DispatchQueue.main.async { callback(isFlipped) }
+        if rotation != newRotation {
+            rotation = newRotation
+            let callback = onRotate
+            DispatchQueue.main.async { callback(newRotation) }
         }
     }
 }
@@ -203,7 +212,7 @@ final class PreviewView: UIView {
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     var onVolumePress: () -> Void = {}
-    var onFlip: (Bool) -> Void = { _ in }
+    var onRotate: (ViewRotation) -> Void = { _ in }
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
@@ -211,7 +220,7 @@ struct CameraPreview: UIViewRepresentable {
         v.previewLayer.videoGravity = .resizeAspectFill
         v.backgroundColor = .clear
         v.onPress = onVolumePress
-        v.onFlip = onFlip
+        v.onRotate = onRotate
 
         if #available(iOS 17.2, *) {
             let interaction = AVCaptureEventInteraction { [weak v] event in
@@ -225,7 +234,7 @@ struct CameraPreview: UIViewRepresentable {
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.onPress = onVolumePress
-        uiView.onFlip = onFlip
+        uiView.onRotate = onRotate
     }
 }
 
