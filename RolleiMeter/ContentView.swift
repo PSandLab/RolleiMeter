@@ -93,13 +93,62 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { screen in
-            let isPortrait = screen.size.width < screen.size.height
+            let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
+            let k = grid.k
 
-            if isPortrait {
-                portraitLayout(screen: screen)
-            } else {
-                landscapeLayout(screen: screen)
+            ZStack {
+                Palette.background
+
+                ZStack(alignment: .topLeading) {
+                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
+                        .cell(grid, col: 0, row: 0, cols: 3, rows: 2)
+
+                    MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
+                        .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
+
+                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
+                        .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
+
+                    preview(k: k)
+                        .cell(grid, col: 3, row: 0, cols: 6, rows: 6)
+
+                    AperturePanel(
+                        index: resolvedApertureIndex,
+                        auto: autoAperture,
+                        lamp: autoLampState,
+                        k: k,
+                        onPick: pickAperture,
+                        onTap: toggleAutoAperture,
+                        onHome: returnHomeAperture
+                    )
+                    .cell(grid, col: 9, row: 0, cols: 3, rows: 2)
+
+                    FocusPanel(
+                        position: focusPos,
+                        manual: manualFocus,
+                        touching: focusTouching,
+                        available: meter.canFocusManually,
+                        lidarDistance: shownDistance,
+                        hasLiDAR: meter.hasLiDAR,
+                        tooClose: tooClose,
+                        aperture: resolvedAperture,
+                        feet: useFeet,
+                        isHeld: frozenEV != nil,
+                        k: k,
+                        onBegin: beginFocusDrag,
+                        onSlide: slideFocus,
+                        onEnd: endFocusDrag,
+                        onAuto: resumeAutoFocus,
+                        onUnits: toggleUnits
+                    )
+                    .cell(grid, col: 9, row: 2, cols: 3, rows: 2)
+
+                    HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
+                        .cell(grid, col: 9, row: 4, cols: 3, rows: 2)
+                }
+                .frame(width: grid.size.width, height: grid.size.height)
             }
+            .frame(width: screen.size.width, height: screen.size.height)
         }
         .ignoresSafeArea()
         .background(Palette.background.ignoresSafeArea())
@@ -156,141 +205,6 @@ struct ContentView: View {
         .onChange(of: advice?.label) {
             if advice != nil { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.45) }
         }
-    }
-
-    private func landscapeLayout(screen: GeometryProxy) -> some View {
-        let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
-        let k = grid.k
-
-        return ZStack {
-            Palette.background
-
-            ZStack(alignment: .topLeading) {
-                ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
-                    .cell(grid, col: 0, row: 0, cols: 3, rows: 2)
-
-                MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
-                    .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
-
-                FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
-                    .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
-
-                preview(k: k)
-                    .cell(grid, col: 3, row: 0, cols: 6, rows: 6)
-
-                AperturePanel(
-                    index: resolvedApertureIndex,
-                    auto: autoAperture,
-                    lamp: autoLampState,
-                    k: k,
-                    onPick: pickAperture,
-                    onTap: toggleAutoAperture,
-                    onHome: returnHomeAperture
-                )
-                .cell(grid, col: 9, row: 0, cols: 3, rows: 2)
-
-                FocusPanel(
-                    position: focusPos,
-                    manual: manualFocus,
-                    touching: focusTouching,
-                    available: meter.canFocusManually,
-                    lidarDistance: shownDistance,
-                    hasLiDAR: meter.hasLiDAR,
-                    tooClose: tooClose,
-                    aperture: resolvedAperture,
-                    feet: useFeet,
-                    isHeld: frozenEV != nil,
-                    k: k,
-                    onBegin: beginFocusDrag,
-                    onSlide: slideFocus,
-                    onEnd: endFocusDrag,
-                    onAuto: resumeAutoFocus,
-                    onUnits: toggleUnits
-                )
-                .cell(grid, col: 9, row: 2, cols: 3, rows: 2)
-
-                HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                    .cell(grid, col: 9, row: 4, cols: 3, rows: 2)
-            }
-            .frame(width: grid.size.width, height: grid.size.height)
-        }
-        .frame(width: screen.size.width, height: screen.size.height)
-    }
-
-    private func portraitLayout(screen: GeometryProxy) -> some View {
-        let w = screen.size.width
-        let k = max(0.40, min(w / 414.0, 0.58))
-        let horizPad: CGFloat = 14
-
-        return ZStack {
-            Palette.background
-
-            VStack(spacing: 10 * k) {
-                // Top Readout Row: Shutter & Aperture
-                HStack(spacing: 12 * k) {
-                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 108 * k)
-
-                    AperturePanel(
-                        index: resolvedApertureIndex,
-                        auto: autoAperture,
-                        lamp: autoLampState,
-                        k: k,
-                        onPick: pickAperture,
-                        onTap: toggleAutoAperture,
-                        onHome: returnHomeAperture
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 108 * k)
-                }
-                .padding(.horizontal, horizPad)
-                .padding(.top, screen.safeAreaInsets.top + 4)
-
-                // 4:3 Centered Viewfinder
-                preview(k: k)
-                    .frame(width: w - horizPad * 2, height: (w - horizPad * 2) * 0.75)
-
-                // Full-width Focus Dial
-                FocusPanel(
-                    position: focusPos,
-                    manual: manualFocus,
-                    touching: focusTouching,
-                    available: meter.canFocusManually,
-                    lidarDistance: shownDistance,
-                    hasLiDAR: meter.hasLiDAR,
-                    tooClose: tooClose,
-                    aperture: resolvedAperture,
-                    feet: useFeet,
-                    isHeld: frozenEV != nil,
-                    k: k,
-                    onBegin: beginFocusDrag,
-                    onSlide: slideFocus,
-                    onEnd: endFocusDrag,
-                    onAuto: resumeAutoFocus,
-                    onUnits: toggleUnits
-                )
-                .frame(width: w - horizPad * 2, height: 116 * k)
-
-                // Bottom Controls Row: Meter, Film (Yellow), Hold
-                HStack(spacing: 10 * k) {
-                    MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 102 * k)
-
-                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 102 * k)
-
-                    HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 102 * k)
-                }
-                .padding(.horizontal, horizPad)
-                .padding(.bottom, screen.safeAreaInsets.bottom + 6)
-            }
-        }
-        .frame(width: screen.size.width, height: screen.size.height)
     }
 
     private func pushConfig() {
@@ -419,29 +333,17 @@ struct ContentView: View {
         }
     }
 
-    private func bufferPoint(_ p: CGPoint, in size: CGSize, isPortrait: Bool = false) -> CGPoint {
-        if isPortrait {
-            let frame: CGFloat = 3.0 / 4.0
-            let aspect = size.width / max(size.height, 1)
-            var q = p
-            if aspect > frame {
-                q.y = 0.5 + (p.y - 0.5) * frame / aspect
-            } else {
-                q.x = 0.5 + (p.x - 0.5) * aspect / frame
-            }
-            return CGPoint(x: q.y, y: 1 - q.x)
+    private func bufferPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
+        let frame: CGFloat = 4.0 / 3.0
+        let aspect = size.width / max(size.height, 1)
+        var q = p
+        if aspect > frame {
+            q.y = 0.5 + (p.y - 0.5) * frame / aspect
         } else {
-            let frame: CGFloat = 4.0 / 3.0
-            let aspect = size.width / max(size.height, 1)
-            var q = p
-            if aspect > frame {
-                q.y = 0.5 + (p.y - 0.5) * frame / aspect
-            } else {
-                q.x = 0.5 + (p.x - 0.5) * aspect / frame
-            }
-            if flipped { q = CGPoint(x: 1 - q.x, y: 1 - q.y) }
-            return q
+            q.x = 0.5 + (p.x - 0.5) * aspect / frame
         }
+        if flipped { q = CGPoint(x: 1 - q.x, y: 1 - q.y) }
+        return q
     }
 
     // MARK: - Viewfinder
@@ -491,8 +393,7 @@ struct ContentView: View {
                             focusPulse &+= 1
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
                             if frozenEV != nil {
-                                let isPort = geo.size.width < geo.size.height
-                                if let dist = meter.sampleFrozenDepth(at: bufferPoint(p, in: previewSize, isPortrait: isPort)) {
+                                if let dist = meter.sampleFrozenDepth(at: bufferPoint(p, in: previewSize)) {
                                     frozenDist = dist
                                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 } else {

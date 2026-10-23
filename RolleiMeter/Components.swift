@@ -185,25 +185,8 @@ final class PreviewView: UIView {
 
     private func applyOrientation() {
         guard let orientation = window?.windowScene?.interfaceOrientation else { return }
-        let angle: CGFloat
-        let isFlipped: Bool
-        switch orientation {
-        case .landscapeLeft:
-            angle = 180
-            isFlipped = true
-        case .landscapeRight:
-            angle = 0
-            isFlipped = false
-        case .portrait:
-            angle = 90
-            isFlipped = false
-        case .portraitUpsideDown:
-            angle = 270
-            isFlipped = true
-        default:
-            angle = 0
-            isFlipped = false
-        }
+        let isFlipped = orientation == .landscapeLeft
+        let angle: CGFloat = isFlipped ? 180 : 0
         if let connection = previewLayer.connection,
            connection.isVideoRotationAngleSupported(angle),
            connection.videoRotationAngle != angle {
