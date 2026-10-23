@@ -256,7 +256,6 @@ struct ShutterPanel: View {
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: index)
             PanelTitle(text: "SHUTTER", k: k)
         }
-        .liquidPanel(radius: 26 * k, useGlass: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Shutter speed")
         .accessibilityValue(r.deviation == nil ? "1/\(r.label) second" : sub)
@@ -372,9 +371,13 @@ struct FilmPanel: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
+            PanelTitle(text: "FILM", k: k)
             RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                .fill(Palette.accentInk)
+                .fill(Palette.panelRaised)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
                 .overlay {
                     Text(readout)
                         .font(AppTypography.next(size: 34 * k, weight: .medium))
@@ -623,6 +626,10 @@ struct FocusPanel: View {
     private let tickHaptic = UISelectionFeedbackGenerator()
     private let stopHaptic = UIImpactFeedbackGenerator(style: .rigid)
 
+    private var isManualActive: Bool {
+        manual || isDragging || touching
+    }
+
     private var subject: Double? {
         if manual { return Focus.distance(at: position) }
         return hasLiDAR ? lidarDistance : nil
@@ -636,116 +643,68 @@ struct FocusPanel: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            VStack(spacing: 8 * k) {
-                // Balanced insets keep both touch targets away from the panel edge.
-                HStack(spacing: 0) {
-                    Button {
-                        stopHaptic.impactOccurred(intensity: 0.6)
-                        onAuto()
-                    } label: {
-                        Text(manual ? "MF" : "AF")
-                            .font(AppTypography.next(size: 19 * k, weight: .semibold))
-                            .foregroundStyle(manual ? Palette.bad : Palette.dim)
-                            .frame(width: 48, height: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+            PanelTitle(text: "FOCUS", k: k)
+
+            // Static Bed Dial Track (generously sized to fill panel below title)
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let knobRadius: CGFloat = max(h * 0.38, 16 * k)
+                let usableWidth = max(w - (knobRadius * 2), 1)
+
+                // Left is 0.0 (0.9m), Right is 1.0 (Infinity)
+                let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
+
+                ZStack(alignment: .leading) {
+                    // Recessed dark housing
+                    RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                        .fill(Color(hex: 0x060606))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                        )
+
+                    // Depth-of-Field Red Band (only visible when manually activated)
+                    if isManualActive, let band = dofBand {
+                        let leftX = knobRadius + CGFloat(min(max(band.near, 0.0), 1.0)) * usableWidth
+                        let rightX = knobRadius + CGFloat(min(max(band.far, 0.0), 1.0)) * usableWidth
+                        let bandW = max(rightX - leftX, 6 * k)
+
+                        RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
+                            .fill(Color(hex: 0xFF1E1E).opacity(0.35))
+                            .frame(width: bandW, height: max(h - 12 * k, 1))
+                            .position(x: leftX + bandW / 2, y: h / 2)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(manual ? "Switch to autofocus" : "Autofocus active")
-                    .accessibilityHint(manual ? "Tap to return to autofocus" : "Autofocus is already active")
 
-                    Spacer(minLength: 0)
+                    // STATIC Lines - Clean pure white vertical lines
+                    Canvas { ctx, size in
+                        let ribH = size.height - 18 * k
+                        let topY = (size.height - ribH) / 2
+                        let botY = topY + ribH
 
-                    Text("FOCUS")
-                        .font(AppTypography.next(size: 24 * k, weight: .semibold))
-                        .tracking(2.2 * k)
-                        .foregroundStyle(Palette.text)
-                        .lineLimit(1)
-                        .fixedSize()
+                        for i in 0...totalTicks {
+                            let fraction = CGFloat(i) / CGFloat(totalTicks)
+                            let x = knobRadius + fraction * usableWidth
 
-                    Spacer(minLength: 0)
+                            var path = Path()
+                            path.move(to: CGPoint(x: x, y: topY))
+                            path.addLine(to: CGPoint(x: x, y: botY))
 
-                    if let subject {
-                        Button(action: onUnits) {
-                            Text(Fmt.distance(subject, feet: feet))
-                                .font(AppTypography.font(size: 19 * k, weight: .semibold))
-                                .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.dim))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .frame(width: 48, height: 44, alignment: .trailing)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Focus distance, \(Fmt.distance(subject, feet: feet))")
-                        .accessibilityHint("Tap to switch between metres and feet")
-                    } else {
-                        Color.clear
-                            .frame(width: 48, height: 44)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .frame(height: 44)
-                .padding(.horizontal, 9)
-                .padding(.top, 12 * k)
-
-                // Static Bed Dial Track
-                GeometryReader { geo in
-                    let w = geo.size.width
-                    let h = geo.size.height
-                    let knobRadius: CGFloat = 16 * k
-                    let usableWidth = max(w - (knobRadius * 2), 1)
-
-                    // Left is 0.0 (0.9m), Right is 1.0 (Infinity)
-                    let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
-
-                    ZStack(alignment: .leading) {
-                        // Recessed dark housing
-                        RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                            .fill(Color(hex: 0x050505))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                            ctx.stroke(
+                                path,
+                                with: .color(Color.white.opacity(0.85)),
+                                lineWidth: max(1.2, 1.8 * k)
                             )
-
-                        // Depth-of-Field Red Band
-                        if let band = dofBand {
-                            let leftX = knobRadius + CGFloat(min(max(band.near, 0.0), 1.0)) * usableWidth
-                            let rightX = knobRadius + CGFloat(min(max(band.far, 0.0), 1.0)) * usableWidth
-                            let bandW = max(rightX - leftX, 6 * k)
-
-                            RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
-                                .fill(Color(hex: 0xFF1E1E).opacity(0.35))
-                                .frame(width: bandW, height: max(h - 12 * k, 1))
-                                .position(x: leftX + bandW / 2, y: h / 2)
                         }
+                    }
+                    .allowsHitTesting(false)
 
-                        // STATIC Lines (Do NOT scroll)
-                        Canvas { ctx, size in
-                            let ribH = size.height - 18 * k
-                            let topY = (size.height - ribH) / 2
-                            let botY = topY + ribH
-
-                            for i in 0...totalTicks {
-                                let fraction = CGFloat(i) / CGFloat(totalTicks)
-                                let x = knobRadius + fraction * usableWidth
-
-                                var path = Path()
-                                path.move(to: CGPoint(x: x, y: topY))
-                                path.addLine(to: CGPoint(x: x, y: botY))
-
-                                let isMajor = (i == 0 || i == totalTicks || i == totalTicks / 2)
-                                let alpha = isMajor ? 0.70 : 0.28
-                                let lineWidth = isMajor ? max(1.5, 2.0 * k) : max(1.0, 1.2 * k)
-
-                                ctx.stroke(path, with: .color(Color.white.opacity(alpha)), lineWidth: lineWidth)
-                            }
-                        }
-                        .allowsHitTesting(false)
-
-                        // Red Circle Knob (Slides Left to Right)
+                    // Red Circle Knob (Slides Left to Right) - ONLY visible when manually activated
+                    if isManualActive {
                         ZStack {
                             Circle()
-                                .fill(Color(hex: 0xFF2A2A).opacity(0.40))
-                                .frame(width: 40 * k, height: 40 * k)
+                                .fill(Color(hex: 0xFF2A2A).opacity(0.35))
+                                .frame(width: knobRadius * 2.5, height: knobRadius * 2.5)
                                 .blur(radius: 4 * k)
 
                             Circle()
@@ -754,7 +713,7 @@ struct FocusPanel: View {
                                         colors: [Color(hex: 0xFF3B30), Color(hex: 0xC70010)],
                                         center: .center,
                                         startRadius: 0,
-                                        endRadius: 16 * k
+                                        endRadius: knobRadius
                                     )
                                 )
                                 .frame(width: knobRadius * 2, height: knobRadius * 2)
@@ -764,47 +723,82 @@ struct FocusPanel: View {
                         }
                         .position(x: knobX, y: h / 2)
                         .allowsHitTesting(false)
+                        .transition(.opacity)
                     }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                guard available else { return }
-                                if !isDragging {
-                                    isDragging = true
-                                    _ = onBegin()
-                                }
-
-                                let rawPos = Double((value.location.x - knobRadius) / usableWidth)
-                                let newPos = min(max(rawPos, 0.0), 1.0)
-
-                                let tickIndex = Int((newPos * Double(totalTicks)).rounded())
-                                if tickIndex != lastHapticTick {
-                                    lastHapticTick = tickIndex
-                                    tickHaptic.selectionChanged()
-                                }
-
-                                if (newPos == 0.0 && position == 0.0) || (newPos == 1.0 && position == 1.0) {
-                                    stopHaptic.impactOccurred(intensity: 0.4)
-                                }
-
-                                onSlide(newPos)
-                            }
-                            .onEnded { _ in
-                                isDragging = false
-                                onEnd()
-                            }
-                    )
-                    .simultaneousGesture(
-                        TapGesture(count: 2).onEnded {
-                            guard available else { return }
-                            stopHaptic.impactOccurred(intensity: 0.8)
-                            onAuto()
-                        }
-                    )
                 }
-                .padding(.horizontal, 10 * k)
-                .padding(.bottom, 12 * k)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard available else { return }
+                            if !isDragging {
+                                isDragging = true
+                                _ = onBegin()
+                            }
+
+                            let rawPos = Double((value.location.x - knobRadius) / usableWidth)
+                            let newPos = min(max(rawPos, 0.0), 1.0)
+
+                            let tickIndex = Int((newPos * Double(totalTicks)).rounded())
+                            if tickIndex != lastHapticTick {
+                                lastHapticTick = tickIndex
+                                tickHaptic.selectionChanged()
+                            }
+
+                            if (newPos == 0.0 && position == 0.0) || (newPos == 1.0 && position == 1.0) {
+                                stopHaptic.impactOccurred(intensity: 0.4)
+                            }
+
+                            onSlide(newPos)
+                        }
+                        .onEnded { _ in
+                            isDragging = false
+                            onEnd()
+                        }
+                )
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        guard available else { return }
+                        stopHaptic.impactOccurred(intensity: 0.8)
+                        onAuto()
+                    }
+                )
+            }
+            .padding(.top, 56 * k)
+            .padding(.bottom, 14 * k)
+            .padding(.horizontal, 14 * k)
+        }
+        .overlay(alignment: .topLeading) {
+            if manual {
+                Button {
+                    stopHaptic.impactOccurred(intensity: 0.6)
+                    onAuto()
+                } label: {
+                    Text("MF")
+                        .font(AppTypography.next(size: 20 * k, weight: .bold))
+                        .foregroundStyle(Palette.bad)
+                        .padding(.top, 17 * k)
+                        .padding(.leading, 18 * k)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Switch to autofocus")
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if manual, let subject {
+                Button(action: onUnits) {
+                    Text(Fmt.distance(subject, feet: feet))
+                        .font(AppTypography.mono(size: 19 * k, weight: .semibold))
+                        .foregroundStyle(tooClose ? Palette.bad : Palette.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.top, 17 * k)
+                        .padding(.trailing, 18 * k)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Focus distance, \(Fmt.distance(subject, feet: feet))")
             }
         }
         .onAppear {
