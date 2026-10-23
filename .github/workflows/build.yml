@@ -1,8 +1,12 @@
 name: Build IPA
 
 # Builds an UNSIGNED .ipa. Sign it with your own signer.
-# Manual only: macOS runner minutes are expensive on private repos.
+# Build on changes to main as well as on demand, so SDK/toolchain regressions are caught.
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       bundle_id:
