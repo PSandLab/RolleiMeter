@@ -34,7 +34,7 @@ final class CameraMeter: NSObject, ObservableObject,
     private var spot = CGPoint(x: 0.5, y: 0.5)
     private var spotRadius: CGFloat = 0.05
     private var focus = CGPoint(x: 0.5, y: 0.5)
-    private var previewFlipped = false
+    private var previewRotationAngle: CGFloat = 0
     private var lensNow: Float = 0.5
     private static let phoneFocalMM = 6.8
     private var phoneMinFocusMM = 200.0
@@ -118,9 +118,9 @@ final class CameraMeter: NSObject, ObservableObject,
         return snapped
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, flipped: Bool) {
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, rotationAngle: CGFloat) {
         lock.lock()
-        self.previewFlipped = flipped
+        self.previewRotationAngle = rotationAngle
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
@@ -278,8 +278,11 @@ final class CameraMeter: NSObject, ObservableObject,
         dofFar = far
         dofActive = active
         let pb = frozenDepthPixelBuffer ?? latestDepthPixelBuffer
-        let flipped = previewFlipped
         dofLock.unlock()
+
+        lock.lock()
+        let rotationAngle = previewRotationAngle
+        lock.unlock()
 
         if !active {
             DispatchQueue.main.async { self.peakingFeed.image = nil }
@@ -287,11 +290,11 @@ final class CameraMeter: NSObject, ObservableObject,
         }
 
         if let pb = pb {
-            renderDoFOverlay(pb, near: near, far: far, flipped: flipped)
+            renderDoFOverlay(pb, near: near, far: far, rotationAngle: rotationAngle)
         }
     }
 
-    private func renderDoFOverlay(_ pb: CVPixelBuffer, near: Double, far: Double, flipped: Bool) {
+    private func renderDoFOverlay(_ pb: CVPixelBuffer, near: Double, far: Double, rotationAngle: CGFloat) {
         dofLock.lock()
         guard !dofBusy else {
             dofLock.unlock()
@@ -308,8 +311,7 @@ final class CameraMeter: NSObject, ObservableObject,
                 self.dofLock.unlock()
             }
 
-            var image = CIImage(cvPixelBuffer: pb)
-            if flipped { image = image.oriented(.down) }
+            let image = orientedForPreview(CIImage(cvPixelBuffer: pb), rotationAngle: rotationAngle)
 
             guard let kernel = CameraMeter.dofKernel,
                   let output = kernel.apply(extent: image.extent, arguments: [image, Float(near), Float(far)]),
@@ -489,11 +491,14 @@ final class CameraMeter: NSObject, ObservableObject,
         let renderNow = dofActive
         let curNear = dofNear
         let curFar = dofFar
-        let isFlipped = previewFlipped
         dofLock.unlock()
 
+        lock.lock()
+        let rotationAngle = previewRotationAngle
+        lock.unlock()
+
         if renderNow {
-            renderDoFOverlay(map, near: curNear, far: curFar, flipped: isFlipped)
+            renderDoFOverlay(map, near: curNear, far: curFar, rotationAngle: rotationAngle)
         }
 
         CVPixelBufferLockBaseAddress(map, .readOnly)
@@ -599,15 +604,24 @@ final class CameraMeter: NSObject, ObservableObject,
         return nil
     }
 
+    private func orientedForPreview(_ image: CIImage, rotationAngle: CGFloat) -> CIImage {
+        switch ((Int(rotationAngle.rounded()) % 360) + 360) % 360 {
+        case 90: return image.oriented(.right)
+        case 180: return image.oriented(.down)
+        case 270: return image.oriented(.left)
+        default: return image
+        }
+    }
+
     func previewSnapshot() -> UIImage? {
         lock.lock()
         let pixelBuffer = latestPreviewPixelBuffer
-        let flipped = previewFlipped
+        let rotationAngle = previewRotationAngle
         lock.unlock()
         guard let pixelBuffer = pixelBuffer else { return nil }
 
         let sensorImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let image = flipped ? sensorImage.oriented(.down) : sensorImage
+        let image = orientedForPreview(sensorImage, rotationAngle: rotationAngle)
         guard let cgImage = previewImageContext.createCGImage(image, from: image.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
