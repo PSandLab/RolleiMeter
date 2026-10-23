@@ -196,7 +196,8 @@ final class CameraMeter: NSObject, ObservableObject,
         lock.unlock()
         let x = f * f / (nearMM - f) * (1 - Double(min(max(p, 0), 1)))
         if x < 0.0005 { return .infinity }
-        return (f * f / x + f) / 1000.0
+        let d = (f * f / x + f) / 1000.0
+        return d >= 8.5 ? .infinity : d
     }
 
     func currentFocusDistance() -> Double {

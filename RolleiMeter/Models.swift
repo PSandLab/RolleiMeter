@@ -129,7 +129,7 @@ enum Fmt {
     /// LiDAR distance. `m` is metres; nil shows a dash.
     static func distance(_ m: Double?, feet: Bool) -> String {
         guard let m else { return "—" }
-        if m.isInfinite { return "∞" }
+        if m.isInfinite || m >= 8.5 { return "∞" }
         if feet {
             let f = m * 3.28084
             return f < 10 ? String(format: "%.1f ft", f) : String(format: "%.0f ft", f)
@@ -173,7 +173,8 @@ enum Focus {
         let p = min(max(position, 0), 1)
         let x = extensionMM(nearest) * (1 - p)
         if x < 0.0005 { return .infinity }
-        return (focalMM * focalMM / x + focalMM) / 1000.0
+        let d = (focalMM * focalMM / x + focalMM) / 1000.0
+        return d >= 8.5 ? .infinity : d
     }
 }
 

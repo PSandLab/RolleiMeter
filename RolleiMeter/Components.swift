@@ -285,14 +285,15 @@ private struct ShutterWheel: View, Animatable {
                 let active = abs(d) < 0.5
                 let color: Color = active ? tint : Palette.text.opacity(0.8)
 
+                let ad = abs(d)
                 let number = Text("1/" + labels[i])
-                    .font(AppTypography.next(size: 40 * k))
-                    .foregroundColor(color)
+                    .font(AppTypography.next(size: 42 * k, weight: active ? .bold : .medium))
+                    .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
                 ctx.draw(ctx.resolve(number), at: CGPoint(x: x, y: 108 * k), anchor: .center)
 
                 let unit = Text(active ? sub : "sec")
-                    .font(AppTypography.next(size: 25 * k))
-                    .foregroundColor(color)
+                    .font(AppTypography.next(size: 25 * k, weight: active ? .bold : .medium))
+                    .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
                 ctx.draw(ctx.resolve(unit), at: CGPoint(x: x, y: 152 * k), anchor: .center)
             }
         }
@@ -623,12 +624,12 @@ struct FocusPanel: View {
     @State private var isDragging: Bool = false
     @State private var lastHapticTick: Int = -1
 
-    private let totalTicks = 28
+    private let totalTicks = 36
     private let tickHaptic = UISelectionFeedbackGenerator()
     private let stopHaptic = UIImpactFeedbackGenerator(style: .rigid)
 
-    private var isManualActive: Bool {
-        manual || isDragging || touching
+    private var isScrolling: Bool {
+        isDragging || touching
     }
 
     private var subject: Double? {
@@ -640,7 +641,7 @@ struct FocusPanel: View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FOCUS", k: k)
 
-            // Static Bed Dial Track (No box or outline around lines)
+            // Static Bed Dial Track (No box / border around the lines)
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
@@ -652,8 +653,8 @@ struct FocusPanel: View {
                 let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
 
                 ZStack(alignment: .leading) {
-                    // Small red gradient wash following the slider knob
-                    if isManualActive {
+                    // Gradient ONLY visible while actively scrolling across
+                    if isScrolling {
                         let glowWidth = knobRadius * 3.8
                         RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
                             .fill(
@@ -675,14 +676,16 @@ struct FocusPanel: View {
                             .transition(.opacity)
                     }
 
-                    // Clean pure white vertical lines (no surrounding box)
+                    // STATIC Lines - Spanning from 0 to width till the very end (no black space)
                     Canvas { ctx, size in
                         let topY = (size.height - ribH) / 2
                         let botY = topY + ribH
+                        let lineMargin: CGFloat = 2 * k
+                        let linesWidth = max(size.width - lineMargin * 2, 1)
 
                         for i in 0...totalTicks {
                             let fraction = CGFloat(i) / CGFloat(totalTicks)
-                            let x = knobRadius + fraction * usableWidth
+                            let x = lineMargin + fraction * linesWidth
 
                             var path = Path()
                             path.move(to: CGPoint(x: x, y: topY))
@@ -697,8 +700,8 @@ struct FocusPanel: View {
                     }
                     .allowsHitTesting(false)
 
-                    // Red Circle Knob - ONLY visible when manually activated
-                    if isManualActive {
+                    // Red Circle Knob - ONLY visible when in manual focus
+                    if manual || isDragging || touching {
                         ZStack {
                             Circle()
                                 .fill(Color(hex: 0xFF2A2A).opacity(0.35))
@@ -725,12 +728,16 @@ struct FocusPanel: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .animation(.easeInOut(duration: 0.22), value: isScrolling)
+                .animation(.easeInOut(duration: 0.15), value: position)
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
                             guard available else { return }
                             if !isDragging {
-                                isDragging = true
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isDragging = true
+                                }
                                 _ = onBegin()
                             }
 
@@ -750,7 +757,9 @@ struct FocusPanel: View {
                             onSlide(newPos)
                         }
                         .onEnded { _ in
-                            isDragging = false
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isDragging = false
+                            }
                             onEnd()
                         }
                 )
@@ -758,7 +767,9 @@ struct FocusPanel: View {
                     TapGesture(count: 2).onEnded {
                         guard available else { return }
                         stopHaptic.impactOccurred(intensity: 0.8)
-                        onAuto()
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            onAuto()
+                        }
                     }
                 )
             }
@@ -770,7 +781,9 @@ struct FocusPanel: View {
             Button {
                 if manual {
                     stopHaptic.impactOccurred(intensity: 0.6)
-                    onAuto()
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        onAuto()
+                    }
                 }
             } label: {
                 Text(manual ? "MF" : "AF")
@@ -784,31 +797,19 @@ struct FocusPanel: View {
             .accessibilityLabel(manual ? "Switch to autofocus" : "Autofocus active")
         }
         .overlay(alignment: .topTrailing) {
-            if let subject {
-                Button(action: onUnits) {
-                    Text(Fmt.distance(subject, feet: feet))
-                        .font(AppTypography.mono(size: 19 * k, weight: .semibold))
-                        .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.dim))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .padding(.top, 17 * k)
-                        .padding(.trailing, 18 * k)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Focus distance, \(Fmt.distance(subject, feet: feet))")
-            } else {
-                Button(action: onUnits) {
-                    Text("—")
-                        .font(AppTypography.mono(size: 19 * k, weight: .semibold))
-                        .foregroundStyle(Palette.dim)
-                        .padding(.top, 17 * k)
-                        .padding(.trailing, 18 * k)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Focus distance unavailable")
+            let displayDistance = subject != nil ? Fmt.distance(subject, feet: feet) : (hasLiDAR ? "∞" : "—")
+            Button(action: onUnits) {
+                Text(displayDistance)
+                    .font(AppTypography.mono(size: 19 * k, weight: .semibold))
+                    .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.dim))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.top, 17 * k)
+                    .padding(.trailing, 18 * k)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Focus distance, \(displayDistance)")
         }
         .onAppear {
             tickHaptic.prepare()
