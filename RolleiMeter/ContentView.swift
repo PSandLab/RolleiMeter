@@ -543,9 +543,7 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Palette.lensDark.opacity(0.42), lineWidth: 6)
-                    .blur(radius: 5)
-                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
                     .allowsHitTesting(false)
             }
             .onAppear { previewSize = geo.size }
@@ -553,7 +551,16 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var settingsKey: some View {
+        if #available(iOS 26.0, *) {
+            settingsKeyButton.buttonStyle(.plain)
+        } else {
+            settingsKeyButton.buttonStyle(PressStyle())
+        }
+    }
+
+    private var settingsKeyButton: some View {
         Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             withAnimation(.easeInOut(duration: 0.3)) { trayOpen.toggle() }
@@ -564,10 +571,19 @@ struct ContentView: View {
                 .foregroundStyle(Palette.text)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Color.black.opacity(0.55), in: Capsule())
+                .background {
+                    if #available(iOS 26.0, *) {
+                        Capsule()
+                            .fill(.clear)
+                            .glassEffect(.regular.interactive(), in: Capsule())
+                    } else {
+                        Capsule()
+                            .fill(Color.black.opacity(0.55))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
+                    }
+                }
                 .contentShape(Capsule())
         }
-        .buttonStyle(PressStyle())
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]

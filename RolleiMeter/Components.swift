@@ -52,34 +52,29 @@ struct LiquidPanel: ViewModifier {
     let radius: CGFloat
     var fill: Color = Palette.panel
     var edge: Bool = true
+    var useGlass: Bool = true
+    var interactive: Bool = true
+    var glassTint: Color?
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            if edge {
-                // Use Apple's system-rendered Liquid Glass on supported OS versions.
-                content
-                    .glassEffect(
-                        .regular,
-                        in: RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    )
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+
+        if #available(iOS 26.0, *), useGlass {
+            if let glassTint {
+                content.glassEffect(.regular.tint(glassTint).interactive(), in: shape)
+            } else if interactive {
+                content.glassEffect(.regular.interactive(), in: shape)
             } else {
-                // Keep the distinctive yellow film-speed panel solid rather than glassy.
-                content
-                    .background {
-                        RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                content.glassEffect(.regular, in: shape)
             }
-        } else {
-            // Compatibility appearance for devices still running iOS 17–25.
+        } else if useGlass {
+            // Compatibility treatment for iOS 17–25, where native Liquid Glass isn't available.
             content
-                .background {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill)
-                }
+                .background { shape.fill(fill) }
                 .overlay {
                     if edge {
-                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        shape
                             .strokeBorder(
                                 LinearGradient(
                                     colors: [Color.white.opacity(0.09), Color.white.opacity(0.02)],
@@ -88,14 +83,31 @@ struct LiquidPanel: ViewModifier {
                             .allowsHitTesting(false)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .clipShape(shape)
+        } else {
+            // Standard material is appropriate for readouts; reserve Liquid Glass for the control layer.
+            content.background(.regularMaterial, in: shape)
         }
     }
 }
 
 extension View {
-    func liquidPanel(radius: CGFloat, fill: Color = Palette.panel, edge: Bool = true) -> some View {
-        modifier(LiquidPanel(radius: radius, fill: fill, edge: edge))
+    func liquidPanel(
+        radius: CGFloat,
+        fill: Color = Palette.panel,
+        edge: Bool = true,
+        useGlass: Bool = true,
+        interactive: Bool = true,
+        glassTint: Color? = nil
+    ) -> some View {
+        modifier(LiquidPanel(
+            radius: radius,
+            fill: fill,
+            edge: edge,
+            useGlass: useGlass,
+            interactive: interactive,
+            glassTint: glassTint
+        ))
     }
 }
 
@@ -244,7 +256,7 @@ struct ShutterPanel: View {
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: index)
             PanelTitle(text: "SHUTTER", k: k)
         }
-        .liquidPanel(radius: 26 * k)
+        .liquidPanel(radius: 26 * k, useGlass: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Shutter speed")
         .accessibilityValue(r.deviation == nil ? "1/\(r.label) second" : sub)
@@ -377,7 +389,7 @@ struct FilmPanel: View {
                 .padding(.top, 69 * k)
                 .padding(.bottom, 15 * k)
         }
-        .liquidPanel(radius: 26 * k, fill: Palette.accent, edge: false)
+        .liquidPanel(radius: 26 * k, fill: Palette.accent, edge: false, glassTint: Palette.accent)
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
@@ -872,12 +884,19 @@ struct HoldControl: View {
     let k: CGFloat
     let action: () -> Void
 
+    @ViewBuilder
     var body: some View {
+        if #available(iOS 26.0, *) {
+            buttonContent.buttonStyle(.plain)
+        } else {
+            buttonContent.buttonStyle(PressStyle(scale: 0.97))
+        }
+    }
+
+    private var buttonContent: some View {
         Button(action: action) {
             ZStack(alignment: .trailing) {
-                Capsule()
-                    .fill(Palette.panel)
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75))
+                capsuleSurface
 
                 Text(frozen ? "hold" : "live")
                     .font(AppTypography.next(size: 29 * k))
@@ -899,7 +918,19 @@ struct HoldControl: View {
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
         }
-        .buttonStyle(PressStyle(scale: 0.97))
+    }
+
+    @ViewBuilder
+    private var capsuleSurface: some View {
+        if #available(iOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            Capsule()
+                .fill(Palette.panel)
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75))
+        }
     }
 }
 
@@ -929,7 +960,7 @@ struct EVChip: View {
         .foregroundStyle(Palette.text)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(Color.black.opacity(0.55), in: Capsule())
+        .background(.regularMaterial, in: Capsule())
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
     }

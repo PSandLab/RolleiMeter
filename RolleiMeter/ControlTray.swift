@@ -64,8 +64,8 @@ struct ControlTray: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Palette.dim)
-                    .frame(width: 24, height: 24)
-                    .background(Color.white.opacity(0.08), in: Circle())
+                    .frame(width: 32, height: 32)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close settings")
@@ -116,7 +116,13 @@ struct ControlTray: View {
                 .foregroundStyle(armStage == 0 ? Palette.text : Palette.accent)
                 .padding(.horizontal, 10)
                 .frame(height: 26)
-                .background(Color.white.opacity(0.08), in: Capsule())
+                .background {
+                    if #available(iOS 26.0, *) {
+                        EmptyView()
+                    } else {
+                        Capsule().fill(Color.white.opacity(0.08))
+                    }
+                }
         }
         .buttonStyle(.plain)
         .disabled(armStage != 0)
