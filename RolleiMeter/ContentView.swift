@@ -225,7 +225,7 @@ struct ContentView: View {
         let utilityWidth = max(contentWidth - utilitySpacing * 2, 1)
         let meterWidth = utilityWidth * 0.50
         let secondaryWidth = utilityWidth * 0.25
-        let holdK = min(k * 0.58, 0.44)
+        let holdK = min(k * 0.48, secondaryWidth / 250)
 
         return ZStack {
             Palette.background
