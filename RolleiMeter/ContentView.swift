@@ -108,14 +108,11 @@ struct ContentView: View {
                     MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
                         .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
 
-                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
+                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, evIndex: $evIndex, k: k)
                         .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
 
-                    EVScaleBar(index: $evIndex, k: k)
-                        .cell(grid, col: 3, row: 0, cols: 6, rows: 1)
-
                     preview(k: k)
-                        .cell(grid, col: 3, row: 1, cols: 6, rows: 5)
+                        .cell(grid, col: 3, row: 0, cols: 6, rows: 6)
 
                     AperturePanel(
                         index: resolvedApertureIndex,
@@ -289,6 +286,7 @@ struct ContentView: View {
     }
 
     private func resumeAutoFocus() {
+        meter.resumeAutoFocus()
         manualFocus = false
         focusTouching = false
         meter.setDoFRange(near: 0, far: 0, active: false)
