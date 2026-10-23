@@ -228,8 +228,9 @@ struct ContentView: View {
             frozenPreviewImage = meter.previewSnapshot()
             frozenEV = liveEV
             frozenDist = meter.distance
+            // Freeze the LiDAR depth map snapshot in memory
+            meter.freezeDepth()
             if manualFocus {
-                meter.freezeDepth()
                 updateDoFOverlay()
             }
         } else {
@@ -378,7 +379,7 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
 
-                // Kept visible in HOLD / frozen state
+                // Preserved in HOLD: Renders on top of the frozen snapshot
                 if peakingVisible || manualFocus {
                     PeakingOverlay(feed: meter.peakingFeed)
                         .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
@@ -461,7 +462,8 @@ struct ContentView: View {
                     }
                 }
 
-                if meter.hasLiDAR {
+                // Hide live LiDAR bracket during HOLD
+                if meter.hasLiDAR && frozenEV == nil {
                     FocusMarker(tooClose: tooClose, pulseID: focusPulse)
                         .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
                         .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)

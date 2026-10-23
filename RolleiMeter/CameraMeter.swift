@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import CoreImage
+import CoreVideo
 import ImageIO
 import QuartzCore
 import UIKit
@@ -38,7 +39,7 @@ final class CameraMeter: NSObject, ObservableObject,
     private static let phoneFocalMM = 6.8
     private var phoneMinFocusMM = 200.0
 
-    // LiDAR Pure Depth-of-Field Overlay
+    // LiDAR Pure Depth-of-Field Overlay & Snapshot Cloning
     private var dofNear: Double = 0.9
     private var dofFar: Double = 2.0
     private var dofActive: Bool = false
@@ -208,10 +209,56 @@ final class CameraMeter: NSObject, ObservableObject,
         }
     }
 
-    /// Freezes the current depth map snapshot when HOLD is pressed.
+    // MARK: - Deep Copy & Frozen Snapshot
+
+    private func deepCopyPixelBuffer(_ src: CVPixelBuffer) -> CVPixelBuffer? {
+        CVPixelBufferLockBaseAddress(src, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(src, .readOnly) }
+
+        guard let srcBase = CVPixelBufferGetBaseAddress(src) else { return nil }
+        let width = CVPixelBufferGetWidth(src)
+        let height = CVPixelBufferGetHeight(src)
+        let pixelFormat = CVPixelBufferGetPixelFormatType(src)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(src)
+
+        var dst: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            pixelFormat,
+            nil,
+            &dst
+        )
+
+        guard status == kCVReturnSuccess, let dstBuffer = dst else { return nil }
+
+        CVPixelBufferLockBaseAddress(dstBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(dstBuffer, []) }
+
+        if let dstBase = CVPixelBufferGetBaseAddress(dstBuffer) {
+            let dstBytesPerRow = CVPixelBufferGetBytesPerRow(dstBuffer)
+            if bytesPerRow == dstBytesPerRow {
+                memcpy(dstBase, srcBase, height * bytesPerRow)
+            } else {
+                let copyBytes = min(bytesPerRow, dstBytesPerRow)
+                for row in 0..<height {
+                    let srcRow = srcBase.advanced(by: row * bytesPerRow)
+                    let dstRow = dstBase.advanced(by: row * dstBytesPerRow)
+                    memcpy(dstRow, srcRow, copyBytes)
+                }
+            }
+        }
+
+        return dstBuffer
+    }
+
+    /// Takes a true byte-level screenshot of the LiDAR depth map so the camera pool cannot overwrite it.
     func freezeDepth() {
         dofLock.lock()
-        frozenDepthPixelBuffer = latestDepthPixelBuffer
+        if let live = latestDepthPixelBuffer {
+            frozenDepthPixelBuffer = deepCopyPixelBuffer(live)
+        }
         dofLock.unlock()
     }
 
@@ -223,7 +270,7 @@ final class CameraMeter: NSObject, ObservableObject,
     }
 
     /// Sets the physical depth slice (in metres) to shade red over the viewfinder.
-    /// Operates seamlessly on either the live camera feed or the frozen snapshot.
+    /// Operates on the frozen LiDAR screenshot when HOLD is active.
     func setDoFRange(near: Double, far: Double, active: Bool) {
         dofLock.lock()
         dofNear = near
@@ -419,6 +466,13 @@ final class CameraMeter: NSObject, ObservableObject,
     // MARK: - Depth (LiDAR)
 
     func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
+        dofLock.lock()
+        let isFrozen = (frozenDepthPixelBuffer != nil)
+        dofLock.unlock()
+
+        // In HOLD mode: completely halt live LiDAR stream
+        if isFrozen { return }
+
         lock.lock()
         let pt = focus
         lock.unlock()
@@ -431,16 +485,14 @@ final class CameraMeter: NSObject, ObservableObject,
 
         dofLock.lock()
         latestDepthPixelBuffer = map
-        let isFrozen = (frozenDepthPixelBuffer != nil)
-        let pb = frozenDepthPixelBuffer ?? map
-        let renderNow = dofActive && !isFrozen
+        let renderNow = dofActive
         let curNear = dofNear
         let curFar = dofFar
         let isFlipped = previewFlipped
         dofLock.unlock()
 
         if renderNow {
-            renderDoFOverlay(pb, near: curNear, far: curFar, flipped: isFlipped)
+            renderDoFOverlay(map, near: curNear, far: curFar, flipped: isFlipped)
         }
 
         CVPixelBufferLockBaseAddress(map, .readOnly)
