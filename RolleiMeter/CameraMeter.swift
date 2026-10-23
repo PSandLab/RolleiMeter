@@ -13,15 +13,11 @@ final class CameraMeter: NSObject, ObservableObject,
     let session = AVCaptureSession()
 
     @Published private(set) var sceneEV: Double = 12
-    /// Metres, nil when there is no valid LiDAR reading.
     @Published private(set) var distance: Double?
     @Published private(set) var hasLiDAR = false
     @Published private(set) var denied = false
-    /// Spot reading minus the framed matrix reading, in stops. Only set while spot metering.
     @Published private(set) var spotDelta: Double?
-    /// True when the phone has LiDAR.
     @Published private(set) var canFocusManually = true
-    /// Focus-peaking / LiDAR DoF feed.
     let peakingFeed = PeakingFeed()
 
     private let sessionQueue = DispatchQueue(label: "meter.session")
@@ -47,6 +43,7 @@ final class CameraMeter: NSObject, ObservableObject,
     private var dofFar: Double = 2.0
     private var dofActive: Bool = false
     private var latestDepthPixelBuffer: CVPixelBuffer?
+    private var frozenDepthPixelBuffer: CVPixelBuffer?
     private let dofLock = NSLock()
     private let dofContext = CIContext(options: [.workingColorSpace: NSNull()])
     private var dofBusy = false
@@ -79,7 +76,6 @@ final class CameraMeter: NSObject, ObservableObject,
     private var currentBias: Float = 0
     private var lastBiasUpdate: CFTimeInterval = 0
 
-    /// sRGB decoding curve.
     private static let lut: [Double] = (0..<256).map { i in
         let v = Double(i) / 255.0
         return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
@@ -161,7 +157,6 @@ final class CameraMeter: NSObject, ObservableObject,
 
     // MARK: - Focus & LiDAR DoF
 
-    /// The phone camera stays in continuous autofocus. Focus dial positions the LiDAR overlay.
     func setManualFocus(_ position: Float) {}
     func setManualFocusThrottled(_ position: Float) {}
 
@@ -213,13 +208,28 @@ final class CameraMeter: NSObject, ObservableObject,
         }
     }
 
+    /// Freezes the current depth map snapshot when HOLD is pressed.
+    func freezeDepth() {
+        dofLock.lock()
+        frozenDepthPixelBuffer = latestDepthPixelBuffer
+        dofLock.unlock()
+    }
+
+    /// Resumes live depth scanning when HOLD is released.
+    func unfreezeDepth() {
+        dofLock.lock()
+        frozenDepthPixelBuffer = nil
+        dofLock.unlock()
+    }
+
     /// Sets the physical depth slice (in metres) to shade red over the viewfinder.
+    /// Operates seamlessly on either the live camera feed or the frozen snapshot.
     func setDoFRange(near: Double, far: Double, active: Bool) {
         dofLock.lock()
         dofNear = near
         dofFar = far
         dofActive = active
-        let pb = latestDepthPixelBuffer
+        let pb = frozenDepthPixelBuffer ?? latestDepthPixelBuffer
         let flipped = previewFlipped
         dofLock.unlock()
 
@@ -421,14 +431,16 @@ final class CameraMeter: NSObject, ObservableObject,
 
         dofLock.lock()
         latestDepthPixelBuffer = map
-        let renderNow = dofActive
+        let isFrozen = (frozenDepthPixelBuffer != nil)
+        let pb = frozenDepthPixelBuffer ?? map
+        let renderNow = dofActive && !isFrozen
         let curNear = dofNear
         let curFar = dofFar
         let isFlipped = previewFlipped
         dofLock.unlock()
 
         if renderNow {
-            renderDoFOverlay(map, near: curNear, far: curFar, flipped: isFlipped)
+            renderDoFOverlay(pb, near: curNear, far: curFar, flipped: isFlipped)
         }
 
         CVPixelBufferLockBaseAddress(map, .readOnly)

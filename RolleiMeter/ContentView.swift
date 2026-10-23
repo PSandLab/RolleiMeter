@@ -228,6 +228,10 @@ struct ContentView: View {
             frozenPreviewImage = meter.previewSnapshot()
             frozenEV = liveEV
             frozenDist = meter.distance
+            if manualFocus {
+                meter.freezeDepth()
+                updateDoFOverlay()
+            }
         } else {
             unfreeze()
         }
@@ -249,6 +253,10 @@ struct ContentView: View {
         frozenEV = nil
         frozenDist = nil
         frozenPreviewImage = nil
+        meter.unfreezeDepth()
+        if manualFocus {
+            updateDoFOverlay()
+        }
     }
 
     // MARK: - Manual Focus & LiDAR DoF
@@ -301,12 +309,18 @@ struct ContentView: View {
             autoAperture = false
             apertureStop = min(max(index, 0), Rollei.stops.count - 1)
         }
+        if manualFocus {
+            updateDoFOverlay()
+        }
     }
 
     private func toggleAutoAperture() {
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             autoAperture.toggle()
+        }
+        if manualFocus {
+            updateDoFOverlay()
         }
     }
 
@@ -315,6 +329,9 @@ struct ContentView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             autoAperture = false
             apertureStop = 3
+        }
+        if manualFocus {
+            updateDoFOverlay()
         }
     }
 
@@ -361,7 +378,8 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
 
-                if peakingVisible && frozenEV == nil {
+                // Kept visible in HOLD / frozen state
+                if peakingVisible || manualFocus {
                     PeakingOverlay(feed: meter.peakingFeed)
                         .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
