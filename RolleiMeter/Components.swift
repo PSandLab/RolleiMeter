@@ -3,111 +3,150 @@ import AVFoundation
 import AVKit
 import UIKit
 
-private let paper = Palette.paper
-private let inkColor = Palette.ink
-private let mutedInk = Palette.mutedInk
-private let hairline = Palette.hairline
-private let accentRed = Palette.accent
-private let goldenGreen = Palette.green
-private let warnRed = accentRed
+// MARK: - 12 × 6 grid
 
-struct Panel: ViewModifier {
-    var stroke: Color = Palette.hairline
-    var lineWidth: CGFloat = 1
+/// Every control sits on the 12 × 6 grid from the design. The grid is 1460 × 665 design units
+/// (76-wide columns, 70-high rows, ~50 unit gutters) inside a 1646 × 761 body, scaled by `k`
+/// so the whole thing fits the screen.
+struct LiquidGrid {
+    static let designWidth: CGFloat = 1460
+    static let designHeight: CGFloat = 665
+    private static let bodyWidth: CGFloat = 1646
+    private static let bodyHeight: CGFloat = 761
+    private static let colPitch: CGFloat = 126
+    private static let rowPitch: CGFloat = 119
 
-    func body(content: Content) -> some View {
-        content.background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(LinearGradient(colors: [Palette.bezelTop, Palette.paper], startPoint: .top, endPoint: .bottom))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(stroke, lineWidth: lineWidth))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(colors: [Palette.highlight, .clear], startPoint: .top, endPoint: .center),
-                            lineWidth: 1
-                        )
-                        .padding(1)
-                )
-                .compositingGroup()
-                .shadow(color: Palette.cast, radius: 8, x: 0, y: 3)
-        }
+    /// Points per design unit.
+    let k: CGFloat
+
+    /// Fits the grid to the screen, keeping it clear of the notch / Dynamic Island side insets.
+    init(screen: CGSize, insets: EdgeInsets) {
+        let sideInset = max(insets.leading, insets.trailing)
+        let usableWidth = max(screen.width - 2 * sideInset, 1)
+        k = max(0.2, min(screen.height / Self.bodyHeight,
+                         screen.width / Self.bodyWidth,
+                         usableWidth / Self.designWidth))
+    }
+
+    var size: CGSize {
+        CGSize(width: Self.designWidth * k, height: Self.designHeight * k)
+    }
+
+    func rect(col: Int, row: Int, cols: Int, rows: Int) -> CGRect {
+        CGRect(
+            x: CGFloat(col) * Self.colPitch * k,
+            y: CGFloat(row) * Self.rowPitch * k,
+            width: (CGFloat(cols) * Self.colPitch - 50) * k,
+            height: (CGFloat(rows) * Self.rowPitch - 49) * k
+        )
     }
 }
 
-private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
-    guard edge1 > edge0 else { return x < edge0 ? 0 : 1 }
-    let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
-    return t * t * (3 - 2 * t)
+extension View {
+    /// Places the view on the grid. The parent must be a top-leading `ZStack` of the grid's size.
+    func cell(_ grid: LiquidGrid, col: Int, row: Int, cols: Int, rows: Int) -> some View {
+        let r = grid.rect(col: col, row: row, cols: cols, rows: rows)
+        return self
+            .frame(width: r.width, height: r.height)
+            .position(x: r.midX, y: r.midY)
+    }
 }
 
-struct WindowInset: ViewModifier {
-    var radius: CGFloat = 11
-    var bezel: CGFloat = 4
+// MARK: - Panel chrome
 
-    private var inner: CGFloat { max(radius - bezel, 3) }
+struct LiquidPanel: ViewModifier {
+    let radius: CGFloat
+    var fill: Color = Palette.panel
+    var edge: Bool = true
 
     func body(content: Content) -> some View {
         content
             .background {
-                RoundedRectangle(cornerRadius: inner, style: .continuous)
-                    .fill(Palette.well)
-                    .overlay {
-                        LinearGradient(
-                            stops: [
-                                .init(color: Palette.recess, location: 0),
-                                .init(color: Palette.recess.opacity(0), location: 0.32)
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        .mask(RoundedRectangle(cornerRadius: inner, style: .continuous))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: inner, style: .continuous)
-                            .strokeBorder(Palette.ink.opacity(0.10), lineWidth: 1)
-                    }
+                RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill)
             }
-            .padding(bezel)
-            .background {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(LinearGradient(colors: [Palette.bezelTop, Palette.bezelBottom],
-                                         startPoint: .top, endPoint: .bottom))
+            .overlay {
+                if edge {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.09), Color.white.opacity(0.02)],
+                                startPoint: .top, endPoint: .bottom),
+                            lineWidth: 0.75)
+                        .allowsHitTesting(false)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Palette.hairline, lineWidth: 1)
-            }
-            .compositingGroup()
-            .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
     }
 }
 
-private struct PointerTriangle: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.midY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
-        p.closeSubpath()
-        return p
+extension View {
+    func liquidPanel(radius: CGFloat, fill: Color = Palette.panel, edge: Bool = true) -> some View {
+        modifier(LiquidPanel(radius: radius, fill: fill, edge: edge))
     }
 }
 
-// MARK: - Camera preview (Clear background & zero-lag layer sizing)
+private struct PanelTitle: View {
+    let text: String
+    let k: CGFloat
+    var color: Color = Palette.text
+
+    var body: some View {
+        Text(text)
+            .font(AppTypography.next(size: 25 * k))
+            .tracking(2.6 * k)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 17 * k)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+struct PressStyle: ButtonStyle {
+    var scale: CGFloat = 0.94
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1.0)
+            .animation(.spring(response: 0.20, dampingFraction: 0.70), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Camera preview
 
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onPress: () -> Void = {}
+    /// Called when the interface turns between the two landscape orientations.
+    var onFlip: (Bool) -> Void = { _ in }
+
+    private var flipped: Bool?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .clear // Eliminates black flashes during view resizing!
+        setUp()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        backgroundColor = .clear
+        setUp()
+    }
+
+    private func setUp() {
+        backgroundColor = .clear // Eliminates black flashes during view resizing.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(sessionStarted),
+            name: AVCaptureSession.didStartRunningNotification, object: nil)
+    }
+
+    @objc private func sessionStarted() {
+        applyOrientation()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyOrientation()
     }
 
     override func layoutSubviews() {
@@ -116,12 +155,33 @@ final class PreviewView: UIView {
         CATransaction.setDisableActions(true)
         previewLayer.frame = bounds
         CATransaction.commit()
+        applyOrientation()
+    }
+
+    /// The sensor is natively landscape (home button on the right). Interface landscape-right shows
+    /// it as is; landscape-left turns the preview over 180°. Metering and LiDAR keep reading the
+    /// native buffer, so the preview is the only thing that turns.
+    private func applyOrientation() {
+        guard let orientation = window?.windowScene?.interfaceOrientation else { return }
+        let isFlipped = orientation == .landscapeLeft
+        let angle: CGFloat = isFlipped ? 180 : 0
+        if let connection = previewLayer.connection,
+           connection.isVideoRotationAngleSupported(angle),
+           connection.videoRotationAngle != angle {
+            connection.videoRotationAngle = angle
+        }
+        if flipped != isFlipped {
+            flipped = isFlipped
+            let callback = onFlip
+            DispatchQueue.main.async { callback(isFlipped) }
+        }
     }
 }
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     var onVolumePress: () -> Void = {}
+    var onFlip: (Bool) -> Void = { _ in }
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
@@ -129,6 +189,7 @@ struct CameraPreview: UIViewRepresentable {
         v.previewLayer.videoGravity = .resizeAspectFill
         v.backgroundColor = .clear
         v.onPress = onVolumePress
+        v.onFlip = onFlip
 
         if #available(iOS 17.2, *) {
             let interaction = AVCaptureEventInteraction { [weak v] event in
@@ -142,468 +203,52 @@ struct CameraPreview: UIViewRepresentable {
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.onPress = onVolumePress
+        uiView.onFlip = onFlip
     }
 }
 
-// MARK: - EV badge
+// MARK: - Shutter (read-out wheel)
 
-private struct NeedleGauge: View {
-    let ev: Double
-
-    var body: some View {
-        Canvas { ctx, size in
-            let c = CGPoint(x: size.width / 2, y: size.height - 2)
-            let r = size.width / 2 - 1.5
-            func point(_ angle: Double, _ len: CGFloat) -> CGPoint {
-                let a = angle * .pi / 180
-                return CGPoint(x: c.x + CGFloat(cos(a)) * len, y: c.y + CGFloat(sin(a)) * len)
-            }
-            for i in 0...6 {
-                let angle = -90.0 - 55.0 + 110.0 * Double(i) / 6.0
-                var tick = Path()
-                tick.move(to: point(angle, r - 3.5))
-                tick.addLine(to: point(angle, r))
-                ctx.stroke(tick, with: .color(mutedInk), lineWidth: i % 2 == 0 ? 1.4 : 1)
-            }
-            let norm = min(max(ev, 0), 18) / 18.0
-            let needleAngle = -145.0 + 110.0 * norm
-            var needle = Path()
-            needle.move(to: c)
-            needle.addLine(to: point(needleAngle, r - 1))
-            ctx.stroke(needle, with: .color(Palette.braunOrange), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(inkColor))
-        }
-        .frame(width: 34, height: 19)
-        .accessibilityHidden(true)
-    }
-}
-
-struct EVBadge: View {
-    @ObservedObject var damp: Damper
-    let frozen: Bool
-    let spot: Bool
-
-    private var evText: String { String(format: "%.1f", damp.values[0]) }
-
-    var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 6) {
-            NeedleGauge(ev: damp.values[0])
-            if frozen {
-                Text("HOLD")
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-            if spot {
-                Text("SPOT")
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-            Text("EV " + evText)
-                .monospacedDigit()
-                .contentTransition(.numericText())
-        }
-        .font(AppTypography.font(size: 13, weight: .medium))
-        .foregroundStyle(inkColor)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
-    }
-}
-
-// MARK: - Simple exposure and focus
-
-private struct SimpleApertureColumn: View {
+/// The metered shutter speed. The wheel turns to the Rollei's nearest marked speed.
+struct ShutterPanel: View {
     @ObservedObject var damp: Damper
     let iso: Double
     let comp: Double
     let aperture: (label: String, n: Double)
+    let k: CGFloat
 
-    private var idealTime: Double {
-        Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
-    }
-    private var reading: ShutterResult { Exposure.result(for: idealTime) }
-    private var exposureStatus: String {
-        guard let deviation = reading.deviation else { return reading.isSlow ? "SLOW · HOLD STEADY" : "" }
-        return deviation > 0 ? "OVEREXPOSED" : "UNDEREXPOSED"
+    /// Slowest to fastest, left to right.
+    private static let labels: [String] = Rollei.speeds.reversed().map { $0.label }
+
+    private var reading: ShutterResult {
+        let t = Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
+        return Exposure.result(for: t)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text("SHUTTER")
-                .font(AppTypography.next(size: 12, weight: .medium))
-                .tracking(0.9)
-                .foregroundStyle(mutedInk)
-                .frame(maxWidth: .infinity)
-            Spacer(minLength: 10)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                if reading.deviation == nil {
-                    Text("1/")
-                        .font(AppTypography.mono(size: 30, weight: .medium))
-                        .foregroundStyle(mutedInk)
-                }
-                Text(reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
-                    .font(AppTypography.bold(size: 80))
-                    .monospacedDigit()
-                    .foregroundStyle(stateInk)
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .animation(.smooth(duration: 0.18), value: reading.deviation.map(Fmt.exposureAmount) ?? reading.label)
-            .animation(.easeInOut(duration: 0.25), value: stateID)
-            Text(exposureStatus)
-                .font(AppTypography.next(size: 10, weight: .medium))
-                .tracking(0.7)
-                .foregroundStyle(stateInk.opacity(0.85))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
-                .frame(height: 12)
-                .accessibilityHidden(exposureStatus.isEmpty)
-            Spacer(minLength: 10)
+        let r = reading
+        let index = Self.labels.firstIndex(of: r.label) ?? 0
+        let tint: Color = r.deviation != nil ? Palette.bad : (r.isSlow ? Palette.slow : Palette.accent)
+        let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "slow" : "sec")
+
+        ZStack(alignment: .top) {
+            ShutterWheel(position: Double(index), labels: Self.labels, tint: tint, sub: sub, k: k)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: index)
+            PanelTitle(text: "SHUTTER", k: k)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(minHeight: 174, maxHeight: 174)
-    }
-
-    private var stateInk: Color {
-        if outOfRange { return Palette.accent }
-        return slow ? Palette.amber : Palette.green
-    }
-
-    private var stateID: Int {
-        if outOfRange { return 2 }
-        return slow ? 1 : 0
-    }
-
-    private var outOfRange: Bool { reading.deviation != nil }
-    private var slow: Bool { reading.deviation == nil && reading.isSlow }
-}
-
-struct SimpleExposurePair: View {
-    let damp: Damper
-    let iso: Double
-    let comp: Double
-    let apertureIndex: Int
-    let distance: Double?
-    let hasLiDAR: Bool
-    let tooClose: Bool
-    let feet: Bool
-
-    private var activeAperture: (label: String, n: Double) {
-        Rollei.stops[apertureIndex]
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            SimpleApertureColumn(damp: damp, iso: iso, comp: comp, aperture: activeAperture)
-            Rectangle().fill(hairline).frame(width: 1).padding(.vertical, 8)
-            SimpleFocusColumn(
-                distance: distance,
-                hasLiDAR: hasLiDAR,
-                aperture: activeAperture,
-                tooClose: tooClose,
-                feet: feet
-            )
-        }
-        .background(
-            LinearGradient(colors: [Palette.bezelTop, Palette.paper], startPoint: .top, endPoint: .bottom)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(hairline, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .compositingGroup()
-        .shadow(color: Palette.cast, radius: 6, x: 0, y: 2)
-    }
-}
-
-private struct SimpleFocusColumn: View {
-    let distance: Double?
-    let hasLiDAR: Bool
-    let aperture: (label: String, n: Double)
-    let tooClose: Bool
-    let feet: Bool
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Spacer(minLength: 0)
-                Image(systemName: "scope").font(.system(size: 16, weight: .regular))
-                Text("FOCUS").font(AppTypography.next(size: 12, weight: .medium)).tracking(0.9)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(mutedInk)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-
-            if !hasLiDAR {
-                Text("NO LIDAR")
-                    .font(AppTypography.next(size: 11, weight: .medium))
-                    .tracking(0.7)
-                    .foregroundStyle(mutedInk)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if tooClose {
-                Text("0")
-                    .font(AppTypography.bold(size: 68))
-                    .foregroundStyle(warnRed)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let distance {
-                FocusRingScale(distance: distance, aperture: aperture, feet: feet)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: 3) {
-                    Text("—")
-                        .font(AppTypography.mono(size: 34, weight: .medium))
-                        .foregroundStyle(mutedInk)
-                    Text("OUT OF RANGE")
-                        .font(AppTypography.next(size: 9, weight: .medium))
-                        .tracking(0.6)
-                        .foregroundStyle(mutedInk.opacity(0.7))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 174, maxHeight: 174)
-        .clipped()
-        .accessibilityElement(children: .contain)
-    }
-}
-
-private struct FocusRingScale: View {
-    let distance: Double
-    let aperture: (label: String, n: Double)
-    let feet: Bool
-
-    private var marks: [(label: String, m: Double)] {
-        feet ? Focus.feetMarks : Focus.meterMarks
-    }
-
-    private var depthRange: (near: Double, far: Double) {
-        DepthOfField.range(subject: distance, n: aperture.n)
-    }
-
-    private var recommendedFocus: String {
-        let advice = Focus.advice(subject: distance, aperture: aperture.n, feet: feet)
-        return advice.sharp ? advice.label : "between \(advice.lo) and \(advice.hi)"
-    }
-
-    var body: some View {
-        FocusDialFace(
-            position: Focus.position(distance),
-            near: Focus.position(depthRange.near),
-            far: Focus.position(depthRange.far),
-            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
-        )
-        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
-        .animation(.spring(response: 0.62, dampingFraction: 0.86), value: aperture.n)
+        .liquidPanel(radius: 26 * k)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
+        .accessibilityLabel("Shutter speed")
+        .accessibilityValue(r.deviation == nil ? "1/\(r.label) second" : sub)
     }
 }
 
-// Pure Typographic Focus Dial (Agfa pictograms removed per request)
-private struct FocusDialFace: View, Animatable {
-    var position: Double
-    var near: Double
-    var far: Double
-    let marks: [(label: String, p: Double)]
-
-    var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
-        get { AnimatablePair(position, AnimatablePair(near, far)) }
-        set {
-            position = newValue.first
-            near = newValue.second.first
-            far = newValue.second.second
-        }
-    }
-
-    var body: some View {
-        Canvas { context, size in
-            drawDial(&context, size)
-        }
-        .clipped()
-    }
-
-    private func zoom(width: CGFloat) -> CGFloat {
-        let span = max(far - near, 0.006)
-        let wanted: CGFloat = width * 0.55 / CGFloat(span)
-        return min(max(wanted, width * 1.15), width * 8)
-    }
-
-    private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
-        let cx: CGFloat = size.width / 2
-        let groupHeight: CGFloat = 104
-        let y0: CGFloat = max(0, (size.height - groupHeight) / 2)
-        let numberY: CGFloat = y0 + 30
-        let markTop: CGFloat = y0 + 50
-        let baseline: CGFloat = y0 + 92
-        let fadeWidth: CGFloat = 44
-        let ppu: CGFloat = zoom(width: size.width)
-        let fineRaw: CGFloat = (ppu / 60 - 4) / 3
-        let fine: Double = Double(min(max(fineRaw, 0), 1))
-
-        func x(_ p: Double) -> CGFloat {
-            return cx + CGFloat(p - position) * ppu
-        }
-        func fade(_ px: CGFloat) -> Double {
-            let edge: CGFloat = min(px, size.width - px)
-            return Double(min(max(edge / fadeWidth, 0), 1))
-        }
-
-        let nearX: CGFloat = x(near)
-        let farX: CGFloat = x(far)
-        let left: CGFloat = min(nearX, farX)
-        let right: CGFloat = max(nearX, farX)
-        let bandTop: CGFloat = markTop - 7
-        if right - left > 1.5 {
-            let width: CGFloat = right - left
-            context.fill(
-                Path(roundedRect: CGRect(x: left, y: bandTop, width: width,
-                                         height: baseline - bandTop + 2),
-                     cornerRadius: 3),
-                with: .color(goldenGreen.opacity(0.12)))
-            context.fill(
-                Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: 3),
-                     cornerRadius: 1.5),
-                with: .color(goldenGreen.opacity(0.80)))
-        }
-
-        let markPositions: [Double] = marks.map { $0.p }
-        for i in 0...60 {
-            let p: Double = Double(i) / 60.0
-            if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
-            let major: Bool = i % 5 == 0
-            let strength: Double = major ? 1.0 : fine
-            if strength <= 0 { continue }
-            let px: CGFloat = x(p)
-            let f: Double = fade(px)
-            if f <= 0 { continue }
-            let h: CGFloat = major ? 28 : 18
-            var tick = Path()
-            tick.move(to: CGPoint(x: px, y: baseline))
-            tick.addLine(to: CGPoint(x: px, y: baseline - h))
-            context.stroke(tick, with: .color(mutedInk.opacity(f * strength)), lineWidth: 1.5)
-        }
-
-        var lastRight: CGFloat = -CGFloat.greatestFiniteMagnitude
-        for mark in marks {
-            let px: CGFloat = x(mark.p)
-            let f: Double = fade(px)
-            if f <= 0 { continue }
-            let green: Bool = mark.p >= near - 0.004 && mark.p <= far + 0.004
-            let color: Color = green ? goldenGreen : inkColor
-            var tick = Path()
-            tick.move(to: CGPoint(x: px, y: baseline))
-            tick.addLine(to: CGPoint(x: px, y: markTop))
-            context.stroke(tick, with: .color(color.opacity(f)), lineWidth: green ? 3 : 2.5)
-
-            let underPointer: Bool = abs(mark.p - position) < 0.012
-            let label = Text(mark.label)
-                .font(AppTypography.bold(size: underPointer ? 29 : 24))
-                .foregroundColor(color.opacity(f))
-            let text = context.resolve(label)
-            let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
-
-            guard underPointer || px - textWidth / 2 > lastRight + 5 else { continue }
-            context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
-            lastRight = px + textWidth / 2
-        }
-
-        var tri = Path()
-        tri.move(to: CGPoint(x: cx - 6, y: y0))
-        tri.addLine(to: CGPoint(x: cx + 6, y: y0))
-        tri.addLine(to: CGPoint(x: cx, y: y0 + 10))
-        tri.closeSubpath()
-        context.fill(tri, with: .color(Palette.braunOrange))
-    }
-}
-
-// MARK: - Braun Horizontal Radio Tuning Scale
-
-struct HorizontalScrubDial: View {
-    let title: String
-    @Binding var selection: Int
-    let labels: [String]
-    var resetIndex: Int? = nil
-
-    private let pitch: CGFloat = 52
-    private let height: CGFloat = 56
-
-    @State private var base: Int?
-    @State private var drag: CGFloat = 0
-
-    private var safeSelection: Int { min(max(selection, 0), max(labels.count - 1, 0)) }
-
-    private var position: Double {
-        guard let base else { return Double(safeSelection) }
-        return min(max(Double(base) - Double(drag / pitch), 0), Double(max(labels.count - 1, 0)))
-    }
-
-    var body: some View {
-        VStack(spacing: 3) {
-            HStack {
-                Text(title)
-                    .font(AppTypography.next(size: 10, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(Palette.mutedInk)
-                Spacer()
-                Text(labels.isEmpty ? "" : labels[safeSelection])
-                    .font(AppTypography.mono(size: 11, weight: .bold))
-                    .foregroundStyle(Palette.ink)
-            }
-            .padding(.horizontal, 4)
-
-            ZStack {
-                HorizontalValueRail(position: position, labels: labels, pitch: pitch)
-                    .frame(height: height)
-
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(Palette.braunOrange)
-                        .frame(width: 2, height: 16)
-                    Spacer()
-                }
-                .frame(height: height)
-            }
-            .modifier(WindowInset(radius: 10, bezel: 3))
-        }
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if base == nil { base = safeSelection }
-                    drag = value.translation.width
-                    let index = Int(position.rounded())
-                    if index != selection {
-                        selection = index
-                        if index == resetIndex {
-                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-                        } else {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        }
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        base = nil
-                        drag = 0
-                    }
-                }
-        )
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded {
-                guard let resetIndex, selection != resetIndex else { return }
-                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { selection = resetIndex }
-            }
-        )
-    }
-}
-
-private struct HorizontalValueRail: View, Animatable {
+private struct ShutterWheel: View, Animatable {
     var position: Double
     let labels: [String]
-    let pitch: CGFloat
+    let tint: Color
+    let sub: String
+    let k: CGFloat
 
     var animatableData: Double {
         get { position }
@@ -613,32 +258,23 @@ private struct HorizontalValueRail: View, Animatable {
     var body: some View {
         Canvas { ctx, size in
             let cx = size.width / 2
-            let tickBaseline: CGFloat = 18
-            let textBaseline: CGFloat = 38
-            let fadeWidth: CGFloat = 40
-
-            func fade(_ px: CGFloat) -> Double {
-                let edge = min(px, size.width - px)
-                return Double(min(max(edge / fadeWidth, 0), 1))
-            }
-
+            let pitch = size.width * 0.40
             for i in labels.indices {
-                let d = CGFloat(Double(i) - position)
-                let x = cx + d * pitch
+                let d = Double(i) - position
+                let x = cx + CGFloat(d) * pitch
                 if x < -pitch || x > size.width + pitch { continue }
-                let f = fade(x)
-                if f <= 0.02 { continue }
+                let active = abs(d) < 0.5
+                let color: Color = active ? tint : Palette.text.opacity(0.8)
 
-                var tick = Path()
-                tick.move(to: CGPoint(x: x, y: 0))
-                tick.addLine(to: CGPoint(x: x, y: tickBaseline))
-                ctx.stroke(tick, with: .color(Palette.mutedInk.opacity(f * 0.7)), lineWidth: 1.2)
+                let number = Text("1/" + labels[i])
+                    .font(AppTypography.next(size: 40 * k))
+                    .foregroundColor(color)
+                ctx.draw(ctx.resolve(number), at: CGPoint(x: x, y: 108 * k), anchor: .center)
 
-                let isSelected = abs(d) < 0.4
-                let text = Text(labels[i])
-                    .font(AppTypography.mono(size: isSelected ? 13 : 11, weight: isSelected ? .bold : .medium))
-                    .foregroundColor(Palette.engraved.opacity(f * (isSelected ? 1.0 : 0.6)))
-                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: textBaseline), anchor: .center)
+                let unit = Text(active ? sub : "sec")
+                    .font(AppTypography.next(size: 25 * k))
+                    .foregroundColor(color)
+                ctx.draw(ctx.resolve(unit), at: CGPoint(x: x, y: 152 * k), anchor: .center)
             }
         }
         .clipped()
@@ -646,52 +282,223 @@ private struct HorizontalValueRail: View, Animatable {
     }
 }
 
-// MARK: - Aperture drum
+// MARK: - Metering mode (the "lens" choice)
+
+struct MeterPanel: View {
+    let modes: [MeterMode]
+    let index: Int
+    let k: CGFloat
+    let onPick: (Int) -> Void
+
+    private func caption(_ mode: MeterMode) -> String {
+        switch mode {
+        case .matrix: return "scene"
+        case .highlight: return "peaks"
+        case .spot: return "point"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            HStack(spacing: 0) {
+                ForEach(modes.indices, id: \.self) { i in
+                    Button {
+                        guard i != index else { return }
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        onPick(i)
+                    } label: {
+                        VStack(spacing: 6 * k) {
+                            Text(modes[i].title)
+                                .font(AppTypography.next(size: 31 * k, weight: .medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Text(caption(modes[i]))
+                                .font(AppTypography.next(size: 23 * k))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(i == index ? Palette.accent : Palette.text)
+                        .animation(.easeOut(duration: 0.18), value: index)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 72 * k)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(modes[i].title + " metering")
+                    .accessibilityAddTraits(i == index ? .isSelected : [])
+                }
+            }
+            PanelTitle(text: "METER", k: k)
+                .allowsHitTesting(false)
+        }
+        .liquidPanel(radius: 26 * k)
+    }
+}
+
+// MARK: - Film speed (the yellow card)
+
+struct FilmPanel: View {
+    @Binding var isoIndex: Int
+    @Binding var useDIN: Bool
+    let k: CGFloat
+
+    @State private var dragBase: Int?
+
+    private var safeIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
+
+    private var readout: String {
+        let value = ISOScale.label(ISOScale.values[safeIndex], din: useDIN)
+        return (useDIN ? "DIN" : "ISO") + "  \u{2022}  " + value
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
+            RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                .fill(Palette.accentInk)
+                .overlay {
+                    Text(readout)
+                        .font(AppTypography.next(size: 34 * k, weight: .medium))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .contentTransition(.numericText())
+                        .animation(.smooth(duration: 0.15), value: readout)
+                }
+                .padding(.horizontal, 15 * k)
+                .padding(.top, 69 * k)
+                .padding(.bottom, 15 * k)
+        }
+        .liquidPanel(radius: 26 * k, fill: Palette.accent, edge: false)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.easeInOut(duration: 0.2)) { useDIN.toggle() }
+        }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            guard let hundred = ISOScale.values.firstIndex(of: 100), isoIndex != hundred else { return }
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+            isoIndex = hundred
+        }
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    if dragBase == nil { dragBase = safeIndex }
+                    let steps = Int((value.translation.width / (26 * k)).rounded())
+                    let target = min(max((dragBase ?? safeIndex) + steps, 0), ISOScale.values.count - 1)
+                    guard target != isoIndex else { return }
+                    isoIndex = target
+                    if ISOScale.values[target] == 100 {
+                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                    } else {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                }
+                .onEnded { _ in dragBase = nil }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Film speed")
+        .accessibilityValue(readout)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: isoIndex = min(safeIndex + 1, ISOScale.values.count - 1)
+            case .decrement: isoIndex = max(safeIndex - 1, 0)
+            @unknown default: break
+            }
+        }
+    }
+}
+
+// MARK: - Exposure compensation scale
+
+struct EVScaleBar: View {
+    @Binding var index: Int
+    let k: CGFloat
+
+    private static let labels = ["\u{2212}2", "\u{2212}1", "0", "+1", "+2"]
+    /// Where −2 sits along the bar, and the distance between whole stops (fractions of the width).
+    private static let origin: CGFloat = 0.096
+    private static let stopWidth: CGFloat = 0.2145
+    /// The labels sit just left of their tick, so the marker never covers a number.
+    private static let labelShift: CGFloat = 0.025
+
+    private func fraction(_ value: Double) -> CGFloat {
+        Self.origin + CGFloat(value + 2) * Self.stopWidth
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let safe = min(max(index, 0), EVComp.values.count - 1)
+
+            ZStack(alignment: .topLeading) {
+                ForEach(0..<5, id: \.self) { n in
+                    Text(Self.labels[n])
+                        .font(AppTypography.next(size: 26 * k))
+                        .foregroundStyle(Palette.text.opacity(0.92))
+                        .position(x: (fraction(Double(n - 2)) - Self.labelShift) * w, y: h / 2)
+                }
+                Rectangle()
+                    .fill(Palette.accent)
+                    .frame(width: max(2, 3 * k), height: h)
+                    .position(x: fraction(EVComp.values[safe]) * w, y: h / 2)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.78), value: safe)
+            }
+            .frame(width: w, height: h)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let raw = Double((value.location.x / max(w, 1) - Self.origin) / Self.stopWidth) - 2
+                        let stops = min(max(raw, -2), 2)
+                        let target = Int((stops * 3).rounded()) + EVComp.zeroIndex
+                        guard target != index else { return }
+                        index = target
+                        if target == EVComp.zeroIndex {
+                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                        } else {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
+                    }
+            )
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    guard index != EVComp.zeroIndex else { return }
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { index = EVComp.zeroIndex }
+                }
+            )
+        }
+        .liquidPanel(radius: 22 * k)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Exposure compensation")
+        .accessibilityValue(Fmt.stops(EVComp.values[min(max(index, 0), EVComp.values.count - 1)]) + " stops")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: index = min(index + 1, EVComp.values.count - 1)
+            case .decrement: index = max(index - 1, 0)
+            @unknown default: break
+            }
+        }
+    }
+}
+
+// MARK: - Aperture (the "frame" wheel)
 
 enum AutoLampState {
     case off, good, slow, bad
 }
 
-struct AutoLamp: View {
-    let state: AutoLampState
-
-    private var color: Color {
-        switch state {
-        case .off: return Color.clear
-        case .good: return Palette.green
-        case .slow: return Palette.amber
-        case .bad: return Palette.accent
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text("A")
-                .font(AppTypography.next(size: 8, weight: .medium))
-                .tracking(0.6)
-                .foregroundStyle(state == .off ? Color.clear : Palette.mutedInk)
-        }
-        .frame(width: 16, alignment: .trailing)
-        .opacity(state == .off ? 0 : 1)
-        .animation(.easeOut(duration: 0.18), value: state)
-        .accessibilityHidden(true)
-    }
-}
-
-struct ApertureDrum: View {
+struct AperturePanel: View {
     let index: Int
     let auto: Bool
+    let lamp: AutoLampState
+    let k: CGFloat
     let onPick: (Int) -> Void
     let onTap: () -> Void
     let onHome: () -> Void
 
-    private let width: CGFloat = 60
-    private let height: CGFloat = 84
-    private let bezel: CGFloat = 4
-    private let pitch: CGFloat = 18.5
     private let homeIndex = 3
 
     @State private var position: Double = 0
@@ -703,30 +510,57 @@ struct ApertureDrum: View {
 
     private var stopCount: Int { Rollei.stops.count }
     private var nearest: Int { min(max(Int(position.rounded()), 0), stopCount - 1) }
+    private var pitch: CGFloat { 81 * k }
+
+    private var lampColor: Color {
+        switch lamp {
+        case .off: return Palette.text
+        case .good: return Palette.good
+        case .slow: return Palette.slow
+        case .bad: return Palette.bad
+        }
+    }
 
     var body: some View {
-        ZStack {
-            DrumFace(position: position, pitch: pitch)
-            PointerTriangle()
-                .fill(Palette.braunOrange)
-                .frame(width: 5, height: 10)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                .offset(x: -3)
+        ZStack(alignment: .top) {
+            ApertureWheel(position: position, labels: Rollei.stops.map { $0.label },
+                          tint: auto ? lampColor : Palette.text, k: k)
+            PanelTitle(text: "APERTURE", k: k)
         }
-        .frame(width: width - bezel * 2, height: height - bezel * 2)
-        .modifier(WindowInset(radius: 11, bezel: bezel))
-        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            if auto {
+                Text("A")
+                    .font(AppTypography.next(size: 25 * k, weight: .bold))
+                    .foregroundStyle(lampColor)
+                    .padding(.top, 17 * k)
+                    .padding(.trailing, 22 * k)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .liquidPanel(radius: 26 * k)
+        .contentShape(Rectangle())
         .gesture(dragGesture)
-            .onAppear {
-                position = Double(index)
-                lastDetent = index
+        .onAppear {
+            position = Double(index)
+            lastDetent = index
+        }
+        .onChange(of: index) { _, newValue in
+            guard base == nil else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                position = Double(newValue)
             }
-            .onChange(of: index) { _, newValue in
-                guard base == nil else { return }
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                    position = Double(newValue)
-                }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Aperture")
+        .accessibilityValue("f/" + Rollei.stops[min(max(index, 0), stopCount - 1)].label + (auto ? ", auto" : ""))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onPick(min(index + 1, stopCount - 1))
+            case .decrement: onPick(max(index - 1, 0))
+            @unknown default: break
             }
+        }
     }
 
     private var dragGesture: some Gesture {
@@ -739,12 +573,12 @@ struct ApertureDrum: View {
                     scheduleHome()
                 }
                 guard !longPressFired else { return }
-                if !moved && abs(value.translation.height) > 4 {
+                if !moved && abs(value.translation.width) > 4 {
                     moved = true
                     pressToken += 1
                 }
                 guard moved, let start = base else { return }
-                position = rubber(start - Double(value.translation.height / pitch))
+                position = rubber(start - Double(value.translation.width / pitch))
                 detent()
             }
             .onEnded { value in
@@ -761,7 +595,7 @@ struct ApertureDrum: View {
                     onTap()
                     return
                 }
-                let predicted = start - Double(value.predictedEndTranslation.height / pitch)
+                let predicted = start - Double(value.predictedEndTranslation.width / pitch)
                 let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
                 detent()
@@ -804,9 +638,11 @@ struct ApertureDrum: View {
     }
 }
 
-private struct DrumFace: View, Animatable {
+private struct ApertureWheel: View, Animatable {
     var position: Double
-    let pitch: CGFloat
+    let labels: [String]
+    let tint: Color
+    let k: CGFloat
 
     var animatableData: Double {
         get { position }
@@ -815,25 +651,19 @@ private struct DrumFace: View, Animatable {
 
     var body: some View {
         Canvas { ctx, size in
-            let cx = size.width / 2 - 3.5
-            let midY = size.height / 2
-            for i in Rollei.stops.indices {
-                let d = CGFloat(Double(i) - position)
-                let y = midY + d * pitch
-                if y < -pitch || y > size.height + pitch { continue }
+            let cx = size.width / 2
+            let pitch = 81 * k
+            for i in labels.indices {
+                let d = Double(i) - position
+                let x = cx + CGFloat(d) * pitch
+                if x < -pitch || x > size.width + pitch { continue }
                 let ad = abs(d)
-                let near = 1 - smoothstep(0.30, 1.10, ad)
-                let mid = 1 - smoothstep(0.80, 1.90, ad)
-                let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
-                if a <= 0.02 { continue }
-                let scale = 1 - 0.26 * smoothstep(0, 1.6, ad)
-                let text = Text(Rollei.stops[i].label)
-                    .font(AppTypography.bold(size: 19.5))
-                    .foregroundColor(Palette.engraved.opacity(a))
-                var sub = ctx
-                sub.translateBy(x: cx, y: y)
-                sub.scaleBy(x: scale, y: scale)
-                sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
+                let selected = ad < 0.5
+                let color: Color = selected ? tint : Palette.text
+                let text = Text(labels[i])
+                    .font(AppTypography.next(size: 42 * k, weight: selected ? .bold : .medium))
+                    .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
+                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: 120 * k), anchor: .center)
             }
         }
         .clipped()
@@ -841,176 +671,294 @@ private struct DrumFace: View, Animatable {
     }
 }
 
-// MARK: - Metering mode
+// MARK: - Focus (LiDAR distance against the Rollei's focus scale)
 
-struct MeterDrum: View {
-    let modes: [MeterMode]
-    let index: Int
-    let onPick: (Int) -> Void
+struct FocusPanel: View {
+    let distance: Double?
+    let hasLiDAR: Bool
+    let aperture: (label: String, n: Double)
+    let tooClose: Bool
+    let feet: Bool
+    let k: CGFloat
     let onTap: () -> Void
 
-    private let width: CGFloat = 82
-    private let height: CGFloat = 84
-    private let bezel: CGFloat = 4
-    private let pitch: CGFloat = 19
+    var body: some View {
+        ZStack(alignment: .top) {
+            content
+                .padding(.horizontal, 15 * k)
+                .padding(.top, 69 * k)
+                .padding(.bottom, 15 * k)
+            PanelTitle(text: "FOCUS", k: k)
+            if hasLiDAR, !tooClose, let distance {
+                Text(Fmt.distance(distance, feet: feet))
+                    .font(AppTypography.font(size: 22 * k, weight: .medium))
+                    .foregroundStyle(Palette.dim)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, 21 * k)
+                    .padding(.trailing, 20 * k)
+                    .allowsHitTesting(false)
+            }
+        }
+        .liquidPanel(radius: 26 * k)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .accessibilityElement(children: .contain)
+    }
 
-    @State private var position: Double = 0
-    @State private var base: Double?
-    @State private var moved = false
-    @State private var lastDetent = -1
+    @ViewBuilder
+    private var content: some View {
+        if !hasLiDAR {
+            Text("NO LIDAR")
+                .font(AppTypography.next(size: 24 * k, weight: .medium))
+                .tracking(1.5 * k)
+                .foregroundStyle(Palette.dim)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if tooClose {
+            Text("TOO CLOSE")
+                .font(AppTypography.next(size: 28 * k, weight: .semibold))
+                .tracking(1.5 * k)
+                .foregroundStyle(Palette.bad)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let distance {
+            FocusRingScale(distance: distance, aperture: aperture, feet: feet, k: k)
+        } else {
+            VStack(spacing: 4 * k) {
+                Text("\u{2014}")
+                    .font(AppTypography.mono(size: 40 * k, weight: .medium))
+                    .foregroundStyle(Palette.dim)
+                Text("OUT OF RANGE")
+                    .font(AppTypography.next(size: 20 * k, weight: .medium))
+                    .tracking(1.2 * k)
+                    .foregroundStyle(Palette.faint)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
 
-    private var labels: [String] { modes.map { $0.title.uppercased() } }
-    private var nearest: Int { min(max(Int(position.rounded()), 0), max(modes.count - 1, 0)) }
+private struct FocusRingScale: View {
+    let distance: Double
+    let aperture: (label: String, n: Double)
+    let feet: Bool
+    let k: CGFloat
+
+    private var marks: [(label: String, m: Double)] {
+        feet ? Focus.feetMarks : Focus.meterMarks
+    }
+
+    private var depthRange: (near: Double, far: Double) {
+        DepthOfField.range(subject: distance, n: aperture.n)
+    }
+
+    private var recommendedFocus: String {
+        let advice = Focus.advice(subject: distance, aperture: aperture.n, feet: feet)
+        return advice.sharp ? advice.label : "between \(advice.lo) and \(advice.hi)"
+    }
 
     var body: some View {
-        Canvas { ctx, canvas in
-            let cx = canvas.width / 2
-            let midY = canvas.height / 2
-            for i in labels.indices {
-                let d = CGFloat(Double(i) - position)
-                let y = midY + d * pitch
-                if y < -pitch || y > canvas.height + pitch { continue }
-                let ad = abs(d)
-                let near = 1 - smoothstep(0.30, 1.10, ad)
-                let mid = 1 - smoothstep(0.80, 1.90, ad)
-                let a = 0.10 + 0.90 * (0.5 * mid + 0.5 * near)
-                if a <= 0.02 { continue }
-                let scale = 1 - 0.20 * smoothstep(0, 1.6, ad)
-                let text = Text(labels[i])
-                    .font(AppTypography.bold(size: 13.5))
-                    .foregroundColor(Palette.engraved.opacity(a))
-                var sub = ctx
-                sub.translateBy(x: cx, y: y)
-                sub.scaleBy(x: scale, y: scale)
-                sub.draw(ctx.resolve(text), at: .zero, anchor: .center)
-            }
-        }
-        .frame(width: width - bezel * 2, height: height - bezel * 2)
-        .modifier(WindowInset(radius: 11, bezel: bezel))
-        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .gesture(dragGesture)
-        .onAppear {
-            position = Double(index)
-            lastDetent = index
-        }
-        .onChange(of: index) { _, newValue in
-            guard base == nil else { return }
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                position = Double(newValue)
-            }
-        }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                if base == nil {
-                    base = position
-                    moved = false
-                }
-                if !moved && abs(value.translation.height) > 4 { moved = true }
-                guard moved, let start = base else { return }
-                position = rubber(start - Double(value.translation.height / pitch))
-                detent()
-            }
-            .onEnded { value in
-                let start = base ?? position
-                let wasMoved = moved
-                base = nil
-                moved = false
-                if !wasMoved {
-                    onTap()
-                    return
-                }
-                let predicted = start - Double(value.predictedEndTranslation.height / pitch)
-                let target = Double(min(max(Int(rubber(predicted).rounded()), 0), max(modes.count - 1, 0)))
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
-                onPick(Int(target))
-            }
-    }
-
-    private func rubber(_ v: Double) -> Double {
-        let hi = Double(max(modes.count - 1, 0))
-        if v < 0 { return max(-0.3, v * 0.3) }
-        if v > hi { return min(hi + 0.3, hi + (v - hi) * 0.3) }
-        return v
-    }
-
-    private func detent() {
-        let stop = nearest
-        guard stop != lastDetent else { return }
-        lastDetent = stop
-        UISelectionFeedbackGenerator().selectionChanged()
+        FocusDialFace(
+            position: Focus.position(distance),
+            near: Focus.position(depthRange.near),
+            far: Focus.position(depthRange.far),
+            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) },
+            k: k
+        )
+        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
+        .animation(.spring(response: 0.62, dampingFraction: 0.86), value: aperture.n)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
     }
 }
 
-// MARK: - Dieter Rams Shutter Button (Concentric, Perfectly Centered Vertically)
+/// A tape of fine vertical ticks under a fixed yellow pointer. Marks inside the depth of field
+/// turn green; the green band behind them is the depth of field itself.
+private struct FocusDialFace: View, Animatable {
+    var position: Double
+    var near: Double
+    var far: Double
+    let marks: [(label: String, p: Double)]
+    let k: CGFloat
 
-struct PressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
-            .animation(.spring(response: 0.20, dampingFraction: 0.70), value: configuration.isPressed)
+    var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
+        get { AnimatablePair(position, AnimatablePair(near, far)) }
+        set {
+            position = newValue.first
+            near = newValue.second.first
+            far = newValue.second.second
+        }
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            drawDial(&context, size)
+        }
+        .clipped()
+        .allowsHitTesting(false)
+    }
+
+    private func zoom(width: CGFloat) -> CGFloat {
+        let span = max(far - near, 0.006)
+        let wanted: CGFloat = width * 0.55 / CGFloat(span)
+        return min(max(wanted, width * 1.15), width * 8)
+    }
+
+    private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
+        let cx: CGFloat = size.width / 2
+        let h: CGFloat = size.height
+        let numberY: CGFloat = h * 0.24
+        let markTop: CGFloat = h * 0.50
+        let baseline: CGFloat = h
+        let fadeWidth: CGFloat = 36 * k
+        let ppu: CGFloat = zoom(width: size.width)
+        let fineRaw: CGFloat = (ppu / 60 - 4) / 3
+        let fine: Double = Double(min(max(fineRaw, 0), 1))
+        let tickWidth: CGFloat = max(1, 1.8 * k)
+
+        func x(_ p: Double) -> CGFloat {
+            return cx + CGFloat(p - position) * ppu
+        }
+        func fade(_ px: CGFloat) -> Double {
+            let edge: CGFloat = min(px, size.width - px)
+            return Double(min(max(edge / fadeWidth, 0), 1))
+        }
+
+        let nearX: CGFloat = x(near)
+        let farX: CGFloat = x(far)
+        let left: CGFloat = min(nearX, farX)
+        let right: CGFloat = max(nearX, farX)
+        let bandTop: CGFloat = markTop - 5 * k
+        if right - left > 1.5 {
+            let width: CGFloat = right - left
+            context.fill(
+                Path(roundedRect: CGRect(x: left, y: bandTop, width: width, height: baseline - bandTop),
+                     cornerRadius: 3 * k),
+                with: .color(Palette.good.opacity(0.16)))
+            context.fill(
+                Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: max(2, 4 * k)),
+                     cornerRadius: 1.5),
+                with: .color(Palette.good.opacity(0.85)))
+        }
+
+        let markPositions: [Double] = marks.map { $0.p }
+        for i in 0...60 {
+            let p: Double = Double(i) / 60.0
+            if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
+            let major: Bool = i % 5 == 0
+            let strength: Double = major ? 1.0 : fine
+            if strength <= 0 { continue }
+            let px: CGFloat = x(p)
+            let f: Double = fade(px)
+            if f <= 0 { continue }
+            let span: CGFloat = baseline - markTop
+            let tickHeight: CGFloat = major ? span * 0.8 : span * 0.5
+            var tick = Path()
+            tick.move(to: CGPoint(x: px, y: baseline))
+            tick.addLine(to: CGPoint(x: px, y: baseline - tickHeight))
+            context.stroke(tick, with: .color(Palette.text.opacity(f * strength * 0.62)), lineWidth: tickWidth)
+        }
+
+        var lastRight: CGFloat = -CGFloat.greatestFiniteMagnitude
+        for mark in marks {
+            let px: CGFloat = x(mark.p)
+            let f: Double = fade(px)
+            if f <= 0 { continue }
+            let inside: Bool = mark.p >= near - 0.004 && mark.p <= far + 0.004
+            let color: Color = inside ? Palette.good : Palette.text
+            var tick = Path()
+            tick.move(to: CGPoint(x: px, y: baseline))
+            tick.addLine(to: CGPoint(x: px, y: markTop))
+            context.stroke(tick, with: .color(color.opacity(f)), lineWidth: tickWidth * (inside ? 1.6 : 1.3))
+
+            let underPointer: Bool = abs(mark.p - position) < 0.012
+            let label = Text(mark.label)
+                .font(AppTypography.bold(size: (underPointer ? 38 : 32) * k))
+                .foregroundColor(color.opacity(f))
+            let text = context.resolve(label)
+            let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
+
+            guard underPointer || px - textWidth / 2 > lastRight + 4 else { continue }
+            context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
+            lastRight = px + textWidth / 2
+        }
+
+        // The pointer: a yellow line through the tape, like the EV marker.
+        var pointer = Path()
+        pointer.move(to: CGPoint(x: cx, y: markTop - 8 * k))
+        pointer.addLine(to: CGPoint(x: cx, y: baseline))
+        context.stroke(pointer, with: .color(Palette.accent),
+                       style: StrokeStyle(lineWidth: max(2, 3 * k), lineCap: .butt))
     }
 }
 
-struct FreezeButton: View {
+// MARK: - Hold button
+
+struct HoldControl: View {
     let frozen: Bool
+    let k: CGFloat
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            ZStack(alignment: .center) {
-                // 1. Concentric outer circular bezel well
-                Circle()
-                    .fill(Palette.well)
-                    .frame(width: 80, height: 80)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: Palette.ink.opacity(0.18), location: 0),
-                                        .init(color: Palette.ink.opacity(0.04), location: 1)
-                                    ],
-                                    startPoint: .top, endPoint: .bottom
-                                ),
-                                lineWidth: 1.5
-                            )
-                    )
-                    .shadow(color: Palette.cast, radius: 4, x: 0, y: 1.5)
+            ZStack(alignment: .trailing) {
+                Capsule()
+                    .fill(Palette.panel)
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75))
 
-                // 2. Pure Braun Orange button - strictly concentric and centered vertically!
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Palette.braunOrangeTop, Palette.braunOrangeBottom],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 66, height: 66)
-                    .overlay {
-                        LinearGradient(
-                            stops: [
-                                .init(color: Color.black.opacity(frozen ? 0.20 : 0.13), location: 0),
-                                .init(color: Color.clear, location: 0.40),
-                                .init(color: Color.white.opacity(frozen ? 0.08 : 0.20), location: 1.0)
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        .clipShape(Circle())
-                    }
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(frozen ? 0.06 : 0.16),
-                            radius: frozen ? 2 : 3.5, x: 0, y: frozen ? 1 : 2)
-                    .scaleEffect(frozen ? 0.96 : 1.0)
+                Text(frozen ? "hold" : "live")
+                    .font(AppTypography.next(size: 29 * k))
+                    .foregroundStyle(frozen ? Palette.accent : Palette.dim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 17 * k)
+
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: 0x070707))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+                    Circle()
+                        .fill(frozen ? Palette.accent : Color.white)
+                        .frame(width: 126 * k, height: 126 * k)
+                        .scaleEffect(frozen ? 0.9 : 1.0)
+                }
+                .frame(width: 175 * k, height: 175 * k)
+                .padding(.trailing, 7 * k)
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
+        }
+        .buttonStyle(PressStyle(scale: 0.97))
+        .accessibilityLabel(frozen ? "Unfreeze exposure" : "Freeze exposure")
+    }
+}
+
+// MARK: - Viewfinder overlays
+
+struct EVChip: View {
+    @ObservedObject var damp: Damper
+    let frozen: Bool
+    let spot: Bool
+    let comp: Double
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if frozen {
+                Text("HOLD").foregroundStyle(Palette.accent)
+            }
+            if spot {
+                Text("SPOT")
+            }
+            Text("EV " + String(format: "%.1f", damp.values[0]))
+                .monospacedDigit()
+            if comp != 0 {
+                Text(Fmt.stops(comp)).foregroundStyle(Palette.accent)
             }
         }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(frozen ? "Unfreeze exposure" : "Freeze exposure")
+        .font(AppTypography.font(size: 11, weight: .medium))
+        .foregroundStyle(Palette.text)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color.black.opacity(0.55), in: Capsule())
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
     }
 }
 
@@ -1023,7 +971,7 @@ private struct FocusPing: View {
 
     var body: some View {
         Circle()
-            .stroke(tooClose ? warnRed : Palette.lensLight, lineWidth: 1)
+            .stroke(tooClose ? Palette.bad : Palette.lensLight, lineWidth: 1)
             .frame(width: 26, height: 26)
             .scaleEffect(expanded ? 1.7 : 0.5)
             .opacity(expanded ? 0 : 0.55)
@@ -1048,12 +996,12 @@ struct FocusMarker: View {
                 FocusPing(tooClose: tooClose).id(pulseID)
             }
             Circle()
-                .stroke(tooClose ? warnRed : Palette.lensLight.opacity(0.92),
+                .stroke(tooClose ? Palette.bad : Palette.lensLight.opacity(0.92),
                         style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
                 .frame(width: 26, height: 26)
                 .scaleEffect(tooClose ? 0.86 : 1)
             Circle()
-                .fill(tooClose ? warnRed : Palette.lensLight)
+                .fill(tooClose ? Palette.bad : Palette.lensLight)
                 .frame(width: 2.5, height: 2.5)
         }
         .frame(width: 30, height: 30)

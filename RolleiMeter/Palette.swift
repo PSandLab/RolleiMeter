@@ -1,96 +1,37 @@
 import SwiftUI
-import UIKit
 
+extension Color {
+    /// 0xRRGGBB, sRGB.
+    init(hex: UInt32, opacity: Double = 1) {
+        self.init(.sRGB,
+                  red: Double((hex >> 16) & 0xFF) / 255.0,
+                  green: Double((hex >> 8) & 0xFF) / 255.0,
+                  blue: Double(hex & 0xFF) / 255.0,
+                  opacity: opacity)
+    }
+}
+
+/// One dark palette. Black body, near-black panels, white type, a single yellow accent.
+/// Green / orange / red are reserved for exposure and focus state.
 enum Palette {
-    private static func rgb(_ v: UInt32, alpha: CGFloat = 1) -> UIColor {
-        UIColor(red: CGFloat((v >> 16) & 0xFF) / 255.0,
-                green: CGFloat((v >> 8) & 0xFF) / 255.0,
-                blue: CGFloat(v & 0xFF) / 255.0,
-                alpha: alpha)
-    }
+    static let background = Color.black
+    static let panel = Color(hex: 0x111111)
+    static let panelRaised = Color(hex: 0x1A1A1A)
 
-    private static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark ? rgb(dark) : rgb(light)
-        })
-    }
+    static let text = Color.white
+    static let dim = Color(hex: 0x6E6E6E)
+    static let faint = Color(hex: 0x3A3A3A)
 
-    // Classic Braun matte light gray/cream & dark anthracite
-    static let paper = dynamic(0xF1EEE7, 0x1A1918)
-    static let ink = dynamic(0x1F1F1F, 0xEBE7DF)
-    static let mutedInk = dynamic(0x7D7A73, 0x949088)
-    static let engraved = dynamic(0x2B2926, 0xD4CFC5)
-    static let hairline = dynamic(0xD5D1C7, 0x33312D)
-    static let accent = dynamic(0xB32631, 0xE2575F)
-    static let green = dynamic(0x3B6846, 0x76A37F)
-    static let amber = dynamic(0x9E681A, 0xD99E43)
+    /// The yellow on the active film card, the EV marker and the metered shutter speed.
+    static let accent = Color(hex: 0xFFC800)
+    /// Dark brown-black inset used inside the yellow film card.
+    static let accentInk = Color(hex: 0x1C1608)
 
-    // Dieter Rams Braun Orange (with directional top-to-bottom lighting tones)
-    static let braunOrange = dynamic(0xEB5528, 0xF06336)
-    static let braunOrangeTop = dynamic(0xDE4B1E, 0xE25325)
-    static let braunOrangeBottom = dynamic(0xF4683A, 0xF9774B)
+    static let good = Color(hex: 0x3DDC6B)
+    static let slow = Color(hex: 0xFF9500)
+    static let bad = Color(hex: 0xFF453A)
 
-    static let highlight = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(white: 1, alpha: 0.06)
-            : UIColor(white: 1, alpha: 0.45)
-    })
-
-    // Molded plastic bezels and wells
-    static let bezelTop = dynamic(0xF7F4EE, 0x252421)
-    static let bezelBottom = dynamic(0xE5E1D7, 0x161513)
-    static let well = dynamic(0xEAE6DC, 0x121110)
-
-    // Authentic physical contact shadows
-    static let cast = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(white: 0, alpha: 0.35)
-            : UIColor(white: 0, alpha: 0.08)
-    })
-
-    // Soft top shadow fading down into recesses
-    static let recess = Color(UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(white: 0, alpha: 0.45)
-            : UIColor(white: 0.15, alpha: 0.16)
-    })
-
-    static let lensLight = Color(red: Double(0xF1) / 255.0, green: Double(0xEE) / 255.0, blue: Double(0xE6) / 255.0)
-    static let lensDark = Color(red: Double(0x26) / 255.0, green: Double(0x26) / 255.0, blue: Double(0x26) / 255.0)
-}
-
-private enum PaperGrain {
-    static let image: UIImage = {
-        let side = 128
-        var bytes = [UInt8](repeating: 255, count: side * side * 4)
-        var state: UInt64 = 0x9E37_79B9_7F4A_7C15
-        for i in 0..<(side * side) {
-            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-            let v = UInt8(truncatingIfNeeded: state >> 56)
-            bytes[i * 4] = v
-            bytes[i * 4 + 1] = v
-            bytes[i * 4 + 2] = v
-        }
-        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
-              let cg = CGImage(
-                width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32,
-                bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-        else { return UIImage() }
-        return UIImage(cgImage: cg, scale: 3, orientation: .up)
-    }()
-}
-
-struct PaperBackground: View {
-    var body: some View {
-        ZStack {
-            Palette.paper
-            Image(uiImage: PaperGrain.image)
-                .resizable(resizingMode: .tile)
-                .opacity(0.025)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
+    /// Marks drawn over the live image.
+    static let lensLight = Color(hex: 0xF1EEE6)
+    static let lensDark = Color(hex: 0x262626)
 }

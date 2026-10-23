@@ -33,6 +33,9 @@ final class CameraMeter: NSObject, ObservableObject,
     private var spot = CGPoint(x: 0.5, y: 0.5)
     private var spotRadius: CGFloat = 0.05
     private var focus = CGPoint(x: 0.5, y: 0.5)
+    /// The buffer is native landscape. In landscape-left it is upside down on screen, which only
+    /// matters for the frozen snapshot; every point handed to `setConfig` is already in buffer space.
+    private var previewFlipped = false
     private var smoothed: Double?
     private var deltaSmoothed: Double?
     private var steadyEV: Double?
@@ -55,7 +58,7 @@ final class CameraMeter: NSObject, ObservableObject,
     }
 
     // MARK: - Precomputed Matrix Weights
-    // Pre-calculate the 36x48 points once so the phone does zero heavy math per frame.
+    // Pre-calculate the 48x36 points once so the phone does zero heavy math per frame.
     private struct MatrixGridPoint {
         let fx: Double
         let fy: Double
@@ -63,8 +66,8 @@ final class CameraMeter: NSObject, ObservableObject,
     }
 
     private static let matrixGrid: [MatrixGridPoint] = {
-        let gx = 36
-        let gy = 48
+        let gx = 48
+        let gy = 36
         var points: [MatrixGridPoint] = []
         points.reserveCapacity(gx * gy)
         for j in 0..<gy {
@@ -92,8 +95,10 @@ final class CameraMeter: NSObject, ObservableObject,
         return snapped
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint) {
+    /// `spot` and `focus` are positions in the sensor buffer (0...1), not on screen.
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, flipped: Bool) {
         lock.lock()
+        self.previewFlipped = flipped
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
@@ -205,8 +210,9 @@ final class CameraMeter: NSObject, ObservableObject,
         guard session.canAddOutput(output) else { return fail() }
         session.addOutput(output)
 
-        if let conn = output.connection(with: .video), conn.isVideoRotationAngleSupported(90) {
-            conn.videoRotationAngle = 90
+        // Native landscape buffers: no rotation, so metering and LiDAR read the sensor as it is.
+        if let conn = output.connection(with: .video), conn.isVideoRotationAngleSupported(0) {
+            conn.videoRotationAngle = 0
         }
 
         if lidar {
@@ -285,8 +291,9 @@ final class CameraMeter: NSObject, ObservableObject,
         let h = CVPixelBufferGetHeight(map)
         let bpr = CVPixelBufferGetBytesPerRow(map)
 
-        let sx = Double(pt.y)
-        let sy = 1.0 - Double(pt.x)
+        // The depth map is native landscape, same as the video buffer.
+        let sx = Double(pt.x)
+        let sy = Double(pt.y)
 
         var values: [Double] = []
         let steps = 7
@@ -348,13 +355,12 @@ final class CameraMeter: NSObject, ObservableObject,
     func previewSnapshot() -> UIImage? {
         lock.lock()
         let pixelBuffer = latestPreviewPixelBuffer
+        let flipped = previewFlipped
         lock.unlock()
         guard let pixelBuffer else { return nil }
 
         let sensorImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let image = sensorImage.extent.width > sensorImage.extent.height
-            ? sensorImage.oriented(.right)
-            : sensorImage
+        let image = flipped ? sensorImage.oriented(.down) : sensorImage
         guard let cgImage = previewImageContext.createCGImage(image, from: image.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
