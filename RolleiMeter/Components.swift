@@ -53,23 +53,43 @@ struct LiquidPanel: ViewModifier {
     var fill: Color = Palette.panel
     var edge: Bool = true
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .background {
-                RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill)
+        if #available(iOS 26.0, *) {
+            if edge {
+                // Use Apple's system-rendered Liquid Glass on supported OS versions.
+                content
+                    .glassEffect(
+                        .regular,
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    )
+            } else {
+                // Keep the distinctive yellow film-speed panel solid rather than glassy.
+                content
+                    .background {
+                        RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             }
-            .overlay {
-                if edge {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.09), Color.white.opacity(0.02)],
-                                startPoint: .top, endPoint: .bottom),
-                            lineWidth: 0.75)
-                        .allowsHitTesting(false)
+        } else {
+            // Compatibility appearance for devices still running iOS 17–25.
+            content
+                .background {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill)
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay {
+                    if edge {
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.09), Color.white.opacity(0.02)],
+                                    startPoint: .top, endPoint: .bottom),
+                                lineWidth: 0.75)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        }
     }
 }
 
