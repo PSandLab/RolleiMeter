@@ -144,9 +144,9 @@ final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onPress: () -> Void = {}
-    var onFlip: (Bool) -> Void = { _ in }
+    var onRotationChange: (CGFloat) -> Void = { _ in }
 
-    private var flipped: Bool?
+    private var appliedRotationAngle: CGFloat?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -185,17 +185,30 @@ final class PreviewView: UIView {
 
     private func applyOrientation() {
         guard let orientation = window?.windowScene?.interfaceOrientation else { return }
-        let isFlipped = orientation == .landscapeLeft
-        let angle: CGFloat = isFlipped ? 180 : 0
+
+        let angle: CGFloat
+        switch orientation {
+        case .portrait:
+            angle = 90
+        case .portraitUpsideDown:
+            angle = 270
+        case .landscapeLeft:
+            angle = 180
+        case .landscapeRight, .unknown:
+            angle = 0
+        @unknown default:
+            angle = 0
+        }
+
         if let connection = previewLayer.connection,
            connection.isVideoRotationAngleSupported(angle),
            connection.videoRotationAngle != angle {
             connection.videoRotationAngle = angle
         }
-        if flipped != isFlipped {
-            flipped = isFlipped
-            let callback = onFlip
-            DispatchQueue.main.async { callback(isFlipped) }
+        if appliedRotationAngle != angle {
+            appliedRotationAngle = angle
+            let callback = onRotationChange
+            DispatchQueue.main.async { callback(angle) }
         }
     }
 }
@@ -203,7 +216,7 @@ final class PreviewView: UIView {
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     var onVolumePress: () -> Void = {}
-    var onFlip: (Bool) -> Void = { _ in }
+    var onRotationChange: (CGFloat) -> Void = { _ in }
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
@@ -211,7 +224,7 @@ struct CameraPreview: UIViewRepresentable {
         v.previewLayer.videoGravity = .resizeAspectFill
         v.backgroundColor = .clear
         v.onPress = onVolumePress
-        v.onFlip = onFlip
+        v.onRotationChange = onRotationChange
 
         if #available(iOS 17.2, *) {
             let interaction = AVCaptureEventInteraction { [weak v] event in
@@ -225,7 +238,7 @@ struct CameraPreview: UIViewRepresentable {
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.onPress = onVolumePress
-        uiView.onFlip = onFlip
+        uiView.onRotationChange = onRotationChange
     }
 }
 
