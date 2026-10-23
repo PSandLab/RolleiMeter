@@ -44,7 +44,6 @@ struct ControlTray: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        .liquidPanel(radius: 20, fill: Palette.panelRaised)
         .frame(maxWidth: 380)
         .onDisappear {
             armTask?.cancel()
