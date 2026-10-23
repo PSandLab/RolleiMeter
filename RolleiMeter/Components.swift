@@ -36,10 +36,10 @@ struct LiquidGrid {
         return CGSize(width: d.width * k, height: d.height * k)
     }
 
-    func rect(col: Int, row: Int, cols: Int, rows: Int) -> CGRect {
+    func rect(col: CGFloat, row: CGFloat, cols: Int, rows: Int) -> CGRect {
         CGRect(
-            x: CGFloat(col) * Self.colPitch * k,
-            y: CGFloat(row) * Self.rowPitch * k,
+            x: col * Self.colPitch * k,
+            y: row * Self.rowPitch * k,
             width: (CGFloat(cols) * Self.colPitch - 50) * k,
             height: (CGFloat(rows) * Self.rowPitch - 49) * k
         )
@@ -47,7 +47,7 @@ struct LiquidGrid {
 }
 
 extension View {
-    func cell(_ grid: LiquidGrid, col: Int, row: Int, cols: Int, rows: Int) -> some View {
+    func cell(_ grid: LiquidGrid, col: CGFloat, row: CGFloat, cols: Int, rows: Int) -> some View {
         let r = grid.rect(col: col, row: row, cols: cols, rows: rows)
         return self
             .frame(width: r.width, height: r.height)

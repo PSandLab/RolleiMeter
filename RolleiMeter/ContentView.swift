@@ -117,14 +117,13 @@ struct ContentView: View {
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
-                    MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
-                        .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
+                    if !p {
+                        MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
+                            .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
 
-                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
-                        .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
-
-                    topBar(k: k)
-                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: 1)
+                        FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
+                            .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
+                    }
 
                     preview(k: k)
                         .cell(grid, col: p ? 0 : 3, row: 1, cols: 6, rows: p ? 6 : 5)
@@ -158,10 +157,14 @@ struct ContentView: View {
                         onAuto: resumeAutoFocus,
                         onUnits: toggleUnits
                     )
-                    .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
+                    .cell(grid, col: p ? 0 : 9, row: p ? 9 : 2, cols: p ? 6 : 3, rows: 2)
 
                     HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                        .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
+                        .cell(grid, col: p ? 1.5 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
+
+                    // Last in the stack so the camera view (which overflows its cell) can't block taps.
+                    topBar(k: k)
+                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: 1)
                 }
                 .frame(width: grid.size.width, height: grid.size.height)
                 .offset(y: grid.yShift)
