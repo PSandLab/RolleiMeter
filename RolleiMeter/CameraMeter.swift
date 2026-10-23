@@ -34,7 +34,7 @@ final class CameraMeter: NSObject, ObservableObject,
     private var spot = CGPoint(x: 0.5, y: 0.5)
     private var spotRadius: CGFloat = 0.05
     private var focus = CGPoint(x: 0.5, y: 0.5)
-    private var previewFlipped = false
+    private var previewRotation: ViewRotation = .landscapeRight
     private var lensNow: Float = 0.5
     private static let phoneFocalMM = 6.8
     private var phoneMinFocusMM = 200.0
@@ -118,9 +118,9 @@ final class CameraMeter: NSObject, ObservableObject,
         return snapped
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, flipped: Bool) {
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, rotation: ViewRotation) {
         lock.lock()
-        self.previewFlipped = flipped
+        self.previewRotation = rotation
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
@@ -278,7 +278,7 @@ final class CameraMeter: NSObject, ObservableObject,
         dofFar = far
         dofActive = active
         let pb = frozenDepthPixelBuffer ?? latestDepthPixelBuffer
-        let flipped = previewFlipped
+        let rotation = previewRotation
         dofLock.unlock()
 
         if !active {
@@ -287,11 +287,11 @@ final class CameraMeter: NSObject, ObservableObject,
         }
 
         if let pb = pb {
-            renderDoFOverlay(pb, near: near, far: far, flipped: flipped)
+            renderDoFOverlay(pb, near: near, far: far, rotation: rotation)
         }
     }
 
-    private func renderDoFOverlay(_ pb: CVPixelBuffer, near: Double, far: Double, flipped: Bool) {
+    private func renderDoFOverlay(_ pb: CVPixelBuffer, near: Double, far: Double, rotation: ViewRotation) {
         dofLock.lock()
         guard !dofBusy else {
             dofLock.unlock()
@@ -308,8 +308,7 @@ final class CameraMeter: NSObject, ObservableObject,
                 self.dofLock.unlock()
             }
 
-            var image = CIImage(cvPixelBuffer: pb)
-            if flipped { image = image.oriented(.down) }
+            let image = CIImage(cvPixelBuffer: pb).oriented(rotation.imageOrientation)
 
             guard let kernel = CameraMeter.dofKernel,
                   let output = kernel.apply(extent: image.extent, arguments: [image, Float(near), Float(far)]),
@@ -489,11 +488,11 @@ final class CameraMeter: NSObject, ObservableObject,
         let renderNow = dofActive
         let curNear = dofNear
         let curFar = dofFar
-        let isFlipped = previewFlipped
+        let rotationNow = previewRotation
         dofLock.unlock()
 
         if renderNow {
-            renderDoFOverlay(map, near: curNear, far: curFar, flipped: isFlipped)
+            renderDoFOverlay(map, near: curNear, far: curFar, rotation: rotationNow)
         }
 
         CVPixelBufferLockBaseAddress(map, .readOnly)
@@ -602,12 +601,12 @@ final class CameraMeter: NSObject, ObservableObject,
     func previewSnapshot() -> UIImage? {
         lock.lock()
         let pixelBuffer = latestPreviewPixelBuffer
-        let flipped = previewFlipped
+        let rotation = previewRotation
         lock.unlock()
         guard let pixelBuffer = pixelBuffer else { return nil }
 
         let sensorImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let image = flipped ? sensorImage.oriented(.down) : sensorImage
+        let image = sensorImage.oriented(rotation.imageOrientation)
         guard let cgImage = previewImageContext.createCGImage(image, from: image.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }

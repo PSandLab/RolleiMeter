@@ -44,7 +44,7 @@ struct ContentView: View {
     @State private var pinchBase: CGFloat = 0.05
     @State private var blink = false
     @State private var previewSize = CGSize(width: 4, height: 3)
-    @State private var flipped = false
+    @State private var rotation: ViewRotation = .landscapeRight
 
     // Manual focus & LiDAR DoF
     @State private var manualFocus = false
@@ -95,22 +95,23 @@ struct ContentView: View {
         GeometryReader { screen in
             let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
             let k = grid.k
+            let p = grid.portrait
 
             ZStack {
                 Palette.background
 
                 ZStack(alignment: .topLeading) {
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
-                        .cell(grid, col: 0, row: 0, cols: 3, rows: 2)
+                        .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
-                        .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
+                        .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
-                        .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
+                        .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
 
                     preview(k: k)
-                        .cell(grid, col: 3, row: 0, cols: 6, rows: 6)
+                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: p ? 7 : 6)
 
                     AperturePanel(
                         index: resolvedApertureIndex,
@@ -121,7 +122,7 @@ struct ContentView: View {
                         onTap: toggleAutoAperture,
                         onHome: returnHomeAperture
                     )
-                    .cell(grid, col: 9, row: 0, cols: 3, rows: 2)
+                    .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FocusPanel(
                         position: focusPos,
@@ -141,12 +142,13 @@ struct ContentView: View {
                         onAuto: resumeAutoFocus,
                         onUnits: toggleUnits
                     )
-                    .cell(grid, col: 9, row: 2, cols: 3, rows: 2)
+                    .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                        .cell(grid, col: 9, row: 4, cols: 3, rows: 2)
+                        .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
                 }
                 .frame(width: grid.size.width, height: grid.size.height)
+                .offset(y: grid.yShift)
             }
             .frame(width: screen.size.width, height: screen.size.height)
         }
@@ -188,7 +190,7 @@ struct ContentView: View {
         .onChange(of: spot) { pushConfig() }
         .onChange(of: focus) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
-        .onChange(of: flipped) { pushConfig() }
+        .onChange(of: rotation) { pushConfig() }
         .onChange(of: previewSize) { pushConfig() }
         .onChange(of: meter.sceneEV) { evDamp.set([ev]) }
         .onChange(of: calibration) { evDamp.set([ev]) }
@@ -213,7 +215,7 @@ struct ContentView: View {
             spot: bufferPoint(spot, in: previewSize),
             radius: spotRadius,
             focus: bufferPoint(focus, in: previewSize),
-            flipped: flipped
+            rotation: rotation
         )
     }
 
@@ -334,7 +336,7 @@ struct ContentView: View {
     }
 
     private func bufferPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
-        let frame: CGFloat = 4.0 / 3.0
+        let frame = rotation.frameAspect
         let aspect = size.width / max(size.height, 1)
         var q = p
         if aspect > frame {
@@ -342,8 +344,13 @@ struct ContentView: View {
         } else {
             q.x = 0.5 + (p.x - 0.5) * aspect / frame
         }
-        if flipped { q = CGPoint(x: 1 - q.x, y: 1 - q.y) }
-        return q
+        return rotation.toBuffer(q)
+    }
+
+    /// Size of the full camera frame when aspect-filled into `size`.
+    private func fullFrame(_ size: CGSize) -> CGSize {
+        let a = rotation.frameAspect
+        return CGSize(width: max(size.width, size.height * a), height: max(size.height, size.width / a))
     }
 
     // MARK: - Viewfinder
@@ -355,9 +362,9 @@ struct ContentView: View {
                 CameraPreview(
                     session: meter.session,
                     onVolumePress: { toggleFreeze() },
-                    onFlip: { flipped = $0 }
+                    onRotate: { rotation = $0 }
                 )
-                .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
+                .frame(width: fullFrame(geo.size).width, height: fullFrame(geo.size).height)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 .clipped()
 
@@ -379,7 +386,7 @@ struct ContentView: View {
                 // Preserved in HOLD: Renders on top of the frozen snapshot
                 if peakingVisible || manualFocus {
                     PeakingOverlay(feed: meter.peakingFeed)
-                        .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
+                        .frame(width: fullFrame(geo.size).width, height: fullFrame(geo.size).height)
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
                         .transition(.opacity)
                 }
@@ -438,7 +445,8 @@ struct ContentView: View {
                     )
 
                 if spotActive {
-                    let d = spotRadius * 2 * max(geo.size.width, geo.size.height * (4.0 / 3.0))
+                    let full = fullFrame(geo.size)
+                    let d = spotRadius * 2 * max(full.width, full.height)
                     ZStack {
                         Circle().fill(Palette.lensLight.opacity(0.05))
                         SpotReticle()
