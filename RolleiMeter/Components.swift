@@ -606,6 +606,8 @@ private struct ApertureWheel: View, Animatable {
 private struct FocusStripLines: View, Animatable {
     var focusPosition: Double
     var scrollProgress: Double
+    var rippleProgress: Double
+    var rippleCenter: Double
     var manual: Bool
     var dofNear: Double
     var dofFar: Double
@@ -614,13 +616,17 @@ private struct FocusStripLines: View, Animatable {
     let totalTicks: Int
     let k: CGFloat
 
-    var animatableData: AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, Double>>> {
-        get { .init(focusPosition, .init(scrollProgress, .init(dofNear, dofFar))) }
+    var animatableData: AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, Double>>>>> {
+        get {
+            .init(focusPosition, .init(scrollProgress, .init(rippleProgress, .init(rippleCenter, .init(dofNear, dofFar)))))
+        }
         set {
             focusPosition = newValue.first
             scrollProgress = newValue.second.first
-            dofNear = newValue.second.second.first
-            dofFar = newValue.second.second.second
+            rippleProgress = newValue.second.second.first
+            rippleCenter = newValue.second.second.second.first
+            dofNear = newValue.second.second.second.second.first
+            dofFar = newValue.second.second.second.second.second
         }
     }
 
@@ -630,17 +636,18 @@ private struct FocusStripLines: View, Animatable {
             let h = geo.size.height
             let lineMargin: CGFloat = 2 * k
             let linesWidth = max(w - lineMargin * 2, 1)
-            let knobX = lineMargin + CGFloat(min(max(focusPosition, 0.0), 1.0)) * linesWidth
-            let baseRibH = h - 18 * k
+            let touchX = lineMargin + CGFloat(min(max(focusPosition, 0.0), 1.0)) * linesWidth
+            let rippleX = lineMargin + CGFloat(min(max(rippleCenter, 0.0), 1.0)) * linesWidth
+            let baseRibH = h - 22 * k
             let zoomRadius = 42 * k
 
             Canvas { ctx, size in
                 for i in 0...totalTicks {
                     let fraction = CGFloat(i) / CGFloat(totalTicks)
                     let x = lineMargin + fraction * linesWidth
-                    let d = abs(x - knobX)
+                    let d = abs(x - touchX)
 
-                    // Gentle macOS dock zoom magnification while scrolling across
+                    // 1. Gentle macOS dock zoom magnification following finger
                     var boost: CGFloat = 0
                     if scrollProgress > 0 && d < zoomRadius {
                         let t = 1.0 - (d / zoomRadius)
@@ -648,15 +655,29 @@ private struct FocusStripLines: View, Animatable {
                         boost = 11 * k * CGFloat(scrollProgress) * wCurve
                     }
 
+                    // 2. Gentle ripple wave expanding outward on release
+                    if rippleProgress < 1.0 {
+                        let dRipple = abs(x - rippleX)
+                        let waveRadius = CGFloat(rippleProgress) * 95 * k
+                        let waveWidth: CGFloat = 30 * k
+                        let distToWave = abs(dRipple - waveRadius)
+                        if distToWave < waveWidth {
+                            let waveT = 1.0 - (distToWave / waveWidth)
+                            let waveCurve = waveT * waveT * (3 - 2 * waveT)
+                            let decay = 1.0 - CGFloat(rippleProgress)
+                            let rippleBoost = 7 * k * decay * waveCurve
+                            boost = max(boost, rippleBoost)
+                        }
+                    }
+
                     let lineH = baseRibH + boost
-                    let topY = (h - lineH) / 2
+                    let topY = (h - 22 * k - lineH) / 2
                     let botY = topY + lineH
 
                     var path = Path()
                     path.move(to: CGPoint(x: x, y: topY))
                     path.addLine(to: CGPoint(x: x, y: botY))
 
-                    // Default white line
                     var r: Double = 1.0
                     var g: Double = 1.0
                     var b: Double = 1.0
@@ -664,7 +685,7 @@ private struct FocusStripLines: View, Animatable {
                     var lw = max(1.2, 1.8 * k) + (boost > 0 ? 0.6 * k : 0)
 
                     if manual {
-                        // Manual Mode: Lines inside depth of field turn RED when resting
+                        // Manual Mode: Lines inside depth-of-field turn RED when resting
                         if scrollProgress < 0.95 {
                             let inDoF = fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
                             if inDoF {
@@ -681,7 +702,7 @@ private struct FocusStripLines: View, Animatable {
                             }
                         }
                     } else {
-                        // Auto Mode: Green lines reflecting measurement and DoF in real-time
+                        // Auto Mode: Green lines reflecting measurement and DoF in real time
                         if isTooClose {
                             if fraction <= 0.12 {
                                 r = 1.0
@@ -694,7 +715,6 @@ private struct FocusStripLines: View, Animatable {
                             if inDoF {
                                 let distToFocus = abs(fraction - focusPosition)
                                 let centerBonus = max(0.0, 1.0 - distToFocus / max(0.06, (dofFar - dofNear) * 0.5))
-                                // Luminous Apple Green
                                 r = 0.19
                                 g = 0.82 + 0.14 * centerBonus
                                 b = 0.35
@@ -729,6 +749,7 @@ struct FocusPanel: View {
     let tooClose: Bool
     let aperture: (label: String, n: Double)
     let feet: Bool
+    var isHeld: Bool = false
     let k: CGFloat
     let onBegin: () -> Double
     let onSlide: (Double) -> Void
@@ -738,6 +759,8 @@ struct FocusPanel: View {
 
     @State private var isDragging: Bool = false
     @State private var lastHapticTick: Int = -1
+    @State private var rippleProgress: Double = 1.0
+    @State private var rippleCenter: Double = 0.5
 
     private let totalTicks = 36
     private let tickHaptic = UISelectionFeedbackGenerator()
@@ -772,25 +795,46 @@ struct FocusPanel: View {
         return (0.0, 0.0)
     }
 
+    private var dofBoundaryMarkers: (near: (pos: Double, label: String), far: (pos: Double, label: String))? {
+        guard let s = subject, s >= Focus.nearest - 0.001 else { return nil }
+        let r = DepthOfField.range(subject: s, n: aperture.n)
+        let marks = feet ? Focus.feetMarks : Focus.meterMarks
+
+        let nearMark = marks.min(by: { abs($0.m - r.near) < abs($1.m - r.near) }) ?? marks[0]
+        let farMark = marks.min(by: { abs($0.m - r.far) < abs($1.m - r.far) }) ?? marks[marks.count - 1]
+
+        var nearLabel = nearMark.label
+        var farLabel = farMark.label
+
+        if nearLabel == farLabel {
+            let lo = marks.last { $0.m <= s } ?? marks[0]
+            let hi = marks.first { $0.m > s } ?? marks[marks.count - 1]
+            nearLabel = lo.label
+            farLabel = hi.label
+        }
+
+        return (
+            near: (pos: Focus.position(r.near), label: nearLabel),
+            far: (pos: Focus.position(r.far), label: farLabel)
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FOCUS", k: k)
 
-            // Static Bed Dial Track (No box or outline around lines)
+            // Static Bed Dial Track (No box, no ball, lines span end to end)
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
-                let knobRadius: CGFloat = max(h * 0.38, 16 * k)
                 let lineMargin: CGFloat = 2 * k
                 let usableWidth = max(w - lineMargin * 2, 1)
-                let ribH = h - 14 * k
-
-                // Knob aligns with the lines from end to end
-                let knobX = lineMargin + CGFloat(min(max(activePosition, 0.0), 1.0)) * usableWidth
+                let ribH = h - 22 * k
+                let touchX = lineMargin + CGFloat(min(max(activePosition, 0.0), 1.0)) * usableWidth
 
                 ZStack(alignment: .leading) {
-                    // Large atmospheric red gradient wash ONLY while actively scrolling across
-                    let glowWidth = max(w * 0.82, knobRadius * 6.0)
+                    // Atmospheric red gradient wash following finger directly
+                    let glowWidth = max(w * 0.82, 110 * k)
                     RoundedRectangle(cornerRadius: 8 * k, style: .continuous)
                         .fill(
                             LinearGradient(
@@ -806,15 +850,17 @@ struct FocusPanel: View {
                             )
                         )
                         .frame(width: glowWidth, height: ribH + 6 * k)
-                        .position(x: knobX, y: h / 2)
+                        .position(x: touchX, y: ribH / 2)
                         .opacity(isScrolling && manual ? 1.0 : 0.0)
                         .animation(.easeInOut(duration: 0.25), value: isScrolling)
                         .allowsHitTesting(false)
 
-                    // Lines with DoF spread (Red in manual, Green in auto, with dock zoom)
+                    // Lines with gentle dock zoom, release ripple & DoF coloring
                     FocusStripLines(
                         focusPosition: activePosition,
                         scrollProgress: isScrolling ? 1.0 : 0.0,
+                        rippleProgress: rippleProgress,
+                        rippleCenter: rippleCenter,
                         manual: manual,
                         dofNear: currentDoFRange.near,
                         dofFar: currentDoFRange.far,
@@ -826,32 +872,44 @@ struct FocusPanel: View {
                     .animation(.easeInOut(duration: 0.22), value: activePosition)
                     .animation(.easeInOut(duration: 0.22), value: currentDoFRange.near)
 
-                    // Red Circle Knob: smooth easeInOut dissolve on release
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: 0xFF2A2A).opacity(0.35))
-                            .frame(width: knobRadius * 2.4, height: knobRadius * 2.4)
-                            .blur(radius: 3 * k)
+                    // DoF boundary markers displayed under the lines on HOLD (shutter pressed)
+                    if (isHeld || (manual && !isScrolling)), let markers = dofBoundaryMarkers {
+                        let leftX = lineMargin + CGFloat(markers.near.pos) * usableWidth
+                        let rightX = lineMargin + CGFloat(markers.far.pos) * usableWidth
+                        let minGap: CGFloat = 34 * k
+                        let actualGap = max(rightX - leftX, minGap)
+                        let midX = (leftX + rightX) / 2
+                        let adjLeftX = min(leftX, midX - actualGap / 2)
+                        let adjRightX = max(rightX, midX + actualGap / 2)
+                        let markerY = ribH + 11 * k
 
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [Color(hex: 0xFF3B30), Color(hex: 0xC70010)],
-                                    center: .center,
-                                    startRadius: 0,
-                                    endRadius: knobRadius
-                                )
-                            )
-                            .frame(width: knobRadius * 2, height: knobRadius * 2)
-                            .overlay(
-                                Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5 * k)
-                            )
+                        ZStack {
+                            VStack(spacing: 2 * k) {
+                                Rectangle()
+                                    .fill(Palette.accent)
+                                    .frame(width: 1.5 * k, height: 4 * k)
+                                Text(markers.near.label)
+                                    .font(AppTypography.mono(size: 13 * k, weight: .bold))
+                                    .foregroundStyle(Palette.accent)
+                                    .lineLimit(1)
+                            }
+                            .position(x: adjLeftX, y: markerY)
+
+                            VStack(spacing: 2 * k) {
+                                Rectangle()
+                                    .fill(Palette.accent)
+                                    .frame(width: 1.5 * k, height: 4 * k)
+                                Text(markers.far.label)
+                                    .font(AppTypography.mono(size: 13 * k, weight: .bold))
+                                    .foregroundStyle(Palette.accent)
+                                    .lineLimit(1)
+                            }
+                            .position(x: adjRightX, y: markerY)
+                        }
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                        .animation(.easeInOut(duration: 0.25), value: isHeld)
+                        .allowsHitTesting(false)
                     }
-                    .position(x: knobX, y: h / 2)
-                    .scaleEffect(isScrolling && manual ? 1.0 : 0.5)
-                    .opacity(isScrolling && manual ? 1.0 : 0.0)
-                    .animation(.easeInOut(duration: 0.25), value: isScrolling)
-                    .allowsHitTesting(false)
                 }
                 .contentShape(Rectangle())
                 .animation(.easeInOut(duration: 0.25), value: isScrolling)
@@ -883,6 +941,11 @@ struct FocusPanel: View {
                             onSlide(newPos)
                         }
                         .onEnded { _ in
+                            rippleCenter = position
+                            rippleProgress = 0.0
+                            withAnimation(.easeOut(duration: 0.45)) {
+                                rippleProgress = 1.0
+                            }
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 isDragging = false
                             }
@@ -900,7 +963,7 @@ struct FocusPanel: View {
                 )
             }
             .padding(.top, 56 * k)
-            .padding(.bottom, 14 * k)
+            .padding(.bottom, 10 * k)
             .padding(.horizontal, 14 * k)
         }
         .overlay(alignment: .topLeading) {

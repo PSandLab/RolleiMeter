@@ -133,6 +133,7 @@ struct ContentView: View {
                         tooClose: tooClose,
                         aperture: resolvedAperture,
                         feet: useFeet,
+                        isHeld: frozenEV != nil,
                         k: k,
                         onBegin: beginFocusDrag,
                         onSlide: slideFocus,
