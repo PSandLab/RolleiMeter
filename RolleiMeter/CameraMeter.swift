@@ -563,6 +563,42 @@ final class CameraMeter: NSObject, ObservableObject,
         return (t, iso, n)
     }
 
+    func sampleFrozenDepth(at pt: CGPoint) -> Double? {
+        dofLock.lock()
+        let pb = frozenDepthPixelBuffer ?? latestDepthPixelBuffer
+        dofLock.unlock()
+        guard let map = pb else { return nil }
+
+        CVPixelBufferLockBaseAddress(map, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
+        let w = CVPixelBufferGetWidth(map)
+        let h = CVPixelBufferGetHeight(map)
+        let bpr = CVPixelBufferGetBytesPerRow(map)
+
+        let sx = Double(pt.x)
+        let sy = Double(pt.y)
+        let r = 0.03
+        var values: [Double] = []
+        let steps = 7
+        for j in 0..<steps {
+            for i in 0..<steps {
+                let u = (Double(i) + 0.5) / Double(steps) * 2 - 1
+                let v = (Double(j) + 0.5) / Double(steps) * 2 - 1
+                let x = min(max(Int((sx + u * r * 0.75) * Double(w)), 0), w - 1)
+                let y = min(max(Int((sy + v * r) * Double(h)), 0), h - 1)
+                let row = base.advanced(by: y * bpr).assumingMemoryBound(to: Float32.self)
+                let d = Double(row[x])
+                if d.isFinite, d > 0.1, d < 8.5 { values.append(d) }
+            }
+        }
+        if values.count >= 3 {
+            values.sort()
+            return values[values.count / 2]
+        }
+        return nil
+    }
+
     func previewSnapshot() -> UIImage? {
         lock.lock()
         let pixelBuffer = latestPreviewPixelBuffer
@@ -707,7 +743,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let delta = deltaOut
 
         let now = CACurrentMediaTime()
-        if now - lastPublish > 0.05 {
+        if now - lastPublish > 0.016 {
             lastPublish = now
             DispatchQueue.main.async { [weak self] in
                 self?.sceneEV = out

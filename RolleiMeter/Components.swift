@@ -185,8 +185,25 @@ final class PreviewView: UIView {
 
     private func applyOrientation() {
         guard let orientation = window?.windowScene?.interfaceOrientation else { return }
-        let isFlipped = orientation == .landscapeLeft
-        let angle: CGFloat = isFlipped ? 180 : 0
+        let angle: CGFloat
+        let isFlipped: Bool
+        switch orientation {
+        case .landscapeLeft:
+            angle = 180
+            isFlipped = true
+        case .landscapeRight:
+            angle = 0
+            isFlipped = false
+        case .portrait:
+            angle = 90
+            isFlipped = false
+        case .portraitUpsideDown:
+            angle = 270
+            isFlipped = true
+        default:
+            angle = 0
+            isFlipped = false
+        }
         if let connection = previewLayer.connection,
            connection.isVideoRotationAngleSupported(angle),
            connection.videoRotationAngle != angle {
@@ -245,6 +262,8 @@ struct ShutterPanel: View {
         return Exposure.result(for: t)
     }
 
+    @State private var position: Double = 0
+
     var body: some View {
         let r = reading
         let index = Self.labels.firstIndex(of: r.label) ?? 0
@@ -252,9 +271,14 @@ struct ShutterPanel: View {
         let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "slow" : "sec")
 
         ZStack(alignment: .top) {
-            ShutterWheel(position: Double(index), labels: Self.labels, tint: tint, sub: sub, k: k)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: index)
+            ShutterWheel(position: position, labels: Self.labels, tint: tint, sub: sub, k: k)
             PanelTitle(text: "SHUTTER", k: k)
+        }
+        .onAppear { position = Double(index) }
+        .onChange(of: index) { _, newIndex in
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                position = Double(newIndex)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Shutter speed")
@@ -907,6 +931,9 @@ struct FocusPanel: View {
                             .position(x: adjRightX, y: markerY)
                         }
                         .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                        .animation(.easeInOut(duration: 0.22), value: markers.near.pos)
+                        .animation(.easeInOut(duration: 0.22), value: markers.far.pos)
+                        .animation(.easeInOut(duration: 0.22), value: aperture.n)
                         .animation(.easeInOut(duration: 0.25), value: isHeld)
                         .allowsHitTesting(false)
                     }

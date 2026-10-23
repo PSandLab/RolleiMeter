@@ -44,6 +44,9 @@ final class Damper: NSObject, ObservableObject {
         guard link == nil else { return }
         last = 0
         let l = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        if #available(iOS 15.0, *) {
+            l.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        }
         l.add(to: .main, forMode: .common)
         link = l
     }
