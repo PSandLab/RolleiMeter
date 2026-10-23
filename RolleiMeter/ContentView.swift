@@ -44,7 +44,7 @@ struct ContentView: View {
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
-    @State private var trayOpen = false
+    @State private var showSettings = false
     @State private var spotActive = false
     @State private var spot = CGPoint(x: 0.5, y: 0.5)
     @State private var focus = CGPoint(x: 0.5, y: 0.5)
@@ -123,8 +123,11 @@ struct ContentView: View {
                     FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
                         .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
 
+                    topBar(k: k)
+                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: 1)
+
                     preview(k: k)
-                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: p ? 7 : 6)
+                        .cell(grid, col: p ? 0 : 3, row: 1, cols: 6, rows: p ? 6 : 5)
 
                     AperturePanel(
                         index: resolvedApertureIndex,
@@ -158,7 +161,6 @@ struct ContentView: View {
                     .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                        .overlay(alignment: .topLeading) { settingsGear(k: k) }
                         .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
                 }
                 .frame(width: grid.size.width, height: grid.size.height)
@@ -198,6 +200,15 @@ struct ContentView: View {
                 UIApplication.shared.isIdleTimerDisabled = false
                 meter.stop()
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet(
+                useDIN: $useDIN,
+                useFeet: $useFeet,
+                calibration: $calibration,
+                armOffset: $armOffset,
+                rawDistance: { meter.distance }
+            )
         }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
@@ -311,10 +322,6 @@ struct ContentView: View {
     private func toggleUnits() {
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.easeInOut(duration: 0.2)) { useFeet.toggle() }
-    }
-
-    private func closeTray() {
-        withAnimation(.easeInOut(duration: 0.3)) { trayOpen = false }
     }
 
     private func pickAperture(_ index: Int) {
@@ -544,23 +551,6 @@ struct ContentView: View {
                     .padding(10)
                     .allowsHitTesting(false)
 
-                if trayOpen {
-                    Color.black.opacity(0.6)
-                        .contentShape(Rectangle())
-                        .onTapGesture { closeTray() }
-                        .transition(.opacity)
-
-                    ControlTray(
-                        useDIN: $useDIN,
-                        useFeet: $useFeet,
-                        calibration: $calibration,
-                        armOffset: $armOffset,
-                        rawDistance: { meter.distance },
-                        onClose: closeTray
-                    )
-                    .padding(12)
-                    .transition(.scale(scale: 0.96).combined(with: .opacity))
-                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -574,26 +564,29 @@ struct ContentView: View {
         }
     }
 
-    /// Small Liquid Glass gear that lives in the HOLD panel, outside the viewfinder.
-    private func settingsGear(k: CGFloat) -> some View {
-        let d = 58 * k
-        return Button {
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-            withAnimation(.easeInOut(duration: 0.3)) { trayOpen.toggle() }
-        } label: {
-            Image(systemName: trayOpen ? "xmark" : "gearshape")
-                .font(.system(size: 26 * k, weight: .medium))
-                .foregroundStyle(trayOpen ? Palette.accent : Palette.dim)
-                .contentTransition(.symbolEffect(.replace))
-                .frame(width: d, height: d)
-                .modifier(GlassCircle())
-                .padding(8)
-                .contentShape(Circle())
+    /// Slim bar above the viewfinder: app name on the left, Liquid Glass gear on the right.
+    private func topBar(k: CGFloat) -> some View {
+        HStack {
+            Text("ROLLEIMETER")
+                .font(AppTypography.next(size: 22 * k, weight: .medium))
+                .tracking(2.6 * k)
+                .foregroundStyle(Palette.dim)
+                .padding(.leading, 17 * k)
+            Spacer()
+            Button {
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 28 * k, weight: .medium))
+                    .foregroundStyle(Palette.text)
+                    .frame(width: 70 * k, height: 70 * k)
+                    .modifier(GlassCircle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
         }
-        .buttonStyle(.plain)
-        .padding(.leading, 9 * k)
-        .padding(.top, 8 * k)
-        .accessibilityLabel("Settings")
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
