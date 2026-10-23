@@ -351,7 +351,6 @@ struct MeterPanel: View {
             PanelTitle(text: "METER", k: k)
                 .allowsHitTesting(false)
         }
-        .liquidPanel(radius: 26 * k)
     }
 }
 
@@ -360,190 +359,64 @@ struct MeterPanel: View {
 struct FilmPanel: View {
     @Binding var isoIndex: Int
     @Binding var useDIN: Bool
-    @Binding var evIndex: Int
     let k: CGFloat
 
+    @State private var dragBase: Int?
+
     private var safeIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
-    private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
 
-    private var isoValue: String {
-        ISOScale.label(ISOScale.values[safeIndex], din: useDIN)
-    }
-
-    private var evValue: String {
-        Fmt.stops(EVComp.values[safeEVIndex])
+    private var readout: String {
+        let value = ISOScale.label(ISOScale.values[safeIndex], din: useDIN)
+        return (useDIN ? "DIN" : "ISO") + "  \u{2022}  " + value
     }
 
     var body: some View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
-
-            VStack(spacing: 2) {
-                HStack(spacing: 4) {
-                    adjustmentButton("minus", label: "Decrease ISO", size: 30) {
-                        stepISO(-1)
-                    }
-                    .disabled(safeIndex == 0)
-
-                    Button {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.easeInOut(duration: 0.18)) { useDIN.toggle() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(useDIN ? "DIN" : "ISO")
-                                .font(.system(size: 11, weight: .medium))
-                                .tracking(0.4)
-                            Text(isoValue)
-                                .font(AppTypography.next(size: 29 * k, weight: .medium))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                        }
+            RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                .fill(Palette.accentInk)
+                .overlay {
+                    Text(readout)
+                        .font(AppTypography.next(size: 34 * k, weight: .medium))
                         .foregroundStyle(Palette.text)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 30)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(useDIN ? "DIN" : "ISO") \(isoValue)")
-                    .accessibilityHint("Tap to switch between ISO and DIN units")
-
-                    adjustmentButton("plus", label: "Increase ISO", size: 30) {
-                        stepISO(1)
-                    }
-                    .disabled(safeIndex == ISOScale.values.count - 1)
-                }
-
-                HStack(spacing: 5) {
-                    Text("EV")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.5)
-                        .foregroundStyle(Palette.accentInk.opacity(0.85))
-
-                    adjustmentButton("minus", label: "Decrease exposure compensation", size: 25) {
-                        stepEV(-1)
-                    }
-                    .disabled(safeEVIndex == 0)
-
-                    Text(evValue)
-                        .font(AppTypography.next(size: 24 * k, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(Palette.accentInk)
+                        .minimumScaleFactor(0.7)
                         .contentTransition(.numericText())
-                        .frame(minWidth: 38)
-                        .accessibilityLabel("Exposure compensation \(evValue) EV")
-
-                    adjustmentButton("plus", label: "Increase exposure compensation", size: 25) {
-                        stepEV(1)
-                    }
-                    .disabled(safeEVIndex == EVComp.values.count - 1)
+                        .animation(.smooth(duration: 0.15), value: readout)
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 26)
-            }
-            .padding(.horizontal, 9 * k)
-            .padding(.top, 48 * k)
+                .padding(.horizontal, 15 * k)
+                .padding(.top, 69 * k)
+                .padding(.bottom, 15 * k)
         }
-        .liquidPanel(radius: 26 * k, fill: Palette.accent, edge: false, glassTint: Palette.accent)
-    }
-
-    private func adjustmentButton(
-        _ symbol: String,
-        label: String,
-        size: CGFloat,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
+        .contentShape(Rectangle())
+        .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
-            action()
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: size == 30 ? 12 : 10, weight: .semibold))
-                .foregroundStyle(Palette.text)
-                .frame(width: size, height: size)
-                .background(Palette.accentInk.opacity(0.18), in: Circle())
-                .contentShape(Circle())
+            withAnimation(.easeInOut(duration: 0.2)) { useDIN.toggle() }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
-
-    private func stepISO(_ direction: Int) {
-        let next = min(max(safeIndex + direction, 0), ISOScale.values.count - 1)
-        guard next != safeIndex else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { isoIndex = next }
-    }
-
-    private func stepEV(_ direction: Int) {
-        let next = min(max(safeEVIndex + direction, 0), EVComp.values.count - 1)
-        guard next != safeEVIndex else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { evIndex = next }
-    }
-}
-
-// MARK: - Exposure compensation scale
-
-struct EVScaleBar: View {
-    @Binding var index: Int
-    let k: CGFloat
-
-    private static let labels = ["\u{2212}2", "\u{2212}1", "0", "+1", "+2"]
-    private static let origin: CGFloat = 0.096
-    private static let stopWidth: CGFloat = 0.2145
-    private static let labelShift: CGFloat = 0.025
-
-    private func fraction(_ value: Double) -> CGFloat {
-        Self.origin + CGFloat(value + 2) * Self.stopWidth
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let safe = min(max(index, 0), EVComp.values.count - 1)
-
-            ZStack(alignment: .topLeading) {
-                ForEach(0..<5, id: \.self) { n in
-                    Text(Self.labels[n])
-                        .font(AppTypography.next(size: 26 * k))
-                        .foregroundStyle(Palette.text.opacity(0.92))
-                        .position(x: (fraction(Double(n - 2)) - Self.labelShift) * w, y: h / 2)
-                }
-                Rectangle()
-                    .fill(Palette.accent)
-                    .frame(width: max(2, 3 * k), height: h)
-                    .position(x: fraction(EVComp.values[safe]) * w, y: h / 2)
-                    .animation(.spring(response: 0.28, dampingFraction: 0.78), value: safe)
-            }
-            .frame(width: w, height: h)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let raw = Double((value.location.x / max(w, 1) - Self.origin) / Self.stopWidth) - 2
-                        let stops = min(max(raw, -2), 2)
-                        let target = Int((stops * 3).rounded()) + EVComp.zeroIndex
-                        guard target != index else { return }
-                        index = target
-                        if target == EVComp.zeroIndex {
-                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-                        } else {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            guard let hundred = ISOScale.values.firstIndex(of: 100), isoIndex != hundred else { return }
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+            isoIndex = hundred
+        }
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    if dragBase == nil { dragBase = safeIndex }
+                    let steps = Int((value.translation.width / (26 * k)).rounded())
+                    let target = min(max((dragBase ?? safeIndex) + steps, 0), ISOScale.values.count - 1)
+                    guard target != isoIndex else { return }
+                    isoIndex = target
+                    if ISOScale.values[target] == 100 {
+                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                    } else {
+                        UISelectionFeedbackGenerator().selectionChanged()
                     }
-            )
-            .simultaneousGesture(
-                TapGesture(count: 2).onEnded {
-                    guard index != EVComp.zeroIndex else { return }
-                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { index = EVComp.zeroIndex }
                 }
-            )
-        }
-        .liquidPanel(radius: 22 * k)
+                .onEnded { _ in dragBase = nil }
+        )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Exposure compensation")
+        .accessibilityLabel("Film speed")
+        .accessibilityValue(readout)
     }
 }
 
@@ -601,7 +474,6 @@ struct AperturePanel: View {
                     .allowsHitTesting(false)
             }
         }
-        .liquidPanel(radius: 26 * k)
         .contentShape(Rectangle())
         .gesture(dragGesture)
         .onAppear {
@@ -765,7 +637,7 @@ struct FocusPanel: View {
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 8 * k) {
-                // Header controls share one row so the title and distance readout align vertically.
+                // Balanced insets keep both touch targets away from the panel edge.
                 HStack(spacing: 0) {
                     Button {
                         stopHaptic.impactOccurred(intensity: 0.6)
@@ -812,6 +684,8 @@ struct FocusPanel: View {
                     }
                 }
                 .frame(height: 44)
+                .padding(.horizontal, 9)
+                .padding(.top, 12 * k)
 
                 // Static Bed Dial Track
                 GeometryReader { geo in
@@ -933,7 +807,6 @@ struct FocusPanel: View {
                 .padding(.bottom, 12 * k)
             }
         }
-        .liquidPanel(radius: 26 * k)
         .onAppear {
             tickHaptic.prepare()
         }
@@ -965,13 +838,8 @@ struct HoldControl: View {
     let k: CGFloat
     let action: () -> Void
 
-    @ViewBuilder
     var body: some View {
-        if #available(iOS 26.0, *) {
-            buttonContent.buttonStyle(.plain)
-        } else {
-            buttonContent.buttonStyle(PressStyle(scale: 0.97))
-        }
+        buttonContent.buttonStyle(PressStyle(scale: 0.97))
     }
 
     private var buttonContent: some View {
@@ -981,9 +849,8 @@ struct HoldControl: View {
         }
     }
 
-    @ViewBuilder
     private var holdLabel: some View {
-        let label = ZStack(alignment: .trailing) {
+        ZStack(alignment: .trailing) {
             Text(frozen ? "hold" : "live")
                 .font(AppTypography.next(size: 29 * k))
                 .foregroundStyle(frozen ? Palette.accent : Palette.dim)
@@ -1002,17 +869,6 @@ struct HoldControl: View {
             .frame(width: 175 * k, height: 175 * k)
             .padding(.trailing, 7 * k)
         }
-
-        if #available(iOS 26.0, *) {
-            label.glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            label
-                .background {
-                    Capsule()
-                        .fill(Palette.panel)
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75))
-                }
-        }
     }
 }
 
@@ -1022,7 +878,6 @@ struct EVChip: View {
     @ObservedObject var damp: Damper
     let frozen: Bool
     let spot: Bool
-    let comp: Double
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1034,9 +889,6 @@ struct EVChip: View {
             }
             Text("EV " + String(format: "%.1f", damp.values[0]))
                 .monospacedDigit()
-            if comp != 0 {
-                Text(Fmt.stops(comp)).foregroundStyle(Palette.accent)
-            }
         }
         .font(AppTypography.font(size: 11, weight: .medium))
         .foregroundStyle(Palette.text)
