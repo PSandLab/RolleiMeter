@@ -565,24 +565,28 @@ struct ContentView: View {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             withAnimation(.easeInOut(duration: 0.3)) { trayOpen.toggle() }
         } label: {
-            Text(trayOpen ? "\u{2715}" : "SET")
-                .font(AppTypography.next(size: 11, weight: .bold))
-                .tracking(trayOpen ? 0 : 1.0)
-                .foregroundStyle(Palette.text)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background {
-                    if #available(iOS 26.0, *) {
-                        Capsule()
-                            .fill(.clear)
-                            .glassEffect(.regular.interactive(), in: Capsule())
-                    } else {
-                        Capsule()
-                            .fill(Color.black.opacity(0.55))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
-                    }
-                }
-                .contentShape(Capsule())
+            settingsKeyLabel
+        }
+    }
+
+    @ViewBuilder
+    private var settingsKeyLabel: some View {
+        let label = Text(trayOpen ? "\u{2715}" : "SET")
+            .font(AppTypography.next(size: 11, weight: .bold))
+            .tracking(trayOpen ? 0 : 1.0)
+            .foregroundStyle(Palette.text)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .contentShape(Capsule())
+
+        if #available(iOS 26.0, *) {
+            label.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            label.background {
+                Capsule()
+                    .fill(Color.black.opacity(0.55))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
+            }
         }
     }
 

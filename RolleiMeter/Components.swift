@@ -895,41 +895,42 @@ struct HoldControl: View {
 
     private var buttonContent: some View {
         Button(action: action) {
-            ZStack(alignment: .trailing) {
-                capsuleSurface
-
-                Text(frozen ? "hold" : "live")
-                    .font(AppTypography.next(size: 29 * k))
-                    .foregroundStyle(frozen ? Palette.accent : Palette.dim)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 17 * k)
-
-                ZStack {
-                    Circle()
-                        .fill(Color(hex: 0x070707))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
-                    Circle()
-                        .fill(frozen ? Palette.accent : Color.white)
-                        .frame(width: 126 * k, height: 126 * k)
-                        .scaleEffect(frozen ? 0.9 : 1.0)
-                }
-                .frame(width: 175 * k, height: 175 * k)
-                .padding(.trailing, 7 * k)
-            }
-            .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
+            holdLabel
+                .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
         }
     }
 
     @ViewBuilder
-    private var capsuleSurface: some View {
+    private var holdLabel: some View {
+        let label = ZStack(alignment: .trailing) {
+            Text(frozen ? "hold" : "live")
+                .font(AppTypography.next(size: 29 * k))
+                .foregroundStyle(frozen ? Palette.accent : Palette.dim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 17 * k)
+
+            ZStack {
+                Circle()
+                    .fill(Color(hex: 0x070707))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+                Circle()
+                    .fill(frozen ? Palette.accent : Color.white)
+                    .frame(width: 126 * k, height: 126 * k)
+                    .scaleEffect(frozen ? 0.9 : 1.0)
+            }
+            .frame(width: 175 * k, height: 175 * k)
+            .padding(.trailing, 7 * k)
+        }
+
         if #available(iOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: Capsule())
+            label.glassEffect(.regular.interactive(), in: Capsule())
         } else {
-            Capsule()
-                .fill(Palette.panel)
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75))
+            label
+                .background {
+                    Capsule()
+                        .fill(Palette.panel)
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.75))
+                }
         }
     }
 }
