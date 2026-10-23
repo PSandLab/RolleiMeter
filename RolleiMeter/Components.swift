@@ -603,6 +603,84 @@ private struct ApertureWheel: View, Animatable {
 
 // MARK: - Focus (Static Bed Dial with Left-to-Right Knob)
 
+private struct FocusStripLines: View, Animatable {
+    var position: Double
+    var scrollProgress: Double
+    var redLinesProgress: Double
+    let totalTicks: Int
+    let knobRadius: CGFloat
+    let k: CGFloat
+
+    var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
+        get { .init(position, .init(scrollProgress, redLinesProgress)) }
+        set {
+            position = newValue.first
+            scrollProgress = newValue.second.first
+            redLinesProgress = newValue.second.second
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let usableWidth = max(w - (knobRadius * 2), 1)
+            let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
+            let baseRibH = h - 18 * k
+            let zoomRadius = 42 * k
+            let markRadius = 14 * k
+            let lineMargin: CGFloat = 2 * k
+            let linesWidth = max(w - lineMargin * 2, 1)
+
+            Canvas { ctx, size in
+                for i in 0...totalTicks {
+                    let fraction = CGFloat(i) / CGFloat(totalTicks)
+                    let x = lineMargin + fraction * linesWidth
+                    let d = abs(x - knobX)
+
+                    // Gentle macOS dock zoom magnification while scrolling across
+                    var boost: CGFloat = 0
+                    if scrollProgress > 0 && d < zoomRadius {
+                        let t = 1.0 - (d / zoomRadius)
+                        let wCurve = t * t * (3 - 2 * t)
+                        boost = 11 * k * CGFloat(scrollProgress) * wCurve
+                    }
+
+                    let lineH = baseRibH + boost
+                    let topY = (h - lineH) / 2
+                    let botY = topY + lineH
+
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: topY))
+                    path.addLine(to: CGPoint(x: x, y: botY))
+
+                    // Line color: transitions smoothly from white to red at knob position when resting
+                    var r: Double = 1.0
+                    var g: Double = 1.0
+                    var b: Double = 1.0
+                    var alpha: Double = 0.85
+
+                    if redLinesProgress > 0 && d < markRadius {
+                        let t = 1.0 - (d / markRadius)
+                        let redFactor = CGFloat(redLinesProgress) * (t * t)
+                        g = 1.0 - Double(redFactor) * (1.0 - 0.23)
+                        b = 1.0 - Double(redFactor) * (1.0 - 0.19)
+                        alpha = min(1.0, 0.85 + Double(redFactor) * 0.15)
+                    }
+
+                    let lw = max(1.2, 1.8 * k) + (boost > 0 ? 0.6 * k : 0)
+                    ctx.stroke(
+                        path,
+                        with: .color(Color(red: r, green: g, blue: b, opacity: alpha)),
+                        lineWidth: lw
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 struct FocusPanel: View {
     /// 0.0 (closest focus / 0.9m on Left) to 1.0 (infinity on Right)
     let position: Double
@@ -641,7 +719,7 @@ struct FocusPanel: View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FOCUS", k: k)
 
-            // Static Bed Dial Track (No box / border around the lines)
+            // Static Bed Dial Track (No box or outline around lines)
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
@@ -653,55 +731,41 @@ struct FocusPanel: View {
                 let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
 
                 ZStack(alignment: .leading) {
-                    // Gradient ONLY visible while actively scrolling across
+                    // Large atmospheric red gradient wash ONLY while actively scrolling across
                     if isScrolling {
-                        let glowWidth = knobRadius * 3.8
-                        RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
+                        let glowWidth = max(w * 0.82, knobRadius * 6.0)
+                        RoundedRectangle(cornerRadius: 8 * k, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     stops: [
                                         .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 0.0),
-                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.40), location: 0.25),
-                                        .init(color: Color(hex: 0xFF1E1E).opacity(0.85), location: 0.50),
-                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.40), location: 0.75),
+                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.20),
+                                        .init(color: Color(hex: 0xFF1E1E).opacity(0.60), location: 0.50),
+                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.80),
                                         .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 1.0)
                                     ],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                             )
-                            .frame(width: glowWidth, height: ribH)
+                            .frame(width: glowWidth, height: ribH + 6 * k)
                             .position(x: knobX, y: h / 2)
                             .allowsHitTesting(false)
                             .transition(.opacity)
                     }
 
-                    // STATIC Lines - Spanning from 0 to width till the very end (no black space)
-                    Canvas { ctx, size in
-                        let topY = (size.height - ribH) / 2
-                        let botY = topY + ribH
-                        let lineMargin: CGFloat = 2 * k
-                        let linesWidth = max(size.width - lineMargin * 2, 1)
+                    // Lines with gentle macOS dock zoom & red line resting indicator
+                    FocusStripLines(
+                        position: position,
+                        scrollProgress: isScrolling ? 1.0 : 0.0,
+                        redLinesProgress: (manual && !isScrolling) ? 1.0 : 0.0,
+                        totalTicks: totalTicks,
+                        knobRadius: knobRadius,
+                        k: k
+                    )
 
-                        for i in 0...totalTicks {
-                            let fraction = CGFloat(i) / CGFloat(totalTicks)
-                            let x = lineMargin + fraction * linesWidth
-
-                            var path = Path()
-                            path.move(to: CGPoint(x: x, y: topY))
-                            path.addLine(to: CGPoint(x: x, y: botY))
-
-                            ctx.stroke(
-                                path,
-                                with: .color(Color.white.opacity(0.85)),
-                                lineWidth: max(1.2, 1.8 * k)
-                            )
-                        }
-                    }
-                    .allowsHitTesting(false)
-
-                    // Red Circle Knob - ONLY visible when in manual focus
-                    if manual || isDragging || touching {
+                    // Red Circle Knob - ONLY visible while actively dragging/scrolling
+                    if isScrolling {
                         ZStack {
                             Circle()
                                 .fill(Color(hex: 0xFF2A2A).opacity(0.35))
@@ -728,7 +792,8 @@ struct FocusPanel: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .animation(.easeInOut(duration: 0.22), value: isScrolling)
+                .animation(.easeInOut(duration: 0.25), value: isScrolling)
+                .animation(.easeInOut(duration: 0.25), value: manual)
                 .animation(.easeInOut(duration: 0.15), value: position)
                 .gesture(
                     DragGesture(minimumDistance: 0)
