@@ -393,18 +393,6 @@ struct FilmPanel: View {
                     } else {
                         UISelectionFeedbackGenerator().selectionChanged()
                     }
-            )
-        }
-        .onAppear {
-            position = Double(safeSelection)
-            lastDetent = safeSelection
-        }
-        .onChange(of: selection) { _, newValue in
-            guard base == nil else { return }
-            let clamped = Double(min(max(newValue, 0), maxIndex))
-            if abs(position - clamped) > 0.001 {
-                withAnimation(.spring(response: 0.30, dampingFraction: 0.8)) {
-                    position = clamped
                 }
                 .onEnded { _ in dragBase = nil }
         )
@@ -515,6 +503,7 @@ struct AperturePanel: View {
 
     @State private var position: Double = 0
     @State private var base: Double?
+    @State private var moved = false
     @State private var longPressFired = false
     @State private var pressToken = 0
     @State private var lastDetent = -1
@@ -537,7 +526,6 @@ struct AperturePanel: View {
             ApertureWheel(position: position, labels: Rollei.stops.map { $0.label },
                           tint: auto ? lampColor : Palette.text, k: k)
             PanelTitle(text: "APERTURE", k: k)
-                .animation(.easeInOut(duration: 0.2), value: auto)
         }
         .overlay(alignment: .topTrailing) {
             if auto {
@@ -602,14 +590,10 @@ struct AperturePanel: View {
                 moved = false
                 longPressFired = false
 
-                    if fired { return }
-
-                    let flick = Double(value.predictedEndTranslation.height - value.translation.height) / (dragSensitivity * 2.5)
-                    let predicted = position - flick
-                    let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) { position = target }
-                    detent()
-                    onPick(Int(target))
+                if fired { return }
+                if !wasMoved {
+                    onTap()
+                    return
                 }
                 let predicted = start - Double(value.predictedEndTranslation.width / pitch)
                 let target = Double(min(max(Int(rubber(predicted).rounded()), 0), stopCount - 1))
@@ -617,7 +601,6 @@ struct AperturePanel: View {
                 detent()
                 onPick(Int(target))
             }
-        }
     }
 
     private func rubber(_ v: Double) -> Double {
@@ -642,8 +625,8 @@ struct AperturePanel: View {
     private func scheduleHome() {
         pressToken += 1
         let token = pressToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            guard token == pressToken, base != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            guard token == pressToken, base != nil, !moved else { return }
             longPressFired = true
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
