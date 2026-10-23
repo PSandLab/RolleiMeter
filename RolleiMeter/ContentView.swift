@@ -34,7 +34,6 @@ struct ContentView: View {
     @State private var frozenPreviewImage: UIImage?
     @State private var trayOpen = false
     @State private var spotActive = false
-    /// Where the spot and the distance point sit on screen, 0...1 across the viewfinder.
     @State private var spot = CGPoint(x: 0.5, y: 0.5)
     @State private var focus = CGPoint(x: 0.5, y: 0.5)
     @State private var focusPulse = 0
@@ -46,12 +45,11 @@ struct ContentView: View {
     @State private var pinchBase: CGFloat = 0.05
     @State private var blink = false
     @State private var previewSize = CGSize(width: 4, height: 3)
-    /// True when the interface is landscape-left, so the sensor buffer is upside down on screen.
     @State private var flipped = false
-    /// Manual focus. `focusPos` is where the slider sits on the Rollei scale (0 = 0.9 m, 1 = infinity).
-    /// Peaking shows while a finger is on the slider and for a moment after.
+
+    // Manual focus & LiDAR DoF
     @State private var manualFocus = false
-    @State private var focusPos: Double = 1
+    @State private var focusPos: Double = 0.5
     @State private var focusTouching = false
     @State private var peakingVisible = false
     @State private var peakingTask: Task<Void, Never>?
@@ -104,7 +102,6 @@ struct ContentView: View {
                 Palette.background
 
                 ZStack(alignment: .topLeading) {
-                    // Left column
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
                         .cell(grid, col: 0, row: 0, cols: 3, rows: 2)
 
@@ -114,14 +111,12 @@ struct ContentView: View {
                     FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
                         .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
 
-                    // Centre: exposure compensation over the viewfinder
                     EVScaleBar(index: $evIndex, k: k)
                         .cell(grid, col: 3, row: 0, cols: 6, rows: 1)
 
                     preview(k: k)
                         .cell(grid, col: 3, row: 1, cols: 6, rows: 5)
 
-                    // Right column
                     AperturePanel(
                         index: resolvedApertureIndex,
                         auto: autoAperture,
@@ -192,12 +187,6 @@ struct ContentView: View {
                 meter.stop()
             }
         }
-                .onChange(of: apertureStop) {
-            if manualFocus { updateDoFOverlay() }
-        }
-        .onChange(of: autoAperture) {
-            if manualFocus { updateDoFOverlay() }
-        }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
         .onChange(of: spot) { pushConfig() }
@@ -208,6 +197,12 @@ struct ContentView: View {
         .onChange(of: meter.sceneEV) { evDamp.set([ev]) }
         .onChange(of: calibration) { evDamp.set([ev]) }
         .onChange(of: frozenEV) { evDamp.set([ev]) }
+        .onChange(of: apertureStop) { _ in
+            if manualFocus { updateDoFOverlay() }
+        }
+        .onChange(of: autoAperture) { _ in
+            if manualFocus { updateDoFOverlay() }
+        }
         .onChange(of: tooClose) {
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
@@ -256,9 +251,7 @@ struct ContentView: View {
         frozenPreviewImage = nil
     }
 
-    // MARK: - Manual focus
-
-    /// Finger down on the focus slider. Returns where the slide starts: where the lens is now.
+    // MARK: - Manual Focus & LiDAR DoF
 
     private func updateDoFOverlay() {
         let subject = Focus.distance(at: focusPos)
@@ -283,7 +276,6 @@ struct ContentView: View {
 
     private func endFocusDrag() {
         focusTouching = false
-        // Keep LiDAR DoF overlay active while manual focus is set
         updateDoFOverlay()
     }
 
@@ -326,9 +318,6 @@ struct ContentView: View {
         }
     }
 
-    /// Screen point (0...1 across the viewfinder) to the sensor buffer (0...1). The buffer is 4:3
-    /// landscape and fills the viewfinder, so the longer side is cropped. When the interface is
-    /// landscape-left the buffer is upside down relative to the screen.
     private func bufferPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
         let frame: CGFloat = 4.0 / 3.0
         let aspect = size.width / max(size.height, 1)
@@ -348,7 +337,6 @@ struct ContentView: View {
         let radius = 22 * k
         return GeometryReader { geo in
             ZStack {
-                // Anchored to the native 4:3 camera aspect so resizing never lags or flashes black.
                 CameraPreview(
                     session: meter.session,
                     onVolumePress: { toggleFreeze() },
@@ -356,7 +344,7 @@ struct ContentView: View {
                 )
                 .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                    .clipped()
+                .clipped()
 
                 if let frozenPreviewImage {
                     Image(uiImage: frozenPreviewImage)
@@ -504,7 +492,6 @@ struct ContentView: View {
                     .opacity(blink ? 0.9 : 0)
                     .allowsHitTesting(false)
 
-                // Readout and settings key
                 EVChip(damp: evDamp, frozen: frozenEV != nil, spot: spotActive, comp: comp)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(10)
@@ -561,10 +548,7 @@ struct ContentView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel(trayOpen ? "Close settings" : "Open settings")
     }
-
-    // MARK: - Metering mode
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
     private var meterChoice: MeterMode { spotActive ? .spot : baseMode }

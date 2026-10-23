@@ -5,9 +5,6 @@ import UIKit
 
 // MARK: - 12 × 6 grid
 
-/// Every control sits on the 12 × 6 grid from the design. The grid is 1460 × 665 design units
-/// (76-wide columns, 70-high rows, ~50 unit gutters) inside a 1646 × 761 body, scaled by `k`
-/// so the whole thing fits the screen.
 struct LiquidGrid {
     static let designWidth: CGFloat = 1460
     static let designHeight: CGFloat = 665
@@ -16,10 +13,8 @@ struct LiquidGrid {
     private static let colPitch: CGFloat = 126
     private static let rowPitch: CGFloat = 119
 
-    /// Points per design unit.
     let k: CGFloat
 
-    /// Fits the grid to the screen, keeping it clear of the notch / Dynamic Island side insets.
     init(screen: CGSize, insets: EdgeInsets) {
         let sideInset = max(insets.leading, insets.trailing)
         let usableWidth = max(screen.width - 2 * sideInset, 1)
@@ -43,7 +38,6 @@ struct LiquidGrid {
 }
 
 extension View {
-    /// Places the view on the grid. The parent must be a top-leading `ZStack` of the grid's size.
     func cell(_ grid: LiquidGrid, col: Int, row: Int, cols: Int, rows: Int) -> some View {
         let r = grid.rect(col: col, row: row, cols: cols, rows: rows)
         return self
@@ -118,7 +112,6 @@ final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onPress: () -> Void = {}
-    /// Called when the interface turns between the two landscape orientations.
     var onFlip: (Bool) -> Void = { _ in }
 
     private var flipped: Bool?
@@ -134,7 +127,7 @@ final class PreviewView: UIView {
     }
 
     private func setUp() {
-        backgroundColor = .clear // Eliminates black flashes during view resizing.
+        backgroundColor = .clear
         NotificationCenter.default.addObserver(
             self, selector: #selector(sessionStarted),
             name: AVCaptureSession.didStartRunningNotification, object: nil)
@@ -158,9 +151,6 @@ final class PreviewView: UIView {
         applyOrientation()
     }
 
-    /// The sensor is natively landscape (home button on the right). Interface landscape-right shows
-    /// it as is; landscape-left turns the preview over 180°. Metering and LiDAR keep reading the
-    /// native buffer, so the preview is the only thing that turns.
     private func applyOrientation() {
         guard let orientation = window?.windowScene?.interfaceOrientation else { return }
         let isFlipped = orientation == .landscapeLeft
@@ -209,7 +199,6 @@ struct CameraPreview: UIViewRepresentable {
 
 // MARK: - Shutter (read-out wheel)
 
-/// The metered shutter speed. The wheel turns to the Rollei's nearest marked speed.
 struct ShutterPanel: View {
     @ObservedObject var damp: Damper
     let iso: Double
@@ -217,7 +206,6 @@ struct ShutterPanel: View {
     let aperture: (label: String, n: Double)
     let k: CGFloat
 
-    /// Slowest to fastest, left to right.
     private static let labels: [String] = Rollei.speeds.reversed().map { $0.label }
 
     private var reading: ShutterResult {
@@ -282,7 +270,7 @@ private struct ShutterWheel: View, Animatable {
     }
 }
 
-// MARK: - Metering mode (the "lens" choice)
+// MARK: - Metering mode
 
 struct MeterPanel: View {
     let modes: [MeterMode]
@@ -335,7 +323,7 @@ struct MeterPanel: View {
     }
 }
 
-// MARK: - Film speed (the yellow card)
+// MARK: - Film speed
 
 struct FilmPanel: View {
     @Binding var isoIndex: Int
@@ -399,13 +387,6 @@ struct FilmPanel: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Film speed")
         .accessibilityValue(readout)
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: isoIndex = min(safeIndex + 1, ISOScale.values.count - 1)
-            case .decrement: isoIndex = max(safeIndex - 1, 0)
-            @unknown default: break
-            }
-        }
     }
 }
 
@@ -416,10 +397,8 @@ struct EVScaleBar: View {
     let k: CGFloat
 
     private static let labels = ["\u{2212}2", "\u{2212}1", "0", "+1", "+2"]
-    /// Where −2 sits along the bar, and the distance between whole stops (fractions of the width).
     private static let origin: CGFloat = 0.096
     private static let stopWidth: CGFloat = 0.2145
-    /// The labels sit just left of their tick, so the marker never covers a number.
     private static let labelShift: CGFloat = 0.025
 
     private func fraction(_ value: Double) -> CGFloat {
@@ -473,18 +452,10 @@ struct EVScaleBar: View {
         .liquidPanel(radius: 22 * k)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Exposure compensation")
-        .accessibilityValue(Fmt.stops(EVComp.values[min(max(index, 0), EVComp.values.count - 1)]) + " stops")
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: index = min(index + 1, EVComp.values.count - 1)
-            case .decrement: index = max(index - 1, 0)
-            @unknown default: break
-            }
-        }
     }
 }
 
-// MARK: - Aperture (the "frame" wheel)
+// MARK: - Aperture wheel
 
 enum AutoLampState {
     case off, good, slow, bad
@@ -549,16 +520,6 @@ struct AperturePanel: View {
             guard base == nil else { return }
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                 position = Double(newValue)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Aperture")
-        .accessibilityValue("f/" + Rollei.stops[min(max(index, 0), stopCount - 1)].label + (auto ? ", auto" : ""))
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: onPick(min(index + 1, stopCount - 1))
-            case .decrement: onPick(max(index - 1, 0))
-            @unknown default: break
             }
         }
     }
@@ -673,8 +634,6 @@ private struct ApertureWheel: View, Animatable {
 
 // MARK: - Focus (Static Bed Dial with Left-to-Right Knob)
 
-/// Static vertical lines with a Red Circle knob that slides Left (0.9m) to Right (Infinity).
-/// The red band displays the depth of field at the selected aperture.
 struct FocusPanel: View {
     /// 0.0 (closest focus / 0.9m on Left) to 1.0 (infinity on Right)
     let position: Double
@@ -748,10 +707,8 @@ struct FocusPanel: View {
 
                             RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
                                 .fill(Color(hex: 0xFF1E1E).opacity(0.35))
-                                .frame(width: bandW, height: h - 12 * k)
+                                .frame(width: bandW, height: max(h - 12 * k, 1))
                                 .position(x: leftX + bandW / 2, y: h / 2)
-                                .animation(.spring(response: 0.28, dampingFraction: 0.82), value: band.near)
-                                .animation(.spring(response: 0.28, dampingFraction: 0.82), value: band.far)
                         }
 
                         // STATIC Lines (Do NOT scroll)
@@ -768,7 +725,6 @@ struct FocusPanel: View {
                                 path.move(to: CGPoint(x: x, y: topY))
                                 path.addLine(to: CGPoint(x: x, y: botY))
 
-                                // Major tick markers at ends and center
                                 let isMajor = (i == 0 || i == totalTicks || i == totalTicks / 2)
                                 let alpha = isMajor ? 0.70 : 0.28
                                 let lineWidth = isMajor ? max(1.5, 2.0 * k) : max(1.0, 1.2 * k)
@@ -800,19 +756,18 @@ struct FocusPanel: View {
                                 )
                         }
                         .position(x: knobX, y: h / 2)
-                        .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.86), value: knobX)
                         .allowsHitTesting(false)
                     }
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
+                                guard available else { return }
                                 if !isDragging {
                                     isDragging = true
                                     _ = onBegin()
                                 }
 
-                                // Linear Left-to-Right mapping: 0.0 at Left, 1.0 at Right
                                 let rawPos = Double((value.location.x - knobRadius) / usableWidth)
                                 let newPos = min(max(rawPos, 0.0), 1.0)
 
@@ -835,6 +790,7 @@ struct FocusPanel: View {
                     )
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
+                            guard available else { return }
                             stopHaptic.impactOccurred(intensity: 0.8)
                             onAuto()
                         }
@@ -871,7 +827,8 @@ struct FocusPanel: View {
     }
 }
 
-/// The pure red LiDAR depth-of-field overlay (No edge lines, no screen dimming).
+// MARK: - Peaking overlay (Pure LiDAR DoF wash)
+
 struct PeakingOverlay: View {
     @ObservedObject var feed: PeakingFeed
 
@@ -887,7 +844,6 @@ struct PeakingOverlay: View {
         .accessibilityHidden(true)
     }
 }
-
 
 // MARK: - Hold button
 
@@ -924,7 +880,6 @@ struct HoldControl: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
         }
         .buttonStyle(PressStyle(scale: 0.97))
-        .accessibilityLabel(frozen ? "Unfreeze exposure" : "Freeze exposure")
     }
 }
 
