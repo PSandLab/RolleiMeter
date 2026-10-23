@@ -604,19 +604,23 @@ private struct ApertureWheel: View, Animatable {
 // MARK: - Focus (Static Bed Dial with Left-to-Right Knob)
 
 private struct FocusStripLines: View, Animatable {
-    var position: Double
+    var focusPosition: Double
     var scrollProgress: Double
-    var redLinesProgress: Double
+    var manual: Bool
+    var dofNear: Double
+    var dofFar: Double
+    var hasMeasurement: Bool
+    var isTooClose: Bool
     let totalTicks: Int
-    let knobRadius: CGFloat
     let k: CGFloat
 
-    var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
-        get { .init(position, .init(scrollProgress, redLinesProgress)) }
+    var animatableData: AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, Double>>> {
+        get { .init(focusPosition, .init(scrollProgress, .init(dofNear, dofFar))) }
         set {
-            position = newValue.first
+            focusPosition = newValue.first
             scrollProgress = newValue.second.first
-            redLinesProgress = newValue.second.second
+            dofNear = newValue.second.second.first
+            dofFar = newValue.second.second.second
         }
     }
 
@@ -624,13 +628,11 @@ private struct FocusStripLines: View, Animatable {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let usableWidth = max(w - (knobRadius * 2), 1)
-            let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
-            let baseRibH = h - 18 * k
-            let zoomRadius = 42 * k
-            let markRadius = 14 * k
             let lineMargin: CGFloat = 2 * k
             let linesWidth = max(w - lineMargin * 2, 1)
+            let knobX = lineMargin + CGFloat(min(max(focusPosition, 0.0), 1.0)) * linesWidth
+            let baseRibH = h - 18 * k
+            let zoomRadius = 42 * k
 
             Canvas { ctx, size in
                 for i in 0...totalTicks {
@@ -654,21 +656,56 @@ private struct FocusStripLines: View, Animatable {
                     path.move(to: CGPoint(x: x, y: topY))
                     path.addLine(to: CGPoint(x: x, y: botY))
 
-                    // Line color: transitions smoothly from white to red at knob position when resting
+                    // Default white line
                     var r: Double = 1.0
                     var g: Double = 1.0
                     var b: Double = 1.0
                     var alpha: Double = 0.85
+                    var lw = max(1.2, 1.8 * k) + (boost > 0 ? 0.6 * k : 0)
 
-                    if redLinesProgress > 0 && d < markRadius {
-                        let t = 1.0 - (d / markRadius)
-                        let redFactor = CGFloat(redLinesProgress) * (t * t)
-                        g = 1.0 - Double(redFactor) * (1.0 - 0.23)
-                        b = 1.0 - Double(redFactor) * (1.0 - 0.19)
-                        alpha = min(1.0, 0.85 + Double(redFactor) * 0.15)
+                    if manual {
+                        // Manual Mode: Lines inside depth of field turn RED when resting
+                        if scrollProgress < 0.95 {
+                            let inDoF = fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
+                            if inDoF {
+                                let restingFactor = 1.0 - scrollProgress
+                                let distToFocus = abs(fraction - focusPosition)
+                                let centerBonus = max(0.0, 1.0 - distToFocus / max(0.05, (dofFar - dofNear) * 0.5))
+                                r = 1.0
+                                g = 1.0 - restingFactor * (1.0 - 0.23)
+                                b = 1.0 - restingFactor * (1.0 - 0.19)
+                                alpha = min(1.0, 0.85 + restingFactor * 0.15)
+                                if centerBonus > 0.6 {
+                                    lw += 0.4 * k
+                                }
+                            }
+                        }
+                    } else {
+                        // Auto Mode: Green lines reflecting measurement and DoF in real-time
+                        if isTooClose {
+                            if fraction <= 0.12 {
+                                r = 1.0
+                                g = 0.27
+                                b = 0.23
+                                alpha = 1.0
+                            }
+                        } else if hasMeasurement {
+                            let inDoF = fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
+                            if inDoF {
+                                let distToFocus = abs(fraction - focusPosition)
+                                let centerBonus = max(0.0, 1.0 - distToFocus / max(0.06, (dofFar - dofNear) * 0.5))
+                                // Luminous Apple Green
+                                r = 0.19
+                                g = 0.82 + 0.14 * centerBonus
+                                b = 0.35
+                                alpha = min(1.0, 0.88 + 0.12 * centerBonus)
+                                if centerBonus > 0.5 {
+                                    lw += 0.4 * k
+                                }
+                            }
+                        }
                     }
 
-                    let lw = max(1.2, 1.8 * k) + (boost > 0 ? 0.6 * k : 0)
                     ctx.stroke(
                         path,
                         with: .color(Color(red: r, green: g, blue: b, opacity: alpha)),
@@ -715,6 +752,26 @@ struct FocusPanel: View {
         return lidarDistance
     }
 
+    private var activePosition: Double {
+        if manual { return position }
+        if let d = lidarDistance { return Focus.position(d) }
+        return 1.0
+    }
+
+    private var currentDoFRange: (near: Double, far: Double) {
+        let s: Double? = manual ? Focus.distance(at: position) : lidarDistance
+        if let dist = s, dist >= Focus.nearest - 0.001 {
+            let r = DepthOfField.range(subject: dist, n: aperture.n)
+            return (Focus.position(r.near), Focus.position(r.far))
+        } else if !manual, let dist = s, dist < Focus.nearest {
+            return (0.0, 0.08)
+        } else if !manual && lidarDistance == nil {
+            let r = DepthOfField.range(subject: .infinity, n: aperture.n)
+            return (Focus.position(r.near), 1.0)
+        }
+        return (0.0, 0.0)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FOCUS", k: k)
@@ -724,77 +781,81 @@ struct FocusPanel: View {
                 let w = geo.size.width
                 let h = geo.size.height
                 let knobRadius: CGFloat = max(h * 0.38, 16 * k)
-                let usableWidth = max(w - (knobRadius * 2), 1)
+                let lineMargin: CGFloat = 2 * k
+                let usableWidth = max(w - lineMargin * 2, 1)
                 let ribH = h - 14 * k
 
-                // Left is 0.0 (0.9m), Right is 1.0 (Infinity)
-                let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
+                // Knob aligns with the lines from end to end
+                let knobX = lineMargin + CGFloat(min(max(activePosition, 0.0), 1.0)) * usableWidth
 
                 ZStack(alignment: .leading) {
                     // Large atmospheric red gradient wash ONLY while actively scrolling across
-                    if isScrolling {
-                        let glowWidth = max(w * 0.82, knobRadius * 6.0)
-                        RoundedRectangle(cornerRadius: 8 * k, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 0.0),
-                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.20),
-                                        .init(color: Color(hex: 0xFF1E1E).opacity(0.60), location: 0.50),
-                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.80),
-                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 1.0)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                    let glowWidth = max(w * 0.82, knobRadius * 6.0)
+                    RoundedRectangle(cornerRadius: 8 * k, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 0.0),
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.20),
+                                    .init(color: Color(hex: 0xFF1E1E).opacity(0.60), location: 0.50),
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.80),
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 1.0)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
-                            .frame(width: glowWidth, height: ribH + 6 * k)
-                            .position(x: knobX, y: h / 2)
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
-                    }
+                        )
+                        .frame(width: glowWidth, height: ribH + 6 * k)
+                        .position(x: knobX, y: h / 2)
+                        .opacity(isScrolling && manual ? 1.0 : 0.0)
+                        .animation(.easeInOut(duration: 0.25), value: isScrolling)
+                        .allowsHitTesting(false)
 
-                    // Lines with gentle macOS dock zoom & red line resting indicator
+                    // Lines with DoF spread (Red in manual, Green in auto, with dock zoom)
                     FocusStripLines(
-                        position: position,
+                        focusPosition: activePosition,
                         scrollProgress: isScrolling ? 1.0 : 0.0,
-                        redLinesProgress: (manual && !isScrolling) ? 1.0 : 0.0,
+                        manual: manual,
+                        dofNear: currentDoFRange.near,
+                        dofFar: currentDoFRange.far,
+                        hasMeasurement: subject != nil || !manual,
+                        isTooClose: tooClose,
                         totalTicks: totalTicks,
-                        knobRadius: knobRadius,
                         k: k
                     )
+                    .animation(.easeInOut(duration: 0.22), value: activePosition)
+                    .animation(.easeInOut(duration: 0.22), value: currentDoFRange.near)
 
-                    // Red Circle Knob - ONLY visible while actively dragging/scrolling
-                    if isScrolling {
-                        ZStack {
-                            Circle()
-                                .fill(Color(hex: 0xFF2A2A).opacity(0.35))
-                                .frame(width: knobRadius * 2.4, height: knobRadius * 2.4)
-                                .blur(radius: 3 * k)
+                    // Red Circle Knob: smooth easeInOut dissolve on release
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: 0xFF2A2A).opacity(0.35))
+                            .frame(width: knobRadius * 2.4, height: knobRadius * 2.4)
+                            .blur(radius: 3 * k)
 
-                            Circle()
-                                .fill(
-                                    RadialGradient(
-                                        colors: [Color(hex: 0xFF3B30), Color(hex: 0xC70010)],
-                                        center: .center,
-                                        startRadius: 0,
-                                        endRadius: knobRadius
-                                    )
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [Color(hex: 0xFF3B30), Color(hex: 0xC70010)],
+                                    center: .center,
+                                    startRadius: 0,
+                                    endRadius: knobRadius
                                 )
-                                .frame(width: knobRadius * 2, height: knobRadius * 2)
-                                .overlay(
-                                    Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5 * k)
-                                )
-                        }
-                        .position(x: knobX, y: h / 2)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                            )
+                            .frame(width: knobRadius * 2, height: knobRadius * 2)
+                            .overlay(
+                                Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5 * k)
+                            )
                     }
+                    .position(x: knobX, y: h / 2)
+                    .scaleEffect(isScrolling && manual ? 1.0 : 0.5)
+                    .opacity(isScrolling && manual ? 1.0 : 0.0)
+                    .animation(.easeInOut(duration: 0.25), value: isScrolling)
+                    .allowsHitTesting(false)
                 }
                 .contentShape(Rectangle())
                 .animation(.easeInOut(duration: 0.25), value: isScrolling)
                 .animation(.easeInOut(duration: 0.25), value: manual)
-                .animation(.easeInOut(duration: 0.15), value: position)
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
@@ -806,7 +867,7 @@ struct FocusPanel: View {
                                 _ = onBegin()
                             }
 
-                            let rawPos = Double((value.location.x - knobRadius) / usableWidth)
+                            let rawPos = Double((value.location.x - lineMargin) / usableWidth)
                             let newPos = min(max(rawPos, 0.0), 1.0)
 
                             let tickIndex = Int((newPos * Double(totalTicks)).rounded())
@@ -853,7 +914,7 @@ struct FocusPanel: View {
             } label: {
                 Text(manual ? "MF" : "AF")
                     .font(AppTypography.next(size: 19 * k, weight: .bold))
-                    .foregroundStyle(manual ? Palette.bad : Palette.dim)
+                    .foregroundStyle(manual ? Palette.bad : Palette.good)
                     .padding(.top, 17 * k)
                     .padding(.leading, 18 * k)
                     .contentShape(Rectangle())
@@ -866,7 +927,7 @@ struct FocusPanel: View {
             Button(action: onUnits) {
                 Text(displayDistance)
                     .font(AppTypography.mono(size: 19 * k, weight: .semibold))
-                    .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.dim))
+                    .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.good))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .padding(.top, 17 * k)
