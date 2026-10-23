@@ -14,7 +14,7 @@ Landscape only, both directions. Dark, with nothing hidden behind menus: every c
 - **FILM** (bottom left, yellow). Film speed. **Drag** sideways to change it in thirds of a stop, **tap** to switch ISO / DIN, **hold** to jump back to 100.
 - **EV bar** (top centre). Exposure compensation, -2 to +2 in thirds. Drag along the bar, double-tap to reset to 0.
 - **APERTURE** (top right). Drag sideways to pick f/2.8 to f/22. **Tap** for auto aperture (picks the widest stop that still gives a usable shutter speed; an "A" lights in green / orange / red), **hold** to jump back to f/8.
-- **FOCUS** (middle right, LiDAR iPhones). The Rollei's focus scale sliding under the yellow pointer, with the depth-of-field band for the selected aperture. Marks inside the depth of field turn green. The measured distance is at the top right. **Tap** to switch metres / feet. Closer than 0.9 m / 3 ft it says TOO CLOSE.
+- **FOCUS** (middle right). Manual focus. Put a finger on the panel and **slide left / right**: the lens follows (left = closer, right = further), the knob turns red, and the viewfinder dims and shows everything that is sharp in red (focus peaking). Lift your finger and the red stays for two seconds. **Double-tap** to go back to autofocus. Top left says AF or MF. On LiDAR iPhones the measured distance is at the top right (red inside 0.9 m / 3 ft); tap it to switch metres / feet.
 - **Round button** (bottom right), or a **volume button**, freezes exposure and distance ("hold"). Press again to release.
 - **SET** (top right of the viewfinder): units, calibration and arm offset. Top left of the viewfinder shows EV, HOLD / SPOT and any compensation.
 - Full-screen: status bar and home indicator are hidden (swipe up from the bottom edge to reach the home bar).
@@ -32,5 +32,7 @@ Leave it at 0 and shoot a roll first. To check: in full sun at ISO 100, f/16 sho
 ## Notes
 - The sensor is natively landscape, so metering and LiDAR read it unrotated. Turning the phone between the two landscape orientations only turns the preview.
 - Depth of field uses a 0.03 mm circle of confusion and the Sonnar's 40 mm focal length.
-- LiDAR reads roughly 0.3 m to 5 m. Beyond that the focus scale shows a dash. Non-LiDAR phones show NO LIDAR.
+- LiDAR reads roughly 0.3 m to 5 m. Beyond that the distance readout disappears. Non-LiDAR phones have no distance readout.
+- The focus slider sets the iPhone lens position (0 to 1), which iOS doesn't tie to a distance, so it can't be labelled in metres. Use the peaking to judge focus.
+- Peaking is only calculated while you are using the slider, so it costs nothing the rest of the time. If it lights up too much or too little, change `peakThreshold` at the top of `CameraMeter.swift` (higher = less red).
 - Untested on a device. If something looks wrong, say what it does.

@@ -48,6 +48,13 @@ struct ContentView: View {
     @State private var previewSize = CGSize(width: 4, height: 3)
     /// True when the interface is landscape-left, so the sensor buffer is upside down on screen.
     @State private var flipped = false
+    /// Manual focus: the lens is locked at `lens` (0 closest ... 1 furthest). Peaking shows while a
+    /// finger is on the slider and for a moment after.
+    @State private var manualFocus = false
+    @State private var lens: Double = 0.5
+    @State private var focusTouching = false
+    @State private var peakingVisible = false
+    @State private var peakingTask: Task<Void, Never>?
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
@@ -127,13 +134,20 @@ struct ContentView: View {
                     .cell(grid, col: 9, row: 0, cols: 3, rows: 2)
 
                     FocusPanel(
+                        lensPosition: lens,
+                        manual: manualFocus,
+                        touching: focusTouching,
+                        available: meter.canFocusManually,
                         distance: shownDistance,
                         hasLiDAR: meter.hasLiDAR,
-                        aperture: resolvedAperture,
                         tooClose: tooClose,
                         feet: useFeet,
                         k: k,
-                        onTap: toggleUnits
+                        onBegin: beginFocusDrag,
+                        onSlide: slideFocus,
+                        onEnd: endFocusDrag,
+                        onAuto: resumeAutoFocus,
+                        onUnits: toggleUnits
                     )
                     .cell(grid, col: 9, row: 2, cols: 3, rows: 2)
 
@@ -235,6 +249,44 @@ struct ContentView: View {
         frozenPreviewImage = nil
     }
 
+    // MARK: - Manual focus
+
+    /// Finger down on the focus slider. Returns where the slide starts: the lens where it is now.
+    private func beginFocusDrag() -> Double {
+        peakingTask?.cancel()
+        if !manualFocus { lens = Double(meter.currentLensPosition()) }
+        focusTouching = true
+        meter.setPeaking(true)
+        withAnimation(.easeOut(duration: 0.15)) { peakingVisible = true }
+        return lens
+    }
+
+    private func slideFocus(_ position: Double) {
+        if !manualFocus { manualFocus = true }
+        lens = position
+        meter.setManualFocus(Float(position))
+    }
+
+    private func endFocusDrag() {
+        focusTouching = false
+        peakingTask?.cancel()
+        peakingTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.4)) { peakingVisible = false }
+            meter.setPeaking(false)
+        }
+    }
+
+    private func resumeAutoFocus() {
+        peakingTask?.cancel()
+        manualFocus = false
+        focusTouching = false
+        meter.resumeAutoFocus()
+        withAnimation(.easeOut(duration: 0.3)) { peakingVisible = false }
+        meter.setPeaking(false)
+    }
+
     private func toggleUnits() {
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.easeInOut(duration: 0.2)) { useFeet.toggle() }
@@ -311,6 +363,13 @@ struct ContentView: View {
                 } else if frozenEV != nil {
                     Color.black.opacity(0.35)
                         .allowsHitTesting(false)
+                }
+
+                if peakingVisible && frozenEV == nil {
+                    PeakingOverlay(feed: meter.peakingFeed)
+                        .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
+                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                        .transition(.opacity)
                 }
 
                 Color.clear
@@ -398,7 +457,7 @@ struct ContentView: View {
                 if showHint {
                     VStack(spacing: 4) {
                         Text("Tap: distance   \u{00B7}   Hold: spot meter")
-                        Text("Tap aperture: auto   \u{00B7}   Tap focus: m / ft")
+                        Text("Tap aperture: auto   \u{00B7}   Slide focus: manual")
                     }
                     .font(AppTypography.next(size: 11, weight: .medium))
                     .foregroundStyle(Palette.lensLight)

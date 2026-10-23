@@ -671,223 +671,217 @@ private struct ApertureWheel: View, Animatable {
     }
 }
 
-// MARK: - Focus (LiDAR distance against the Rollei's focus scale)
+// MARK: - Focus (manual focus slider)
 
+/// Where a tick sits along the track for a position 0...1 on the scale. Ticks crowd toward the far
+/// (infinity) end, the way a focus ring's marks do.
+private func focusWarp(_ t: Double) -> Double { 1 - pow(1 - min(max(t, 0), 1), 1.15) }
+private func focusUnwarp(_ u: Double) -> Double { 1 - pow(1 - min(max(u, 0), 1), 1 / 1.15) }
+
+/// Manual focus. Put a finger on the panel and slide: the lens follows, and the viewfinder shows
+/// whatever is sharp in red. Double-tap returns to autofocus.
 struct FocusPanel: View {
+    /// 0 = closest focus, 1 = furthest. A normalised lens position, not a distance.
+    let lensPosition: Double
+    let manual: Bool
+    let touching: Bool
+    let available: Bool
     let distance: Double?
     let hasLiDAR: Bool
-    let aperture: (label: String, n: Double)
     let tooClose: Bool
     let feet: Bool
     let k: CGFloat
-    let onTap: () -> Void
+    /// Finger down. Returns the lens position the slide starts from.
+    let onBegin: () -> Double
+    let onSlide: (Double) -> Void
+    let onEnd: () -> Void
+    let onAuto: () -> Void
+    let onUnits: () -> Void
+
+    @State private var baseU: Double?
+    @State private var lastDetent = -1
+
+    private let tickCount = 28
+
+    /// The knob travels this far: the inner width of a 3-column panel minus the knob.
+    private var trackWidth: CGFloat { max((298 - 100) * k, 1) }
 
     var body: some View {
         ZStack(alignment: .top) {
-            content
-                .padding(.horizontal, 15 * k)
-                .padding(.top, 69 * k)
-                .padding(.bottom, 15 * k)
+            FocusSliderFace(
+                position: lensPosition,
+                heat: touching ? 1 : 0,
+                showKnob: manual || touching,
+                tickCount: tickCount,
+                k: k
+            )
+            .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.85), value: lensPosition)
+            .animation(.easeOut(duration: 0.22), value: touching)
+            .padding(.horizontal, 15 * k)
+            .padding(.top, 69 * k)
+            .padding(.bottom, 15 * k)
+
             PanelTitle(text: "FOCUS", k: k)
-            if hasLiDAR, !tooClose, let distance {
-                Text(Fmt.distance(distance, feet: feet))
-                    .font(AppTypography.font(size: 22 * k, weight: .medium))
-                    .foregroundStyle(Palette.dim)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, 21 * k)
-                    .padding(.trailing, 20 * k)
-                    .allowsHitTesting(false)
-            }
+                .allowsHitTesting(false)
         }
-        .liquidPanel(radius: 26 * k)
+        .overlay(alignment: .topLeading) {
+            Text(manual ? "MF" : "AF")
+                .font(AppTypography.next(size: 20 * k, weight: .semibold))
+                .foregroundStyle(manual ? Palette.bad : Palette.dim)
+                .padding(.top, 21 * k)
+                .padding(.leading, 20 * k)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topTrailing) {
+            distanceLabel
+                .padding(.top, 12 * k)
+                .padding(.trailing, 12 * k)
+        }
+        .liquidPanel(radius: 26 * k, fill: touching ? Color(hex: 0x050505) : Palette.panel)
+        .animation(.easeOut(duration: 0.22), value: touching)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-        .accessibilityElement(children: .contain)
+        .gesture(drag)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                guard available, manual else { return }
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                onAuto()
+            }
+        )
+        .accessibilityLabel("Manual focus")
+        .accessibilityValue(manual ? "\(Int((lensPosition * 100).rounded())) percent" : "Auto")
+        .accessibilityAdjustableAction { direction in
+            guard available else { return }
+            let start = onBegin()
+            let step = direction == .increment ? 0.04 : -0.04
+            onSlide(min(max(start + step, 0), 1))
+            onEnd()
+        }
     }
 
     @ViewBuilder
-    private var content: some View {
-        if !hasLiDAR {
-            Text("NO LIDAR")
-                .font(AppTypography.next(size: 24 * k, weight: .medium))
-                .tracking(1.5 * k)
-                .foregroundStyle(Palette.dim)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if tooClose {
-            Text("TOO CLOSE")
-                .font(AppTypography.next(size: 28 * k, weight: .semibold))
-                .tracking(1.5 * k)
-                .foregroundStyle(Palette.bad)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let distance {
-            FocusRingScale(distance: distance, aperture: aperture, feet: feet, k: k)
-        } else {
-            VStack(spacing: 4 * k) {
-                Text("\u{2014}")
-                    .font(AppTypography.mono(size: 40 * k, weight: .medium))
-                    .foregroundStyle(Palette.dim)
-                Text("OUT OF RANGE")
-                    .font(AppTypography.next(size: 20 * k, weight: .medium))
-                    .tracking(1.2 * k)
-                    .foregroundStyle(Palette.faint)
+    private var distanceLabel: some View {
+        if hasLiDAR, let distance {
+            Button(action: onUnits) {
+                Text(Fmt.distance(distance, feet: feet))
+                    .font(AppTypography.font(size: 20 * k, weight: .medium))
+                    .foregroundStyle(tooClose ? Palette.bad : Palette.dim)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(8 * k)
+                    .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Distance")
+            .accessibilityHint("Switches metres and feet")
         }
     }
-}
 
-private struct FocusRingScale: View {
-    let distance: Double
-    let aperture: (label: String, n: Double)
-    let feet: Bool
-    let k: CGFloat
-
-    private var marks: [(label: String, m: Double)] {
-        feet ? Focus.feetMarks : Focus.meterMarks
-    }
-
-    private var depthRange: (near: Double, far: Double) {
-        DepthOfField.range(subject: distance, n: aperture.n)
-    }
-
-    private var recommendedFocus: String {
-        let advice = Focus.advice(subject: distance, aperture: aperture.n, feet: feet)
-        return advice.sharp ? advice.label : "between \(advice.lo) and \(advice.hi)"
-    }
-
-    var body: some View {
-        FocusDialFace(
-            position: Focus.position(distance),
-            near: Focus.position(depthRange.near),
-            far: Focus.position(depthRange.far),
-            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) },
-            k: k
-        )
-        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: distance)
-        .animation(.spring(response: 0.62, dampingFraction: 0.86), value: aperture.n)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Focus ring. Set \(recommendedFocus). Depth of field at f/\(aperture.label).")
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard available else { return }
+                if baseU == nil {
+                    baseU = focusWarp(onBegin())
+                    lastDetent = -1
+                }
+                guard let u0 = baseU, abs(value.translation.width) > 3 else { return }
+                let u = min(max(u0 + Double(value.translation.width / trackWidth), 0), 1)
+                let s = focusUnwarp(u)
+                onSlide(s)
+                let detent = Int((s * Double(tickCount - 1)).rounded())
+                if detent != lastDetent {
+                    lastDetent = detent
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            }
+            .onEnded { _ in
+                guard baseU != nil else { return }
+                baseU = nil
+                onEnd()
+            }
     }
 }
 
-/// A tape of fine vertical ticks under a fixed yellow pointer. Marks inside the depth of field
-/// turn green; the green band behind them is the depth of field itself.
-private struct FocusDialFace: View, Animatable {
+/// Fine vertical ticks, and a knob that glows red while a finger is on it. The ticks near the knob
+/// pick up the red.
+private struct FocusSliderFace: View, Animatable {
     var position: Double
-    var near: Double
-    var far: Double
-    let marks: [(label: String, p: Double)]
+    var heat: Double
+    let showKnob: Bool
+    let tickCount: Int
     let k: CGFloat
 
-    var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
-        get { AnimatablePair(position, AnimatablePair(near, far)) }
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(position, heat) }
         set {
             position = newValue.first
-            near = newValue.second.first
-            far = newValue.second.second
+            heat = newValue.second
         }
     }
 
     var body: some View {
-        Canvas { context, size in
-            drawDial(&context, size)
+        Canvas { ctx, size in
+            let knobR = min(50 * k, size.height / 2)
+            let knobX = knobR + CGFloat(focusWarp(position)) * (size.width - 2 * knobR)
+            let midY = size.height / 2
+            let edge = 6 * k
+            let tickWidth = max(1, 1.7 * k)
+            let tickHeight = size.height * 0.74
+            let red = Color(hex: 0xFF1A1A)
+
+            if heat > 0.01 {
+                var glow = ctx
+                glow.translateBy(x: knobX, y: midY)
+                glow.scaleBy(x: 2.6, y: 1)
+                let radius = knobR * 0.95
+                glow.fill(
+                    Path(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2)),
+                    with: .radialGradient(
+                        Gradient(colors: [red.opacity(0.62 * heat), red.opacity(0)]),
+                        center: .zero, startRadius: 0, endRadius: radius))
+            }
+
+            for i in 0..<tickCount {
+                let t = Double(i) / Double(tickCount - 1)
+                let x = edge + CGFloat(focusWarp(t)) * (size.width - 2 * edge)
+                let near = max(0, 1 - Double(abs(x - knobX) / (knobR * 2.2)))
+                let w = heat * near
+                let color = Color(red: 1, green: 1 - 0.92 * w, blue: 1 - 0.92 * w)
+                var tick = Path()
+                tick.move(to: CGPoint(x: x, y: midY - tickHeight / 2))
+                tick.addLine(to: CGPoint(x: x, y: midY + tickHeight / 2))
+                ctx.stroke(tick, with: .color(color.opacity(0.92)), lineWidth: tickWidth)
+            }
+
+            if showKnob {
+                let rect = CGRect(x: knobX - knobR, y: midY - knobR, width: knobR * 2, height: knobR * 2)
+                let knob = Path(ellipseIn: rect)
+                ctx.fill(knob, with: .color(Color(red: 0.25 + 0.75 * heat,
+                                                  green: 0.25 - 0.23 * heat,
+                                                  blue: 0.25 - 0.23 * heat)))
+                ctx.stroke(knob, with: .color(Color.black.opacity(0.7)), lineWidth: max(1, 1.4 * k))
+            }
         }
-        .clipped()
         .allowsHitTesting(false)
     }
+}
 
-    private func zoom(width: CGFloat) -> CGFloat {
-        let span = max(far - near, 0.006)
-        let wanted: CGFloat = width * 0.55 / CGFloat(span)
-        return min(max(wanted, width * 1.15), width * 8)
-    }
+/// The red focus-peaking layer drawn over the viewfinder, on a dimmed image so the red reads.
+struct PeakingOverlay: View {
+    @ObservedObject var feed: PeakingFeed
 
-    private func drawDial(_ context: inout GraphicsContext, _ size: CGSize) {
-        let cx: CGFloat = size.width / 2
-        let h: CGFloat = size.height
-        let numberY: CGFloat = h * 0.24
-        let markTop: CGFloat = h * 0.50
-        let baseline: CGFloat = h
-        let fadeWidth: CGFloat = 36 * k
-        let ppu: CGFloat = zoom(width: size.width)
-        let fineRaw: CGFloat = (ppu / 60 - 4) / 3
-        let fine: Double = Double(min(max(fineRaw, 0), 1))
-        let tickWidth: CGFloat = max(1, 1.8 * k)
-
-        func x(_ p: Double) -> CGFloat {
-            return cx + CGFloat(p - position) * ppu
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.38)
+            if let image = feed.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+            }
         }
-        func fade(_ px: CGFloat) -> Double {
-            let edge: CGFloat = min(px, size.width - px)
-            return Double(min(max(edge / fadeWidth, 0), 1))
-        }
-
-        let nearX: CGFloat = x(near)
-        let farX: CGFloat = x(far)
-        let left: CGFloat = min(nearX, farX)
-        let right: CGFloat = max(nearX, farX)
-        let bandTop: CGFloat = markTop - 5 * k
-        if right - left > 1.5 {
-            let width: CGFloat = right - left
-            context.fill(
-                Path(roundedRect: CGRect(x: left, y: bandTop, width: width, height: baseline - bandTop),
-                     cornerRadius: 3 * k),
-                with: .color(Palette.good.opacity(0.16)))
-            context.fill(
-                Path(roundedRect: CGRect(x: left, y: bandTop, width: max(width, 2.5), height: max(2, 4 * k)),
-                     cornerRadius: 1.5),
-                with: .color(Palette.good.opacity(0.85)))
-        }
-
-        let markPositions: [Double] = marks.map { $0.p }
-        for i in 0...60 {
-            let p: Double = Double(i) / 60.0
-            if markPositions.contains(where: { abs($0 - p) < 0.003 }) { continue }
-            let major: Bool = i % 5 == 0
-            let strength: Double = major ? 1.0 : fine
-            if strength <= 0 { continue }
-            let px: CGFloat = x(p)
-            let f: Double = fade(px)
-            if f <= 0 { continue }
-            let span: CGFloat = baseline - markTop
-            let tickHeight: CGFloat = major ? span * 0.8 : span * 0.5
-            var tick = Path()
-            tick.move(to: CGPoint(x: px, y: baseline))
-            tick.addLine(to: CGPoint(x: px, y: baseline - tickHeight))
-            context.stroke(tick, with: .color(Palette.text.opacity(f * strength * 0.62)), lineWidth: tickWidth)
-        }
-
-        var lastRight: CGFloat = -CGFloat.greatestFiniteMagnitude
-        for mark in marks {
-            let px: CGFloat = x(mark.p)
-            let f: Double = fade(px)
-            if f <= 0 { continue }
-            let inside: Bool = mark.p >= near - 0.004 && mark.p <= far + 0.004
-            let color: Color = inside ? Palette.good : Palette.text
-            var tick = Path()
-            tick.move(to: CGPoint(x: px, y: baseline))
-            tick.addLine(to: CGPoint(x: px, y: markTop))
-            context.stroke(tick, with: .color(color.opacity(f)), lineWidth: tickWidth * (inside ? 1.6 : 1.3))
-
-            let underPointer: Bool = abs(mark.p - position) < 0.012
-            let label = Text(mark.label)
-                .font(AppTypography.bold(size: (underPointer ? 38 : 32) * k))
-                .foregroundColor(color.opacity(f))
-            let text = context.resolve(label)
-            let textWidth: CGFloat = text.measure(in: CGSize(width: 400, height: 80)).width
-
-            guard underPointer || px - textWidth / 2 > lastRight + 4 else { continue }
-            context.draw(text, at: CGPoint(x: px, y: numberY), anchor: .center)
-            lastRight = px + textWidth / 2
-        }
-
-        // The pointer: a yellow line through the tape, like the EV marker.
-        var pointer = Path()
-        pointer.move(to: CGPoint(x: cx, y: markTop - 8 * k))
-        pointer.addLine(to: CGPoint(x: cx, y: baseline))
-        context.stroke(pointer, with: .color(Palette.accent),
-                       style: StrokeStyle(lineWidth: max(2, 3 * k), lineCap: .butt))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
