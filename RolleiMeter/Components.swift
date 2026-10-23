@@ -334,7 +334,7 @@ private struct SimpleFocusColumn: View {
             }
             .foregroundStyle(mutedInk)
             .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.bottom, 2)
 
             if !hasLiDAR {
                 Text("NO LIDAR")
@@ -348,8 +348,17 @@ private struct SimpleFocusColumn: View {
                     .foregroundStyle(warnRed)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let distance {
-                FocusRingScale(distance: distance, aperture: aperture, feet: feet)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 2) {
+                    FocusRingScale(distance: distance, aperture: aperture, feet: feet)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Clean live distance readout at the bottom of the column (NO overlap with dial)
+                    Text(Fmt.distance(distance, feet: feet))
+                        .font(AppTypography.mono(size: 11, weight: .bold))
+                        .foregroundStyle(Palette.mutedInk)
+                        .frame(height: 14)
+                        .padding(.bottom, 4)
+                }
             } else {
                 VStack(spacing: 3) {
                     Text("—")
@@ -393,11 +402,9 @@ private struct FocusRingScale: View {
             position: Focus.position(distance),
             near: Focus.position(depthRange.near),
             far: Focus.position(depthRange.far),
-            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) },
-            currentDistance: distance,
-            feet: feet
+            marks: marks.map { (label: $0.label, p: Focus.position($0.m)) }
         )
-        // Silk-smooth easeInOut zoom and rotation animation
+        // Silk-smooth easeInOut dynamic zoom when changing aperture
         .animation(.easeInOut(duration: 0.42), value: distance)
         .animation(.easeInOut(duration: 0.48), value: aperture.n)
         .accessibilityElement(children: .ignore)
@@ -405,13 +412,12 @@ private struct FocusRingScale: View {
     }
 }
 
+// Precision Analog Clock / Chronograph Focus Dial
 private struct FocusDialFace: View, Animatable {
     var position: Double
     var near: Double
     var far: Double
     let marks: [(label: String, p: Double)]
-    let currentDistance: Double
-    let feet: Bool
 
     var animatableData: AnimatablePair<Double, AnimatablePair<Double, Double>> {
         get { AnimatablePair(position, AnimatablePair(near, far)) }
@@ -424,59 +430,57 @@ private struct FocusDialFace: View, Animatable {
 
     var body: some View {
         Canvas { context, size in
-            drawCurvedZoomDial(&context, size)
+            drawClockFaceDial(&context, size)
         }
         .clipped()
     }
 
-    private func drawCurvedZoomDial(_ context: inout GraphicsContext, _ size: CGSize) {
+    private func drawClockFaceDial(_ context: inout GraphicsContext, _ size: CGSize) {
         let cx = size.width / 2
-        // Generous open radius eliminates cramped feel
-        let radius: CGFloat = 132
-        let apexY: CGFloat = 22
+        let radius: CGFloat = 126
+        let apexY: CGFloat = 20
         let cy = apexY + radius
         let center = CGPoint(x: cx, y: cy)
 
         // -------------------------------------------------------------
-        // Dynamic Zoom based on Depth-of-Field (far - near)
+        // Aperture-driven dynamic zoom
         // -------------------------------------------------------------
         let rawDof = abs(far - near)
-        // Intelligent clamp: at fast apertures (tiny DOF), we clamp the minimum
-        // span to 0.14 so nearby lens marks (e.g. 2 and 3) ALWAYS remain visible!
+        // Guard minimum span so nearby lens marks never disappear when zoomed in
         let effectiveSpan = max(rawDof, 0.14)
-        // Angular spread (radians per 1.0 position): scales smoothly with aperture
-        let spread = min(max(1.15 / effectiveSpan, 1.8), 8.2)
+        let spread = min(max(1.15 / effectiveSpan, 1.8), 8.0)
 
-        let maxDev: Double = 0.88 // ~50 degrees visible on each side
+        let maxDev: Double = 0.86 // ~50 degrees visible on each side
 
         func angle(for p: Double) -> Double {
             -Double.pi / 2.0 + (p - position) * spread
         }
 
-        // 1. Subtle hairline arc track (no colored bars)
+        // 1. Clock outer rim track
         let trackStart = -Double.pi / 2.0 - maxDev
         let trackEnd = -Double.pi / 2.0 + maxDev
-        var baseArc = Path()
-        baseArc.addArc(center: center, radius: radius,
-                       startAngle: Angle(radians: trackStart),
-                       endAngle: Angle(radians: trackEnd),
-                       clockwise: false)
-        context.stroke(baseArc, with: .color(Palette.mutedInk.opacity(0.24)), lineWidth: 1.2)
+        var rimArc = Path()
+        rimArc.addArc(center: center, radius: radius,
+                      startAngle: Angle(radians: trackStart),
+                      endAngle: Angle(radians: trackEnd),
+                      clockwise: false)
+        context.stroke(rimArc, with: .color(Palette.hairline), lineWidth: 1.0)
 
-        // 2. Minor subdivision ticks along the curve
-        let minorCount = 44
+        // 2. High-density Clock Ticks (120 graduations like a chronograph subdial)
+        let totalClockTicks = 120
         let markPositions = marks.map { $0.p }
-        for i in 0...minorCount {
-            let p = Double(i) / Double(minorCount)
-            if markPositions.contains(where: { abs($0 - p) < 0.007 }) { continue }
+        for i in 0...totalClockTicks {
+            let p = Double(i) / Double(totalClockTicks)
+            if markPositions.contains(where: { abs($0 - p) < 0.005 }) { continue }
 
             let a = angle(for: p)
             let dev = abs(a - (-Double.pi / 2.0))
             if dev > maxDev { continue }
-            let fade = max(0, min(1, (maxDev - dev) / 0.22))
+            let fade = max(0, min(1, (maxDev - dev) / 0.18))
 
-            let isMajor = i % 4 == 0
-            let tickLen: CGFloat = isMajor ? 8 : 4.5
+            // Every 5th tick is medium (like 5-minute marks on a watch)
+            let isMedium = i % 5 == 0
+            let tickLen: CGFloat = isMedium ? 7.5 : 4.0
 
             let cosA = CGFloat(cos(a))
             let sinA = CGFloat(sin(a))
@@ -486,48 +490,41 @@ private struct FocusDialFace: View, Animatable {
             var tick = Path()
             tick.move(to: p1)
             tick.addLine(to: p2)
-            context.stroke(tick, with: .color(Palette.mutedInk.opacity(fade * (isMajor ? 0.45 : 0.25))),
-                           lineWidth: isMajor ? 1.3 : 1.0)
+            context.stroke(tick,
+                           with: .color(Palette.mutedInk.opacity(fade * (isMedium ? 0.60 : 0.30))),
+                           lineWidth: isMedium ? 1.2 : 0.8)
         }
 
-        // 3. Major lens distance marks (Numbers smoothly curve below ticks with ample space)
+        // 3. Major Lens Markings (Stamped numbers like clock hours with zero collision)
         for mark in marks {
             let a = angle(for: mark.p)
             let dev = abs(a - (-Double.pi / 2.0))
-            if dev > maxDev + 0.10 { continue }
-            let fade = max(0, min(1, (maxDev + 0.10 - dev) / 0.24))
+            if dev > maxDev + 0.08 { continue }
+            let fade = max(0, min(1, (maxDev + 0.08 - dev) / 0.20))
 
             let cosA = CGFloat(cos(a))
             let sinA = CGFloat(sin(a))
 
-            // Major tick line crossing the arc
-            let p1 = CGPoint(x: cx + (radius - 11) * cosA, y: cy + (radius - 11) * sinA)
-            let p2 = CGPoint(x: cx + (radius + 2) * cosA, y: cy + (radius + 2) * sinA)
+            // Major hour-style tick crossing inward from the rim
+            let p1 = CGPoint(x: cx + (radius - 12) * cosA, y: cy + (radius - 12) * sinA)
+            let p2 = CGPoint(x: cx + radius * cosA, y: cy + radius * sinA)
             var tick = Path()
             tick.move(to: p1)
             tick.addLine(to: p2)
-            context.stroke(tick, with: .color(Palette.ink.opacity(fade * 0.85)), lineWidth: 2.0)
+            context.stroke(tick, with: .color(Palette.ink.opacity(fade * 0.90)), lineWidth: 1.8)
 
-            // Number label positioned cleanly under the tick
-            let isUnderPointer = dev < 0.07
-            let labelPos = CGPoint(x: cx + (radius - 23) * cosA, y: cy + (radius - 23) * sinA)
+            // Stamped numbers sit cleanly below the tick tip with 14pt of clear space
+            let isUnderPointer = dev < 0.06
+            let labelPos = CGPoint(x: cx + (radius - 26) * cosA, y: cy + (radius - 26) * sinA)
 
             let label = Text(mark.label)
-                .font(AppTypography.next(size: isUnderPointer ? 17 : 14, weight: isUnderPointer ? .bold : .medium))
-                .foregroundColor(Palette.ink.opacity(fade * (isUnderPointer ? 0.95 : 0.65)))
+                .font(AppTypography.next(size: isUnderPointer ? 16 : 13.5, weight: isUnderPointer ? .bold : .semibold))
+                .foregroundColor(Palette.ink.opacity(fade * (isUnderPointer ? 0.95 : 0.60)))
 
             context.draw(context.resolve(label), at: labelPos, anchor: .center)
         }
 
-        // 4. Center Live Readout: Always shows exact measured distance
-        // Guarantees that at fast apertures where you land between marks, distance is crystal clear!
-        let distText = Fmt.distance(currentDistance, feet: feet)
-        let readout = Text(distText)
-            .font(AppTypography.mono(size: 13, weight: .bold))
-            .foregroundColor(Palette.ink.opacity(0.85))
-        context.draw(context.resolve(readout), at: CGPoint(x: cx, y: apexY + 20), anchor: .center)
-
-        // 5. Classic Braun Orange Pointer at Apex (12 o'clock)
+        // 4. Classic Braun Orange Pointer at Apex (12 o'clock index)
         var tri = Path()
         tri.move(to: CGPoint(x: cx - 5, y: apexY - 11))
         tri.addLine(to: CGPoint(x: cx + 5, y: apexY - 11))
