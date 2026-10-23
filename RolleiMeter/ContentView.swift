@@ -21,7 +21,6 @@ struct ContentView: View {
 
     @AppStorage("mode") private var mode: MeterMode = .matrix
     @AppStorage("isoIndex") private var isoIndex = 6
-    @AppStorage("evIndex") private var evIndex = 6
     @AppStorage("useDIN") private var useDIN = false
     @AppStorage("useFeet") private var useFeet = false
     @AppStorage("simpleAperture") private var apertureStop = 0
@@ -55,7 +54,6 @@ struct ContentView: View {
     @State private var peakingTask: Task<Void, Never>?
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
-    private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
     private var apertureIndex: Int { min(max(apertureStop, 0), Rollei.stops.count - 1) }
 
     private var autoApertureIndex: Int {
@@ -71,7 +69,7 @@ struct ContentView: View {
     private var resolvedAperture: (label: String, n: Double) { Rollei.stops[resolvedApertureIndex] }
 
     private var iso: Double { Double(ISOScale.values[safeISOIndex]) }
-    private var comp: Double { EVComp.values[safeEVIndex] }
+    private var comp: Double { 0.0 }
     private var liveEV: Double { meter.sceneEV + calibration }
     private var ev: Double { frozenEV ?? liveEV }
 
@@ -108,7 +106,7 @@ struct ContentView: View {
                     MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
                         .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
 
-                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, evIndex: $evIndex, k: k)
+                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
                         .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
 
                     preview(k: k)
@@ -503,14 +501,13 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                     .padding(20)
-                    .liquidPanel(radius: 16, fill: Palette.panelRaised)
                 }
 
                 Color.black
                     .opacity(blink ? 0.9 : 0)
                     .allowsHitTesting(false)
 
-                EVChip(damp: evDamp, frozen: frozenEV != nil, spot: spotActive, comp: comp)
+                EVChip(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(10)
                     .allowsHitTesting(false)
@@ -567,25 +564,14 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
     private var settingsKeyLabel: some View {
-        let label = Text(trayOpen ? "\u{2715}" : "SET")
+        Text(trayOpen ? "\u{2715}" : "SET")
             .font(AppTypography.next(size: 11, weight: .bold))
             .tracking(trayOpen ? 0 : 1.0)
             .foregroundStyle(Palette.text)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .contentShape(Capsule())
-
-        if #available(iOS 26.0, *) {
-            label.glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            label.background {
-                Capsule()
-                    .fill(Color.black.opacity(0.55))
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
-            }
-        }
+            .contentShape(Rectangle())
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
