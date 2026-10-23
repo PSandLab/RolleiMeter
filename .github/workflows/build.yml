@@ -12,10 +12,18 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select and verify current Xcode toolchain
+        run: |
+          set -euo pipefail
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+          xcodebuild -showsdks
+          echo "Selected iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
 
       - name: Install XcodeGen
         run: brew install xcodegen
