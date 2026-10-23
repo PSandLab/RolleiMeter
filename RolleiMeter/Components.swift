@@ -443,7 +443,7 @@ struct FilmPanel: View {
                 .frame(height: 26)
             }
             .padding(.horizontal, 9 * k)
-            .padding(.top, 43 * k)
+            .padding(.top, 48 * k)
         }
         .liquidPanel(radius: 26 * k, fill: Palette.accent, edge: false, glassTint: Palette.accent)
     }
