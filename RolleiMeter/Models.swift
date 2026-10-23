@@ -167,6 +167,14 @@ enum Focus {
         let x = extensionMM(max(d, nearest))
         return min(max(1 - x / x0, 0), 1)
     }
+
+    /// The distance in metres for a position on that scale. The inverse of `position`.
+    static func distance(at position: Double) -> Double {
+        let p = min(max(position, 0), 1)
+        let x = extensionMM(nearest) * (1 - p)
+        if x < 0.0005 { return .infinity }
+        return (focalMM * focalMM / x + focalMM) / 1000.0
+    }
 }
 
 // MARK: - Depth of field

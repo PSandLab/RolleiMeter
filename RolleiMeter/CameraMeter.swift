@@ -19,6 +19,10 @@ final class CameraMeter: NSObject, ObservableObject,
     @Published private(set) var denied = false
     /// Spot reading minus the framed matrix reading, in stops. Only set while spot metering.
     @Published private(set) var spotDelta: Double?
+    /// True when the lens can be set by hand (every LiDAR iPhone can).
+    @Published private(set) var canFocusManually = false
+    /// Red focus-peaking image, kept on its own object so a new frame doesn't redraw the whole screen.
+    let peakingFeed = PeakingFeed()
 
     private let sessionQueue = DispatchQueue(label: "meter.session")
     private let frameQueue = DispatchQueue(label: "meter.frames")
@@ -33,6 +37,29 @@ final class CameraMeter: NSObject, ObservableObject,
     private var spot = CGPoint(x: 0.5, y: 0.5)
     private var spotRadius: CGFloat = 0.05
     private var focus = CGPoint(x: 0.5, y: 0.5)
+    /// The buffer is native landscape. In landscape-left it is upside down on screen, which only
+    /// matters for the frozen snapshot; every point handed to `setConfig` is already in buffer space.
+    private var previewFlipped = false
+    private var lensNow: Float = 0.5
+    /// The phone's own lens, for turning a distance into the 0...1 lens position iOS wants. Lens
+    /// position is close to linear in how far the lens extends, so the same thin-lens maths the
+    /// Rollei scale uses applies. The focal length is typical for the main camera, so distances are
+    /// approximate.
+    private static let phoneFocalMM = 6.8
+    private var phoneMinFocusMM = 200.0
+    private var peakingOn = false
+    private var peakBusy = false
+    private var lastPeak: CFTimeInterval = 0
+    private let peakQueue = DispatchQueue(label: "meter.peak", qos: .userInitiated)
+    /// No colour management: edges are measured on the display values, so they behave the same in
+    /// shadows and highlights.
+    private let peakContext = CIContext(options: [.workingColorSpace: NSNull()])
+    /// Peaking sensitivity. Edge strength is summed over R, G and B; anything above `peakThreshold`
+    /// lights up, and `peakGain` sets how hard the cut-off is. Raise the threshold for less red.
+    private static let peakGain: CGFloat = 14
+    private static let peakThreshold: CGFloat = 1.0
+    /// Opacity of the red wash over sharp areas (0 = lines only).
+    private static let peakWash: CGFloat = 0.45
     private var smoothed: Double?
     private var deltaSmoothed: Double?
     private var steadyEV: Double?
@@ -55,7 +82,7 @@ final class CameraMeter: NSObject, ObservableObject,
     }
 
     // MARK: - Precomputed Matrix Weights
-    // Pre-calculate the 36x48 points once so the phone does zero heavy math per frame.
+    // Pre-calculate the 48x36 points once so the phone does zero heavy math per frame.
     private struct MatrixGridPoint {
         let fx: Double
         let fy: Double
@@ -63,8 +90,8 @@ final class CameraMeter: NSObject, ObservableObject,
     }
 
     private static let matrixGrid: [MatrixGridPoint] = {
-        let gx = 36
-        let gy = 48
+        let gx = 48
+        let gy = 36
         var points: [MatrixGridPoint] = []
         points.reserveCapacity(gx * gy)
         for j in 0..<gy {
@@ -92,8 +119,10 @@ final class CameraMeter: NSObject, ObservableObject,
         return snapped
     }
 
-    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint) {
+    /// `spot` and `focus` are positions in the sensor buffer (0...1), not on screen.
+    func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, flipped: Bool) {
         lock.lock()
+        self.previewFlipped = flipped
         self.mode = mode
         self.spot = spot
         self.spotRadius = radius
@@ -127,6 +156,136 @@ final class CameraMeter: NSObject, ObservableObject,
         sessionQueue.async {
             if self.session.isRunning { self.session.stopRunning() }
         }
+    }
+
+    // MARK: - Manual focus
+
+    /// Locks the lens at `position` (0 = closest, 1 = furthest). iOS only exposes this normalised
+    /// value, not a distance.
+    func setManualFocus(_ position: Float) {
+        let p = min(max(position, 0), 1)
+        sessionQueue.async {
+            guard let dev = self.device, dev.isLockingFocusWithCustomLensPositionSupported else { return }
+            do {
+                try dev.lockForConfiguration()
+                dev.setFocusModeLocked(lensPosition: p, completionHandler: nil)
+                dev.unlockForConfiguration()
+            } catch {}
+        }
+    }
+
+    func resumeAutoFocus() {
+        sessionQueue.async {
+            guard let dev = self.device, dev.isFocusModeSupported(.continuousAutoFocus) else { return }
+            do {
+                try dev.lockForConfiguration()
+                dev.focusMode = .continuousAutoFocus
+                dev.unlockForConfiguration()
+            } catch {}
+        }
+    }
+
+    /// Where the lens is right now, 0...1.
+    func currentLensPosition() -> Float {
+        lock.lock()
+        defer { lock.unlock() }
+        return lensNow
+    }
+
+    /// The 0...1 lens position that focuses at `d` metres (approximate; see `phoneFocalMM`).
+    func lensPosition(forDistance d: Double) -> Float {
+        if d.isInfinite { return 1 }
+        let f = CameraMeter.phoneFocalMM
+        lock.lock()
+        let nearMM = max(phoneMinFocusMM, 2 * f)
+        lock.unlock()
+        let x0 = f * f / (nearMM - f)
+        let x = f * f / (max(d * 1000, nearMM) - f)
+        return Float(min(max(1 - x / x0, 0), 1))
+    }
+
+    /// The distance in metres the lens is focused at for a 0...1 lens position (approximate).
+    func focusDistance(forLensPosition p: Float) -> Double {
+        let f = CameraMeter.phoneFocalMM
+        lock.lock()
+        let nearMM = max(phoneMinFocusMM, 2 * f)
+        lock.unlock()
+        let x = f * f / (nearMM - f) * (1 - Double(min(max(p, 0), 1)))
+        if x < 0.0005 { return .infinity }
+        return (f * f / x + f) / 1000.0
+    }
+
+    func currentFocusDistance() -> Double {
+        focusDistance(forLensPosition: currentLensPosition())
+    }
+
+    /// Peaking is only computed while it is on, so the phone stays cool the rest of the time.
+    func setPeaking(_ on: Bool) {
+        lock.lock()
+        peakingOn = on
+        lock.unlock()
+        if !on {
+            DispatchQueue.main.async { self.peakingFeed.image = nil }
+        }
+    }
+
+    private func queuePeaking(_ pb: CVPixelBuffer, flipped: Bool) {
+        let now = CACurrentMediaTime()
+        lock.lock()
+        let skip = peakBusy || now - lastPeak < 1.0 / 15.0
+        if !skip {
+            peakBusy = true
+            lastPeak = now
+        }
+        lock.unlock()
+        if skip { return }
+
+        peakQueue.async { [weak self] in
+            guard let self else { return }
+            let image = self.renderPeaking(pb, flipped: flipped)
+            self.lock.lock()
+            self.peakBusy = false
+            let stillOn = self.peakingOn
+            self.lock.unlock()
+            guard stillOn else { return }
+            DispatchQueue.main.async { self.peakingFeed.image = image }
+        }
+    }
+
+    /// Sobel edges on a half-size mono copy of the frame, cut off hard, thickened a pixel and
+    /// coloured red. Transparent everywhere that isn't sharp.
+    private func renderPeaking(_ pb: CVPixelBuffer, flipped: Bool) -> UIImage? {
+        var image = CIImage(cvPixelBuffer: pb)
+        if flipped { image = image.oriented(.down) }
+        image = image.transformed(by: CGAffineTransform(translationX: -image.extent.origin.x,
+                                                        y: -image.extent.origin.y))
+        let small = image.transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+        let extent = small.extent
+
+        let mono = small.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0])
+        let edges = mono.applyingFilter("CIEdges", parameters: [kCIInputIntensityKey: 1.0])
+        let g = CameraMeter.peakGain
+        let mask = edges.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputAVector": CIVector(x: g, y: g, z: g, w: 0),
+            "inputBiasVector": CIVector(x: 1, y: 0, z: 0, w: -g * CameraMeter.peakThreshold)
+        ])
+        // Crisp red lines on the edges, over a soft red wash that fills the sharp areas so the
+        // in-focus region reads at a glance.
+        let lines = mask.applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 1.0])
+        let wash = mask
+            .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 4.0])
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CameraMeter.peakWash)
+            ])
+        let thick = lines.composited(over: wash).cropped(to: extent)
+
+        guard let cg = peakContext.createCGImage(
+            thick, from: extent, format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     // MARK: - Session setup
@@ -205,8 +364,9 @@ final class CameraMeter: NSObject, ObservableObject,
         guard session.canAddOutput(output) else { return fail() }
         session.addOutput(output)
 
-        if let conn = output.connection(with: .video), conn.isVideoRotationAngleSupported(90) {
-            conn.videoRotationAngle = 90
+        // Native landscape buffers: no rotation, so metering and LiDAR read the sensor as it is.
+        if let conn = output.connection(with: .video), conn.isVideoRotationAngleSupported(0) {
+            conn.videoRotationAngle = 0
         }
 
         if lidar {
@@ -219,7 +379,15 @@ final class CameraMeter: NSObject, ObservableObject,
 
         session.commitConfiguration()
         device = dev
-        DispatchQueue.main.async { self.hasLiDAR = lidar }
+        let manualFocusOK = dev.isLockingFocusWithCustomLensPositionSupported
+        let minFocus = Double(dev.minimumFocusDistance)
+        lock.lock()
+        if minFocus > 0 { phoneMinFocusMM = minFocus }
+        lock.unlock()
+        DispatchQueue.main.async {
+            self.hasLiDAR = lidar
+            self.canFocusManually = manualFocusOK
+        }
         return true
     }
 
@@ -285,8 +453,9 @@ final class CameraMeter: NSObject, ObservableObject,
         let h = CVPixelBufferGetHeight(map)
         let bpr = CVPixelBufferGetBytesPerRow(map)
 
-        let sx = Double(pt.y)
-        let sy = 1.0 - Double(pt.x)
+        // The depth map is native landscape, same as the video buffer.
+        let sx = Double(pt.x)
+        let sy = Double(pt.y)
 
         var values: [Double] = []
         let steps = 7
@@ -348,13 +517,12 @@ final class CameraMeter: NSObject, ObservableObject,
     func previewSnapshot() -> UIImage? {
         lock.lock()
         let pixelBuffer = latestPreviewPixelBuffer
+        let flipped = previewFlipped
         lock.unlock()
         guard let pixelBuffer else { return nil }
 
         let sensorImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let image = sensorImage.extent.width > sensorImage.extent.height
-            ? sensorImage.oriented(.right)
-            : sensorImage
+        let image = flipped ? sensorImage.oriented(.down) : sensorImage
         guard let cgImage = previewImageContext.createCGImage(image, from: image.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
@@ -364,7 +532,11 @@ final class CameraMeter: NSObject, ObservableObject,
 
         lock.lock()
         latestPreviewPixelBuffer = pb
+        lensNow = dev.lensPosition
+        let wantPeaking = peakingOn
+        let peakFlipped = previewFlipped
         lock.unlock()
+        if wantPeaking { queuePeaking(pb, flipped: peakFlipped) }
 
         let e = frameExposure(sampleBuffer, dev)
         guard e.t > 0, e.iso > 0, e.n > 0 else { return }
@@ -482,4 +654,8 @@ final class CameraMeter: NSObject, ObservableObject,
             }
         }
     }
+}
+/// Holds the latest focus-peaking image. Separate from `CameraMeter` so only the overlay redraws.
+final class PeakingFeed: ObservableObject {
+    @Published var image: UIImage?
 }

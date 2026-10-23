@@ -34,11 +34,10 @@ struct ContentView: View {
     @State private var frozenPreviewImage: UIImage?
     @State private var trayOpen = false
     @State private var spotActive = false
+    /// Where the spot and the distance point sit on screen, 0...1 across the viewfinder.
     @State private var spot = CGPoint(x: 0.5, y: 0.5)
-    @State private var spotBuf = CGPoint(x: 0.5, y: 0.5)
     @State private var focus = CGPoint(x: 0.5, y: 0.5)
     @State private var focusPulse = 0
-    @State private var focusBuf = CGPoint(x: 0.5, y: 0.5)
     @State private var spotGestureLive = false
     @State private var suppressTap = false
     @State private var showHint = false
@@ -46,8 +45,16 @@ struct ContentView: View {
     @State private var spotRadius: CGFloat = 0.05
     @State private var pinchBase: CGFloat = 0.05
     @State private var blink = false
-    @State private var night = false
-    @State private var nightSince: Date?
+    @State private var previewSize = CGSize(width: 4, height: 3)
+    /// True when the interface is landscape-left, so the sensor buffer is upside down on screen.
+    @State private var flipped = false
+    /// Manual focus. `focusPos` is where the slider sits on the Rollei scale (0 = 0.9 m, 1 = infinity).
+    /// Peaking shows while a finger is on the slider and for a moment after.
+    @State private var manualFocus = false
+    @State private var focusPos: Double = 1
+    @State private var focusTouching = false
+    @State private var peakingVisible = false
+    @State private var peakingTask: Task<Void, Never>?
 
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var safeEVIndex: Int { min(max(evIndex, 0), EVComp.values.count - 1) }
@@ -89,48 +96,73 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            topBar
+        GeometryReader { screen in
+            let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
+            let k = grid.k
 
-            if trayOpen {
-                ControlTray(
-                    evIndex: $evIndex,
-                    isoIndex: $isoIndex,
-                    useDIN: $useDIN,
-                    useFeet: $useFeet,
-                    calibration: $calibration,
-                    armOffset: $armOffset,
-                    rawDistance: { meter.distance },
-                    onClose: {
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            trayOpen = false
-                        }
-                    }
-                )
-                .zIndex(10)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .top).combined(with: .opacity),
-                    removal: .move(edge: .top).combined(with: .opacity)
-                ))
+            ZStack {
+                Palette.background
+
+                ZStack(alignment: .topLeading) {
+                    // Left column
+                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
+                        .cell(grid, col: 0, row: 0, cols: 3, rows: 2)
+
+                    MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
+                        .cell(grid, col: 0, row: 2, cols: 3, rows: 2)
+
+                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
+                        .cell(grid, col: 0, row: 4, cols: 3, rows: 2)
+
+                    // Centre: exposure compensation over the viewfinder
+                    EVScaleBar(index: $evIndex, k: k)
+                        .cell(grid, col: 3, row: 0, cols: 6, rows: 1)
+
+                    preview(k: k)
+                        .cell(grid, col: 3, row: 1, cols: 6, rows: 5)
+
+                    // Right column
+                    AperturePanel(
+                        index: resolvedApertureIndex,
+                        auto: autoAperture,
+                        lamp: autoLampState,
+                        k: k,
+                        onPick: pickAperture,
+                        onTap: toggleAutoAperture,
+                        onHome: returnHomeAperture
+                    )
+                    .cell(grid, col: 9, row: 0, cols: 3, rows: 2)
+
+                    FocusPanel(
+                        position: focusPos,
+                        manual: manualFocus,
+                        touching: focusTouching,
+                        available: meter.canFocusManually,
+                        lidarDistance: shownDistance,
+                        hasLiDAR: meter.hasLiDAR,
+                        tooClose: tooClose,
+                        aperture: resolvedAperture,
+                        feet: useFeet,
+                        k: k,
+                        onBegin: beginFocusDrag,
+                        onSlide: slideFocus,
+                        onEnd: endFocusDrag,
+                        onAuto: resumeAutoFocus,
+                        onUnits: toggleUnits
+                    )
+                    .cell(grid, col: 9, row: 2, cols: 3, rows: 2)
+
+                    HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
+                        .cell(grid, col: 9, row: 4, cols: 3, rows: 2)
+                }
+                .frame(width: grid.size.width, height: grid.size.height)
             }
-
-            preview
-
-            SimpleExposurePair(
-                damp: evDamp, iso: iso, comp: comp,
-                apertureIndex: resolvedApertureIndex,
-                distance: shownDistance,
-                hasLiDAR: meter.hasLiDAR,
-                tooClose: tooClose, feet: useFeet
-            )
-
-            controls
+            .frame(width: screen.size.width, height: screen.size.height)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PaperBackground().ignoresSafeArea())
-        .preferredColorScheme(night ? .dark : .light)
+        .ignoresSafeArea()
+        .background(Palette.background.ignoresSafeArea())
+        .dynamicTypeSize(.large)
+        .preferredColorScheme(.dark)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear {
@@ -162,13 +194,12 @@ struct ContentView: View {
         }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
-        .onChange(of: spotBuf) { pushConfig() }
-        .onChange(of: focusBuf) { pushConfig() }
+        .onChange(of: spot) { pushConfig() }
+        .onChange(of: focus) { pushConfig() }
         .onChange(of: spotRadius) { pushConfig() }
-        .onChange(of: meter.sceneEV) {
-            evDamp.set([ev])
-            updateNight()
-        }
+        .onChange(of: flipped) { pushConfig() }
+        .onChange(of: previewSize) { pushConfig() }
+        .onChange(of: meter.sceneEV) { evDamp.set([ev]) }
         .onChange(of: calibration) { evDamp.set([ev]) }
         .onChange(of: frozenEV) { evDamp.set([ev]) }
         .onChange(of: tooClose) {
@@ -180,23 +211,13 @@ struct ContentView: View {
     }
 
     private func pushConfig() {
-        meter.setConfig(mode: engineMode, spot: spotBuf, radius: spotRadius, focus: focusBuf)
-    }
-
-    private func updateNight() {
-        let wantNight = night ? liveEV < 6.5 : liveEV < 5.0
-        if wantNight == night {
-            nightSince = nil
-            return
-        }
-        guard let since = nightSince else {
-            nightSince = Date()
-            return
-        }
-        if Date().timeIntervalSince(since) > (night ? 1.5 : 2.5) {
-            withAnimation(.easeInOut(duration: 0.8)) { night = wantNight }
-            nightSince = nil
-        }
+        meter.setConfig(
+            mode: engineMode,
+            spot: bufferPoint(spot, in: previewSize),
+            radius: spotRadius,
+            focus: bufferPoint(focus, in: previewSize),
+            flipped: flipped
+        )
     }
 
     private func toggleFreeze() {
@@ -229,6 +250,53 @@ struct ContentView: View {
         frozenPreviewImage = nil
     }
 
+    // MARK: - Manual focus
+
+    /// Finger down on the focus slider. Returns where the slide starts: where the lens is now.
+    private func beginFocusDrag() -> Double {
+        peakingTask?.cancel()
+        if !manualFocus { focusPos = Focus.position(meter.currentFocusDistance()) }
+        focusTouching = true
+        meter.setPeaking(true)
+        withAnimation(.easeOut(duration: 0.15)) { peakingVisible = true }
+        return focusPos
+    }
+
+    private func slideFocus(_ position: Double) {
+        if !manualFocus { manualFocus = true }
+        focusPos = position
+        meter.setManualFocus(meter.lensPosition(forDistance: Focus.distance(at: position)))
+    }
+
+    private func endFocusDrag() {
+        focusTouching = false
+        peakingTask?.cancel()
+        peakingTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.4)) { peakingVisible = false }
+            meter.setPeaking(false)
+        }
+    }
+
+    private func resumeAutoFocus() {
+        peakingTask?.cancel()
+        manualFocus = false
+        focusTouching = false
+        meter.resumeAutoFocus()
+        withAnimation(.easeOut(duration: 0.3)) { peakingVisible = false }
+        meter.setPeaking(false)
+    }
+
+    private func toggleUnits() {
+        UISelectionFeedbackGenerator().selectionChanged()
+        withAnimation(.easeInOut(duration: 0.2)) { useFeet.toggle() }
+    }
+
+    private func closeTray() {
+        withAnimation(.easeInOut(duration: 0.3)) { trayOpen = false }
+    }
+
     private func pickAperture(_ index: Int) {
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
@@ -252,24 +320,36 @@ struct ContentView: View {
         }
     }
 
+    /// Screen point (0...1 across the viewfinder) to the sensor buffer (0...1). The buffer is 4:3
+    /// landscape and fills the viewfinder, so the longer side is cropped. When the interface is
+    /// landscape-left the buffer is upside down relative to the screen.
     private func bufferPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
-        let frame = 0.75
+        let frame: CGFloat = 4.0 / 3.0
         let aspect = size.width / max(size.height, 1)
-        if aspect < frame {
-            return CGPoint(x: 0.5 + (p.x - 0.5) * aspect / frame, y: p.y)
+        var q = p
+        if aspect > frame {
+            q.y = 0.5 + (p.y - 0.5) * frame / aspect
+        } else {
+            q.x = 0.5 + (p.x - 0.5) * aspect / frame
         }
-        return CGPoint(x: p.x, y: 0.5 + (p.y - 0.5) * frame / aspect)
+        if flipped { q = CGPoint(x: 1 - q.x, y: 1 - q.y) }
+        return q
     }
 
-    // MARK: - Viewfinder (Zero-Lag Smooth Window Masking)
+    // MARK: - Viewfinder
 
-    private var preview: some View {
-        GeometryReader { geo in
+    private func preview(k: CGFloat) -> some View {
+        let radius = 22 * k
+        return GeometryReader { geo in
             ZStack {
-                // Anchored to native 3:4 camera aspect ratio to eliminate resize lag and black flashes!
-                CameraPreview(session: meter.session, onVolumePress: { toggleFreeze() })
-                    .frame(width: geo.size.width, height: max(geo.size.height, geo.size.width * (4.0 / 3.0)))
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                // Anchored to the native 4:3 camera aspect so resizing never lags or flashes black.
+                CameraPreview(
+                    session: meter.session,
+                    onVolumePress: { toggleFreeze() },
+                    onFlip: { flipped = $0 }
+                )
+                .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .clipped()
 
                 if let frozenPreviewImage {
@@ -287,13 +367,19 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                 }
 
+                if peakingVisible && frozenEV == nil {
+                    PeakingOverlay(feed: meter.peakingFeed)
+                        .frame(width: max(geo.size.width, geo.size.height * (4.0 / 3.0)), height: geo.size.height)
+                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                        .transition(.opacity)
+                }
+
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(
                         SpatialTapGesture().onEnded { value in
                             if suppressTap { return }
                             let p = normalized(value.location, geo.size)
-                            focusBuf = bufferPoint(p, in: geo.size)
                             focusPulse &+= 1
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
                             unfreeze()
@@ -312,7 +398,6 @@ struct ContentView: View {
                                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 }
                                 let p = normalized(drag.location, geo.size)
-                                spotBuf = bufferPoint(p, in: geo.size)
                                 withAnimation(.interactiveSpring) {
                                     spot = p
                                     spotActive = true
@@ -334,7 +419,7 @@ struct ContentView: View {
                     )
 
                 if spotActive {
-                    let d = spotRadius * 2 * max(geo.size.width, geo.size.height * 0.75)
+                    let d = spotRadius * 2 * max(geo.size.width, geo.size.height * (4.0 / 3.0))
                     ZStack {
                         Circle().fill(Palette.lensLight.opacity(0.05))
                         SpotReticle()
@@ -342,13 +427,13 @@ struct ContentView: View {
                                     style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
                         Circle().fill(Palette.lensLight).frame(width: 2.5, height: 2.5)
                     }
-                        .shadow(color: Palette.lensDark.opacity(0.40), radius: 1.5)
-                        .frame(width: d, height: d)
-                        .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
-                        .animation(.interactiveSpring, value: spotRadius)
-                        .transition(.scale(scale: 1.6).combined(with: .opacity))
-                        .allowsHitTesting(false)
+                    .shadow(color: Palette.lensDark.opacity(0.40), radius: 1.5)
+                    .frame(width: d, height: d)
+                    .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
+                    .animation(.interactiveSpring, value: spotRadius)
+                    .transition(.scale(scale: 1.6).combined(with: .opacity))
+                    .allowsHitTesting(false)
 
                     if let delta = meter.spotDelta {
                         Text(Fmt.stops(delta))
@@ -356,7 +441,8 @@ struct ContentView: View {
                             .foregroundStyle(Palette.lensLight)
                             .shadow(color: Palette.lensDark.opacity(0.8), radius: 2)
                             .contentTransition(.numericText())
-                            .position(x: spot.x * geo.size.width, y: max(14, spot.y * geo.size.height - d / 2 - 14))
+                            .position(x: spot.x * geo.size.width,
+                                      y: max(14, spot.y * geo.size.height - d / 2 - 14))
                             .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
                             .animation(.smooth(duration: 0.15), value: Fmt.stops(delta))
                             .allowsHitTesting(false)
@@ -365,28 +451,31 @@ struct ContentView: View {
 
                 if meter.hasLiDAR {
                     FocusMarker(tooClose: tooClose, pulseID: focusPulse)
-                    .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
-                    .allowsHitTesting(false)
+                        .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
+                        .allowsHitTesting(false)
                 }
 
                 if showHint {
-                    Text("Tap: distance   ·   Hold: spot meter")
-                        .font(AppTypography.next(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.lensLight)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Palette.lensDark.opacity(0.88), in: Capsule())
-                        .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
-                        .transition(.opacity)
-                        .allowsHitTesting(false)
+                    VStack(spacing: 4) {
+                        Text("Tap: distance   \u{00B7}   Hold: spot meter")
+                        Text("Tap aperture: auto   \u{00B7}   Slide focus: manual")
+                    }
+                    .font(AppTypography.next(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.lensLight)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Palette.lensDark.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
                 }
 
                 if meter.denied {
                     VStack(spacing: 10) {
                         Text("Camera access is off")
                             .font(AppTypography.next(size: 16, weight: .semibold))
-                            .foregroundStyle(Palette.ink)
+                            .foregroundStyle(Palette.text)
                         Button {
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 UIApplication.shared.open(url)
@@ -402,60 +491,74 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                     .padding(20)
-                    .modifier(Panel())
+                    .liquidPanel(radius: 16, fill: Palette.panelRaised)
                 }
 
                 Color.black
                     .opacity(blink ? 0.9 : 0)
                     .allowsHitTesting(false)
+
+                // Readout and settings key
+                EVChip(damp: evDamp, frozen: frozenEV != nil, spot: spotActive, comp: comp)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(10)
+                    .allowsHitTesting(false)
+
+                settingsKey
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(10)
+
+                if trayOpen {
+                    Color.black.opacity(0.6)
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeTray() }
+                        .transition(.opacity)
+
+                    ControlTray(
+                        useDIN: $useDIN,
+                        useFeet: $useFeet,
+                        calibration: $calibration,
+                        armOffset: $armOffset,
+                        rawDistance: { meter.distance },
+                        onClose: closeTray
+                    )
+                    .padding(12)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(Palette.lensDark.opacity(0.42), lineWidth: 6)
                     .blur(radius: 5)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
                     .allowsHitTesting(false)
             }
+            .onAppear { previewSize = geo.size }
+            .onChange(of: geo.size) { _, newSize in previewSize = newSize }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .layoutPriority(1)
     }
 
-    private var topBar: some View {
-        HStack(spacing: 12) {
-            EVBadge(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
-            Spacer(minLength: 12)
-            trayKey
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .contain)
-    }
-
-    private var trayKey: some View {
+    private var settingsKey: some View {
         Button {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-            withAnimation(.easeInOut(duration: 0.35)) {
-                trayOpen.toggle()
-            }
+            withAnimation(.easeInOut(duration: 0.3)) { trayOpen.toggle() }
         } label: {
-            ZStack {
-                Circle()
-                    .fill(trayOpen ? Palette.ink : Palette.paper)
-                    .frame(width: 38, height: 38)
-                    .overlay(Circle().stroke(Palette.hairline, lineWidth: 1))
-                    .shadow(color: Palette.cast, radius: 2, x: 0, y: 1)
-
-                Text(trayOpen ? "✕" : "SET")
-                    .font(AppTypography.next(size: trayOpen ? 12 : 11, weight: .bold))
-                    .tracking(trayOpen ? 0 : 1.0)
-                    .foregroundStyle(trayOpen ? Palette.paper : Palette.ink)
-            }
+            Text(trayOpen ? "\u{2715}" : "SET")
+                .font(AppTypography.next(size: 11, weight: .bold))
+                .tracking(trayOpen ? 0 : 1.0)
+                .foregroundStyle(Palette.text)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.55), in: Capsule())
+                .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(trayOpen ? "Close settings" : "Open settings")
     }
+
+    // MARK: - Metering mode
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
     private var meterChoice: MeterMode { spotActive ? .spot : baseMode }
@@ -465,11 +568,6 @@ struct ContentView: View {
         let next = meterModes[min(max(index, 0), meterModes.count - 1)]
         guard next != meterChoice else { return }
         applyMeterMode(next)
-    }
-
-    private func cycleMeterMode() {
-        UISelectionFeedbackGenerator().selectionChanged()
-        applyMeterMode(meterModes[(meterIndex + 1) % meterModes.count])
     }
 
     private func applyMeterMode(_ next: MeterMode) {
@@ -482,37 +580,6 @@ struct ContentView: View {
             }
         }
         unfreeze()
-    }
-
-    private var controls: some View {
-        ZStack {
-            FreezeButton(frozen: frozenEV != nil) {
-                toggleFreeze()
-            }
-
-            HStack(spacing: 0) {
-                MeterDrum(
-                    modes: meterModes,
-                    index: meterIndex,
-                    onPick: pickMeterMode,
-                    onTap: cycleMeterMode
-                )
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 6) {
-                    AutoLamp(state: autoLampState)
-                    .onTapGesture { toggleAutoAperture() }
-                    ApertureDrum(
-                        index: resolvedApertureIndex,
-                        auto: autoAperture,
-                        onPick: pickAperture,
-                        onTap: toggleAutoAperture,
-                        onHome: returnHomeAperture
-                    )
-                }
-            }
-        }
     }
 
     private var autoLampState: AutoLampState {
