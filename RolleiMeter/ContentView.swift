@@ -48,10 +48,10 @@ struct ContentView: View {
     @State private var previewSize = CGSize(width: 4, height: 3)
     /// True when the interface is landscape-left, so the sensor buffer is upside down on screen.
     @State private var flipped = false
-    /// Manual focus: the lens is locked at `lens` (0 closest ... 1 furthest). Peaking shows while a
-    /// finger is on the slider and for a moment after.
+    /// Manual focus. `focusPos` is where the slider sits on the Rollei scale (0 = 0.9 m, 1 = infinity).
+    /// Peaking shows while a finger is on the slider and for a moment after.
     @State private var manualFocus = false
-    @State private var lens: Double = 0.5
+    @State private var focusPos: Double = 1
     @State private var focusTouching = false
     @State private var peakingVisible = false
     @State private var peakingTask: Task<Void, Never>?
@@ -134,13 +134,14 @@ struct ContentView: View {
                     .cell(grid, col: 9, row: 0, cols: 3, rows: 2)
 
                     FocusPanel(
-                        lensPosition: lens,
+                        position: focusPos,
                         manual: manualFocus,
                         touching: focusTouching,
                         available: meter.canFocusManually,
-                        distance: shownDistance,
+                        lidarDistance: shownDistance,
                         hasLiDAR: meter.hasLiDAR,
                         tooClose: tooClose,
+                        aperture: resolvedAperture,
                         feet: useFeet,
                         k: k,
                         onBegin: beginFocusDrag,
@@ -251,20 +252,20 @@ struct ContentView: View {
 
     // MARK: - Manual focus
 
-    /// Finger down on the focus slider. Returns where the slide starts: the lens where it is now.
+    /// Finger down on the focus slider. Returns where the slide starts: where the lens is now.
     private func beginFocusDrag() -> Double {
         peakingTask?.cancel()
-        if !manualFocus { lens = Double(meter.currentLensPosition()) }
+        if !manualFocus { focusPos = Focus.position(meter.currentFocusDistance()) }
         focusTouching = true
         meter.setPeaking(true)
         withAnimation(.easeOut(duration: 0.15)) { peakingVisible = true }
-        return lens
+        return focusPos
     }
 
     private func slideFocus(_ position: Double) {
         if !manualFocus { manualFocus = true }
-        lens = position
-        meter.setManualFocus(Float(position))
+        focusPos = position
+        meter.setManualFocus(meter.lensPosition(forDistance: Focus.distance(at: position)))
     }
 
     private func endFocusDrag() {

@@ -673,25 +673,24 @@ private struct ApertureWheel: View, Animatable {
 
 // MARK: - Focus (manual focus slider)
 
-/// Where a tick sits along the track for a position 0...1 on the scale. Ticks crowd toward the far
-/// (infinity) end, the way a focus ring's marks do.
-private func focusWarp(_ t: Double) -> Double { 1 - pow(1 - min(max(t, 0), 1), 1.15) }
-private func focusUnwarp(_ u: Double) -> Double { 1 - pow(1 - min(max(u, 0), 1), 1 / 1.15) }
-
-/// Manual focus. Put a finger on the panel and slide: the lens follows, and the viewfinder shows
-/// whatever is sharp in red. Double-tap returns to autofocus.
+/// Manual focus on the Rollei's own scale: 0.9 m at the left, infinity at the right, spaced the way
+/// the lens extends. Slide a finger and the lens follows. The red band is the depth of field at the
+/// selected aperture, so one glance shows what will be sharp; the number is what you have set.
+/// Double-tap returns to autofocus.
 struct FocusPanel: View {
-    /// 0 = closest focus, 1 = furthest. A normalised lens position, not a distance.
-    let lensPosition: Double
+    /// 0...1 along the scale: 0 = 0.9 m, 1 = infinity.
+    let position: Double
     let manual: Bool
     let touching: Bool
     let available: Bool
-    let distance: Double?
+    /// Live LiDAR distance. Shown (and its depth of field) while autofocus is on.
+    let lidarDistance: Double?
     let hasLiDAR: Bool
     let tooClose: Bool
+    let aperture: (label: String, n: Double)
     let feet: Bool
     let k: CGFloat
-    /// Finger down. Returns the lens position the slide starts from.
+    /// Finger down. Returns the scale position the slide starts from.
     let onBegin: () -> Double
     let onSlide: (Double) -> Void
     let onEnd: () -> Void
@@ -701,21 +700,44 @@ struct FocusPanel: View {
     @State private var baseU: Double?
     @State private var lastDetent = -1
 
-    private let tickCount = 28
+    private let tickSteps = 48
 
     /// The knob travels this far: the inner width of a 3-column panel minus the knob.
-    private var trackWidth: CGFloat { max((298 - 100) * k, 1) }
+    private var trackWidth: CGFloat { max((298 - 64) * k, 1) }
+
+    /// The distance being shown: what you set by hand, or what LiDAR reads.
+    private var subject: Double? {
+        if manual { return Focus.distance(at: position) }
+        return hasLiDAR ? lidarDistance : nil
+    }
+
+    private var band: (near: Double, far: Double)? {
+        guard let s = subject, s >= Focus.nearest - 0.001 else { return nil }
+        let r = DepthOfField.range(subject: s, n: aperture.n)
+        return (Focus.position(r.near), Focus.position(r.far))
+    }
+
+    private var marks: [(label: String, p: Double)] {
+        (feet ? Focus.feetMarks : Focus.meterMarks).map { (label: $0.label, p: Focus.position($0.m)) }
+    }
 
     var body: some View {
+        let range = band
         ZStack(alignment: .top) {
             FocusSliderFace(
-                position: lensPosition,
+                position: position,
                 heat: touching ? 1 : 0,
+                bandNear: range?.near ?? 0,
+                bandFar: range?.far ?? 0,
+                showBand: range != nil,
                 showKnob: manual || touching,
-                tickCount: tickCount,
+                marks: marks,
+                tickSteps: tickSteps,
                 k: k
             )
-            .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.85), value: lensPosition)
+            .animation(.interactiveSpring(response: 0.18, dampingFraction: 0.85), value: position)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: range?.near)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: range?.far)
             .animation(.easeOut(duration: 0.22), value: touching)
             .padding(.horizontal, 15 * k)
             .padding(.top, 69 * k)
@@ -733,7 +755,7 @@ struct FocusPanel: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .topTrailing) {
-            distanceLabel
+            readout
                 .padding(.top, 12 * k)
                 .padding(.trailing, 12 * k)
         }
@@ -749,31 +771,37 @@ struct FocusPanel: View {
             }
         )
         .accessibilityLabel("Manual focus")
-        .accessibilityValue(manual ? "\(Int((lensPosition * 100).rounded())) percent" : "Auto")
+        .accessibilityValue(manual ? Fmt.distance(Focus.distance(at: position), feet: feet) : "Auto")
         .accessibilityAdjustableAction { direction in
             guard available else { return }
             let start = onBegin()
-            let step = direction == .increment ? 0.04 : -0.04
+            let step = direction == .increment ? 0.05 : -0.05
             onSlide(min(max(start + step, 0), 1))
             onEnd()
         }
     }
 
     @ViewBuilder
-    private var distanceLabel: some View {
-        if hasLiDAR, let distance {
+    private var readout: some View {
+        if let subject {
             Button(action: onUnits) {
-                Text(Fmt.distance(distance, feet: feet))
-                    .font(AppTypography.font(size: 20 * k, weight: .medium))
-                    .foregroundStyle(tooClose ? Palette.bad : Palette.dim)
+                Text(Fmt.distance(subject, feet: feet))
+                    .font(AppTypography.font(size: 20 * k, weight: .semibold))
+                    .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.dim))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .padding(8 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Distance")
+            .accessibilityLabel("Focus distance")
             .accessibilityHint("Switches metres and feet")
+        } else if hasLiDAR && tooClose {
+            Text("< 0.9 m")
+                .font(AppTypography.font(size: 20 * k, weight: .semibold))
+                .foregroundStyle(Palette.bad)
+                .padding(8 * k)
+                .allowsHitTesting(false)
         }
     }
 
@@ -782,14 +810,13 @@ struct FocusPanel: View {
             .onChanged { value in
                 guard available else { return }
                 if baseU == nil {
-                    baseU = focusWarp(onBegin())
+                    baseU = min(max(onBegin(), 0), 1)
                     lastDetent = -1
                 }
                 guard let u0 = baseU, abs(value.translation.width) > 3 else { return }
                 let u = min(max(u0 + Double(value.translation.width / trackWidth), 0), 1)
-                let s = focusUnwarp(u)
-                onSlide(s)
-                let detent = Int((s * Double(tickCount - 1)).rounded())
+                onSlide(u)
+                let detent = Int((u * Double(tickSteps)).rounded())
                 if detent != lastDetent {
                     lastDetent = detent
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -803,64 +830,81 @@ struct FocusPanel: View {
     }
 }
 
-/// Fine vertical ticks, and a knob that glows red while a finger is on it. The ticks near the knob
-/// pick up the red.
+/// The scale: fine ticks, the Rollei's marked distances, the red depth-of-field band behind them,
+/// and a knob that lights up while a finger is on it.
 private struct FocusSliderFace: View, Animatable {
     var position: Double
     var heat: Double
+    var bandNear: Double
+    var bandFar: Double
+    let showBand: Bool
     let showKnob: Bool
-    let tickCount: Int
+    let marks: [(label: String, p: Double)]
+    let tickSteps: Int
     let k: CGFloat
 
-    var animatableData: AnimatablePair<Double, Double> {
-        get { AnimatablePair(position, heat) }
+    var animatableData: AnimatablePair<AnimatablePair<Double, Double>, AnimatablePair<Double, Double>> {
+        get { AnimatablePair(AnimatablePair(position, heat), AnimatablePair(bandNear, bandFar)) }
         set {
-            position = newValue.first
-            heat = newValue.second
+            position = newValue.first.first
+            heat = newValue.first.second
+            bandNear = newValue.second.first
+            bandFar = newValue.second.second
         }
     }
 
     var body: some View {
         Canvas { ctx, size in
-            let knobR = min(50 * k, size.height / 2)
-            let knobX = knobR + CGFloat(focusWarp(position)) * (size.width - 2 * knobR)
-            let midY = size.height / 2
-            let edge = 6 * k
+            let knobR = min(32 * k, size.height / 2)
+            let trackW = size.width - 2 * knobR
+            func x(_ p: Double) -> CGFloat { knobR + CGFloat(min(max(p, 0), 1)) * trackW }
+
+            let zoneTop = 6 * k
+            let zoneBottom = 74 * k
             let tickWidth = max(1, 1.7 * k)
-            let tickHeight = size.height * 0.74
             let red = Color(hex: 0xFF1A1A)
 
-            if heat > 0.01 {
-                var glow = ctx
-                glow.translateBy(x: knobX, y: midY)
-                glow.scaleBy(x: 2.6, y: 1)
-                let radius = knobR * 0.95
-                glow.fill(
-                    Path(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2)),
-                    with: .radialGradient(
-                        Gradient(colors: [red.opacity(0.62 * heat), red.opacity(0)]),
-                        center: .zero, startRadius: 0, endRadius: radius))
+            // The range in focus.
+            if showBand {
+                let left = x(bandNear)
+                let right = x(bandFar)
+                let rect = CGRect(x: left - 2 * k, y: zoneTop - 4 * k,
+                                  width: max(right - left + 4 * k, 7 * k),
+                                  height: zoneBottom - zoneTop + 8 * k)
+                ctx.fill(Path(roundedRect: rect, cornerRadius: 7 * k),
+                         with: .color(red.opacity(0.58 + 0.22 * heat)))
             }
 
-            for i in 0..<tickCount {
-                let t = Double(i) / Double(tickCount - 1)
-                let x = edge + CGFloat(focusWarp(t)) * (size.width - 2 * edge)
-                let near = max(0, 1 - Double(abs(x - knobX) / (knobR * 2.2)))
-                let w = heat * near
-                let color = Color(red: 1, green: 1 - 0.92 * w, blue: 1 - 0.92 * w)
+            // Fine ticks, evenly spaced in lens travel.
+            let markPositions = marks.map { $0.p }
+            for i in 0...tickSteps {
+                let p = Double(i) / Double(tickSteps)
+                if markPositions.contains(where: { abs($0 - p) < 0.012 }) { continue }
                 var tick = Path()
-                tick.move(to: CGPoint(x: x, y: midY - tickHeight / 2))
-                tick.addLine(to: CGPoint(x: x, y: midY + tickHeight / 2))
-                ctx.stroke(tick, with: .color(color.opacity(0.92)), lineWidth: tickWidth)
+                tick.move(to: CGPoint(x: x(p), y: zoneBottom - 30 * k))
+                tick.addLine(to: CGPoint(x: x(p), y: zoneBottom))
+                ctx.stroke(tick, with: .color(Color.white.opacity(0.55)), lineWidth: tickWidth)
+            }
+
+            // The Rollei's marked distances.
+            for mark in marks {
+                var tick = Path()
+                tick.move(to: CGPoint(x: x(mark.p), y: zoneTop + 12 * k))
+                tick.addLine(to: CGPoint(x: x(mark.p), y: zoneBottom))
+                ctx.stroke(tick, with: .color(Color.white), lineWidth: tickWidth * 1.5)
+
+                let label = Text(mark.label)
+                    .font(AppTypography.next(size: 19 * k, weight: .medium))
+                    .foregroundColor(Color.white.opacity(0.92))
+                ctx.draw(ctx.resolve(label), at: CGPoint(x: x(mark.p), y: 92 * k), anchor: .center)
             }
 
             if showKnob {
-                let rect = CGRect(x: knobX - knobR, y: midY - knobR, width: knobR * 2, height: knobR * 2)
-                let knob = Path(ellipseIn: rect)
-                ctx.fill(knob, with: .color(Color(red: 0.25 + 0.75 * heat,
-                                                  green: 0.25 - 0.23 * heat,
-                                                  blue: 0.25 - 0.23 * heat)))
-                ctx.stroke(knob, with: .color(Color.black.opacity(0.7)), lineWidth: max(1, 1.4 * k))
+                let r = 26 * k
+                let centre = CGPoint(x: x(position), y: (zoneTop + zoneBottom) / 2)
+                let knob = Path(ellipseIn: CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2))
+                ctx.fill(knob, with: .color(Color(red: 0.2 + 0.8 * heat, green: 0.2 - 0.18 * heat, blue: 0.2 - 0.18 * heat)))
+                ctx.stroke(knob, with: .color(Color.white.opacity(0.95)), lineWidth: max(1.5, 2.6 * k))
             }
         }
         .allowsHitTesting(false)

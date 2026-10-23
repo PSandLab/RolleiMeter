@@ -41,6 +41,12 @@ final class CameraMeter: NSObject, ObservableObject,
     /// matters for the frozen snapshot; every point handed to `setConfig` is already in buffer space.
     private var previewFlipped = false
     private var lensNow: Float = 0.5
+    /// The phone's own lens, for turning a distance into the 0...1 lens position iOS wants. Lens
+    /// position is close to linear in how far the lens extends, so the same thin-lens maths the
+    /// Rollei scale uses applies. The focal length is typical for the main camera, so distances are
+    /// approximate.
+    private static let phoneFocalMM = 6.8
+    private var phoneMinFocusMM = 200.0
     private var peakingOn = false
     private var peakBusy = false
     private var lastPeak: CFTimeInterval = 0
@@ -52,6 +58,8 @@ final class CameraMeter: NSObject, ObservableObject,
     /// lights up, and `peakGain` sets how hard the cut-off is. Raise the threshold for less red.
     private static let peakGain: CGFloat = 14
     private static let peakThreshold: CGFloat = 1.0
+    /// Opacity of the red wash over sharp areas (0 = lines only).
+    private static let peakWash: CGFloat = 0.45
     private var smoothed: Double?
     private var deltaSmoothed: Double?
     private var steadyEV: Double?
@@ -184,6 +192,33 @@ final class CameraMeter: NSObject, ObservableObject,
         return lensNow
     }
 
+    /// The 0...1 lens position that focuses at `d` metres (approximate; see `phoneFocalMM`).
+    func lensPosition(forDistance d: Double) -> Float {
+        if d.isInfinite { return 1 }
+        let f = CameraMeter.phoneFocalMM
+        lock.lock()
+        let nearMM = max(phoneMinFocusMM, 2 * f)
+        lock.unlock()
+        let x0 = f * f / (nearMM - f)
+        let x = f * f / (max(d * 1000, nearMM) - f)
+        return Float(min(max(1 - x / x0, 0), 1))
+    }
+
+    /// The distance in metres the lens is focused at for a 0...1 lens position (approximate).
+    func focusDistance(forLensPosition p: Float) -> Double {
+        let f = CameraMeter.phoneFocalMM
+        lock.lock()
+        let nearMM = max(phoneMinFocusMM, 2 * f)
+        lock.unlock()
+        let x = f * f / (nearMM - f) * (1 - Double(min(max(p, 0), 1)))
+        if x < 0.0005 { return .infinity }
+        return (f * f / x + f) / 1000.0
+    }
+
+    func currentFocusDistance() -> Double {
+        focusDistance(forLensPosition: currentLensPosition())
+    }
+
     /// Peaking is only computed while it is on, so the phone stays cool the rest of the time.
     func setPeaking(_ on: Bool) {
         lock.lock()
@@ -237,9 +272,15 @@ final class CameraMeter: NSObject, ObservableObject,
             "inputAVector": CIVector(x: g, y: g, z: g, w: 0),
             "inputBiasVector": CIVector(x: 1, y: 0, z: 0, w: -g * CameraMeter.peakThreshold)
         ])
-        let thick = mask
-            .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 1.0])
-            .cropped(to: extent)
+        // Crisp red lines on the edges, over a soft red wash that fills the sharp areas so the
+        // in-focus region reads at a glance.
+        let lines = mask.applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 1.0])
+        let wash = mask
+            .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: 4.0])
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CameraMeter.peakWash)
+            ])
+        let thick = lines.composited(over: wash).cropped(to: extent)
 
         guard let cg = peakContext.createCGImage(
             thick, from: extent, format: .RGBA8,
@@ -339,6 +380,10 @@ final class CameraMeter: NSObject, ObservableObject,
         session.commitConfiguration()
         device = dev
         let manualFocusOK = dev.isLockingFocusWithCustomLensPositionSupported
+        let minFocus = Double(dev.minimumFocusDistance)
+        lock.lock()
+        if minFocus > 0 { phoneMinFocusMM = minFocus }
+        lock.unlock()
         DispatchQueue.main.async {
             self.hasLiDAR = lidar
             self.canFocusManually = manualFocusOK
