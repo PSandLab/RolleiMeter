@@ -265,14 +265,14 @@ struct ContentView: View {
     private func slideFocus(_ position: Double) {
         if !manualFocus { manualFocus = true }
         focusPos = position
-        meter.setManualFocus(meter.lensPosition(forDistance: Focus.distance(at: position)))
+        meter.setManualFocusThrottled(meter.lensPosition(forDistance: Focus.distance(at: position)))
     }
 
     private func endFocusDrag() {
         focusTouching = false
         peakingTask?.cancel()
         peakingTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.4)) { peakingVisible = false }
             meter.setPeaking(false)

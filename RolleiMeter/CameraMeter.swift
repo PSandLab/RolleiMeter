@@ -162,6 +162,34 @@ final class CameraMeter: NSObject, ObservableObject,
 
     /// Locks the lens at `position` (0 = closest, 1 = furthest). iOS only exposes this normalised
     /// value, not a distance.
+    private var targetLensPos: Float = 0.5
+    private var isUpdatingLens = false
+
+    /// Smoothly throttles manual focus actuation to 30 Hz so rapid rotary swipes don't choke AVFoundation.
+    func setManualFocusThrottled(_ position: Float) {
+        lock.lock()
+        targetLensPos = min(max(position, 0), 1)
+        lock.unlock()
+
+        guard !isUpdatingLens else { return }
+        isUpdatingLens = true
+
+        sessionQueue.asyncAfter(deadline: .now() + 0.033) { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            let pos = self.targetLensPos
+            self.isUpdatingLens = false
+            self.lock.unlock()
+
+            guard let dev = self.device, dev.isLockingFocusWithCustomLensPositionSupported else { return }
+            do {
+                try dev.lockForConfiguration()
+                dev.setFocusModeLocked(lensPosition: pos, completionHandler: nil)
+                dev.unlockForConfiguration()
+            } catch {}
+        }
+    }
+
     func setManualFocus(_ position: Float) {
         let p = min(max(position, 0), 1)
         sessionQueue.async {
