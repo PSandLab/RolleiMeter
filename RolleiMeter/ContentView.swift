@@ -192,6 +192,12 @@ struct ContentView: View {
                 meter.stop()
             }
         }
+                .onChange(of: apertureStop) {
+            if manualFocus { updateDoFOverlay() }
+        }
+        .onChange(of: autoAperture) {
+            if manualFocus { updateDoFOverlay() }
+        }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
         .onChange(of: spot) { pushConfig() }
@@ -253,11 +259,18 @@ struct ContentView: View {
     // MARK: - Manual focus
 
     /// Finger down on the focus slider. Returns where the slide starts: where the lens is now.
+
+    private func updateDoFOverlay() {
+        let subject = Focus.distance(at: focusPos)
+        let dof = DepthOfField.range(subject: subject, n: resolvedAperture.n)
+        meter.setDoFRange(near: dof.near, far: dof.far, active: true)
+    }
+
     private func beginFocusDrag() -> Double {
         peakingTask?.cancel()
-        if !manualFocus { focusPos = Focus.position(meter.currentFocusDistance()) }
+        if !manualFocus { manualFocus = true }
         focusTouching = true
-        meter.setPeaking(true)
+        updateDoFOverlay()
         withAnimation(.easeOut(duration: 0.15)) { peakingVisible = true }
         return focusPos
     }
@@ -265,27 +278,20 @@ struct ContentView: View {
     private func slideFocus(_ position: Double) {
         if !manualFocus { manualFocus = true }
         focusPos = position
-        meter.setManualFocusThrottled(meter.lensPosition(forDistance: Focus.distance(at: position)))
+        updateDoFOverlay()
     }
 
     private func endFocusDrag() {
         focusTouching = false
-        peakingTask?.cancel()
-        peakingTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.4)) { peakingVisible = false }
-            meter.setPeaking(false)
-        }
+        // Keep LiDAR DoF overlay active while manual focus is set
+        updateDoFOverlay()
     }
 
     private func resumeAutoFocus() {
-        peakingTask?.cancel()
         manualFocus = false
         focusTouching = false
-        meter.resumeAutoFocus()
-        withAnimation(.easeOut(duration: 0.3)) { peakingVisible = false }
-        meter.setPeaking(false)
+        meter.setDoFRange(near: 0, far: 0, active: false)
+        withAnimation(.easeOut(duration: 0.25)) { peakingVisible = false }
     }
 
     private func toggleUnits() {

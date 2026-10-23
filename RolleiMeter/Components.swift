@@ -671,12 +671,12 @@ private struct ApertureWheel: View, Animatable {
     }
 }
 
-// MARK: - Focus (Liquid Rotary Drum Dial)
+// MARK: - Focus (Static Bed Dial with Left-to-Right Knob)
 
-/// 3D knurled cylindrical focus wheel matching the Liquid redesign render.
-/// Vertical ribs with cylindrical 3D perspective, center red backlight glow,
-/// glowing red circle reticle, and relative swipe scrubbing with detent haptics.
+/// Static vertical lines with a Red Circle knob that slides Left (0.9m) to Right (Infinity).
+/// The red band displays the depth of field at the selected aperture.
 struct FocusPanel: View {
+    /// 0.0 (closest focus / 0.9m on Left) to 1.0 (infinity on Right)
     let position: Double
     let manual: Bool
     let touching: Bool
@@ -693,14 +693,10 @@ struct FocusPanel: View {
     let onAuto: () -> Void
     let onUnits: () -> Void
 
-    @State private var drumAngle: Double = 0.0
-    @State private var dragStartPos: Double = 0.0
-    @State private var dragAngleStart: Double = 0.0
     @State private var isDragging: Bool = false
-    @State private var lastHapticTick: Int = 0
+    @State private var lastHapticTick: Int = -1
 
-    private let totalRibs = 38
-    private let visibleArc = Double.pi * 0.88
+    private let totalTicks = 28
     private let tickHaptic = UISelectionFeedbackGenerator()
     private let stopHaptic = UIImpactFeedbackGenerator(style: .rigid)
 
@@ -709,23 +705,34 @@ struct FocusPanel: View {
         return hasLiDAR ? lidarDistance : nil
     }
 
+    private var dofBand: (near: Double, far: Double)? {
+        guard let s = subject, s >= Focus.nearest - 0.001 else { return nil }
+        let r = DepthOfField.range(subject: s, n: aperture.n)
+        return (Focus.position(r.near), Focus.position(r.far))
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
-            VStack(spacing: 6 * k) {
+            VStack(spacing: 8 * k) {
+                // Header
                 Text("FOCUS")
                     .font(AppTypography.next(size: 24 * k, weight: .semibold))
                     .tracking(2.2 * k)
                     .foregroundStyle(Palette.text)
                     .padding(.top, 14 * k)
 
-                // Rotary Wheel Cavity
+                // Static Bed Dial Track
                 GeometryReader { geo in
                     let w = geo.size.width
                     let h = geo.size.height
-                    let radius = w * 0.50
+                    let knobRadius: CGFloat = 16 * k
+                    let usableWidth = max(w - (knobRadius * 2), 1)
 
-                    ZStack {
-                        // Deep black recessed cavity
+                    // Left is 0.0 (0.9m), Right is 1.0 (Infinity)
+                    let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
+
+                    ZStack(alignment: .leading) {
+                        // Recessed dark housing
                         RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
                             .fill(Color(hex: 0x050505))
                             .overlay(
@@ -733,62 +740,50 @@ struct FocusPanel: View {
                                     .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                             )
 
-                        // Center Red Backlight Glow
-                        RoundedRectangle(cornerRadius: 10 * k, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(hex: 0xFF1E1E).opacity(0.0),
-                                        Color(hex: 0xFF1E1E).opacity(0.42),
-                                        Color(hex: 0xFF1E1E).opacity(0.0)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: w * 0.38, height: h - 8 * k)
-                            .allowsHitTesting(false)
+                        // Depth-of-Field Red Band
+                        if let band = dofBand {
+                            let leftX = knobRadius + CGFloat(min(max(band.near, 0.0), 1.0)) * usableWidth
+                            let rightX = knobRadius + CGFloat(min(max(band.far, 0.0), 1.0)) * usableWidth
+                            let bandW = max(rightX - leftX, 6 * k)
 
-                        // 3D Knurled Rotating Cylinder Ribs
+                            RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
+                                .fill(Color(hex: 0xFF1E1E).opacity(0.35))
+                                .frame(width: bandW, height: h - 12 * k)
+                                .position(x: leftX + bandW / 2, y: h / 2)
+                                .animation(.spring(response: 0.28, dampingFraction: 0.82), value: band.near)
+                                .animation(.spring(response: 0.28, dampingFraction: 0.82), value: band.far)
+                        }
+
+                        // STATIC Lines (Do NOT scroll)
                         Canvas { ctx, size in
-                            let cx = size.width / 2
-                            let cy = size.height / 2
-                            let ribH = size.height - 16 * k
+                            let ribH = size.height - 18 * k
+                            let topY = (size.height - ribH) / 2
+                            let botY = topY + ribH
 
-                            for i in 0..<totalRibs {
-                                let baseA = (Double(i) / Double(totalRibs)) * (2.0 * .pi)
-                                var theta = (baseA + drumAngle).truncatingRemainder(dividingBy: 2.0 * .pi)
-                                if theta < -Double.pi { theta += 2.0 * .pi }
-                                if theta > Double.pi { theta -= 2.0 * .pi }
-
-                                guard abs(theta) < (visibleArc / 2.0) else { continue }
-
-                                // 3D projection: x follows sin(theta), depth follows cos(theta)
-                                let x = cx + CGFloat(sin(theta)) * radius
-                                let depth = CGFloat(cos(theta))
-                                let alpha = max(0.0, Double(depth - 0.2) / 0.8)
-                                let lineWidth = max(1.0, 1.8 * depth * k)
+                            for i in 0...totalTicks {
+                                let fraction = CGFloat(i) / CGFloat(totalTicks)
+                                let x = knobRadius + fraction * usableWidth
 
                                 var path = Path()
-                                path.move(to: CGPoint(x: x, y: cy - ribH / 2.0))
-                                path.addLine(to: CGPoint(x: x, y: cy + ribH / 2.0))
+                                path.move(to: CGPoint(x: x, y: topY))
+                                path.addLine(to: CGPoint(x: x, y: botY))
 
-                                let nearCenter = abs(x - cx) < (w * 0.17)
-                                let col = nearCenter
-                                    ? Color.white.opacity(0.95 * alpha)
-                                    : Color.white.opacity(0.38 * alpha)
+                                // Major tick markers at ends and center
+                                let isMajor = (i == 0 || i == totalTicks || i == totalTicks / 2)
+                                let alpha = isMajor ? 0.70 : 0.28
+                                let lineWidth = isMajor ? max(1.5, 2.0 * k) : max(1.0, 1.2 * k)
 
-                                ctx.stroke(path, with: .color(col), lineWidth: lineWidth)
+                                ctx.stroke(path, with: .color(Color.white.opacity(alpha)), lineWidth: lineWidth)
                             }
                         }
                         .allowsHitTesting(false)
 
-                        // Center Glowing Red Reticle Circle
+                        // Red Circle Knob (Slides Left to Right)
                         ZStack {
                             Circle()
                                 .fill(Color(hex: 0xFF2A2A).opacity(0.40))
-                                .frame(width: 44 * k, height: 44 * k)
-                                .blur(radius: 5 * k)
+                                .frame(width: 40 * k, height: 40 * k)
+                                .blur(radius: 4 * k)
 
                             Circle()
                                 .fill(
@@ -796,19 +791,48 @@ struct FocusPanel: View {
                                         colors: [Color(hex: 0xFF3B30), Color(hex: 0xC70010)],
                                         center: .center,
                                         startRadius: 0,
-                                        endRadius: 18 * k
+                                        endRadius: 16 * k
                                     )
                                 )
-                                .frame(width: 32 * k, height: 32 * k)
+                                .frame(width: knobRadius * 2, height: knobRadius * 2)
                                 .overlay(
-                                    Circle().strokeBorder(Color.white.opacity(0.28), lineWidth: 1.2 * k)
+                                    Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5 * k)
                                 )
                         }
+                        .position(x: knobX, y: h / 2)
+                        .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.86), value: knobX)
                         .allowsHitTesting(false)
                     }
-                    .padding(.horizontal, 10 * k)
                     .contentShape(Rectangle())
-                    .gesture(dragGesture)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if !isDragging {
+                                    isDragging = true
+                                    _ = onBegin()
+                                }
+
+                                // Linear Left-to-Right mapping: 0.0 at Left, 1.0 at Right
+                                let rawPos = Double((value.location.x - knobRadius) / usableWidth)
+                                let newPos = min(max(rawPos, 0.0), 1.0)
+
+                                let tickIndex = Int((newPos * Double(totalTicks)).rounded())
+                                if tickIndex != lastHapticTick {
+                                    lastHapticTick = tickIndex
+                                    tickHaptic.selectionChanged()
+                                }
+
+                                if (newPos == 0.0 && position == 0.0) || (newPos == 1.0 && position == 1.0) {
+                                    stopHaptic.impactOccurred(intensity: 0.4)
+                                }
+
+                                onSlide(newPos)
+                            }
+                            .onEnded { _ in
+                                isDragging = false
+                                onEnd()
+                            }
+                    )
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
                             stopHaptic.impactOccurred(intensity: 0.8)
@@ -816,6 +840,7 @@ struct FocusPanel: View {
                         }
                     )
                 }
+                .padding(.horizontal, 10 * k)
                 .padding(.bottom, 12 * k)
             }
         }
@@ -841,53 +866,12 @@ struct FocusPanel: View {
         }
         .liquidPanel(radius: 26 * k)
         .onAppear {
-            drumAngle = position * (Double.pi * 3.0)
             tickHaptic.prepare()
         }
-        .onChange(of: position) { _, newPos in
-            guard !isDragging else { return }
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                drumAngle = newPos * (Double.pi * 3.0)
-            }
-        }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                guard available else { return }
-                if !isDragging {
-                    isDragging = true
-                    dragStartPos = onBegin()
-                    dragAngleStart = drumAngle
-                }
-
-                let deltaX = Double(value.translation.width)
-                let sensitivity = 0.0024
-                let nextPos = min(max(dragStartPos + deltaX * sensitivity, 0.0), 1.0)
-
-                drumAngle = dragAngleStart + deltaX * 0.014
-
-                let tick = Int((drumAngle / (2.0 * .pi / Double(totalRibs))).rounded())
-                if tick != lastHapticTick {
-                    lastHapticTick = tick
-                    tickHaptic.selectionChanged()
-                }
-
-                if (nextPos == 0.0 && position == 0.0) || (nextPos == 1.0 && position == 1.0) {
-                    if abs(deltaX) > 5 { stopHaptic.impactOccurred(intensity: 0.4) }
-                }
-
-                onSlide(nextPos)
-            }
-            .onEnded { _ in
-                isDragging = false
-                onEnd()
-            }
     }
 }
 
-/// The red focus-peaking layer drawn directly over the live preview without darkening the screen.
+/// The pure red LiDAR depth-of-field overlay (No edge lines, no screen dimming).
 struct PeakingOverlay: View {
     @ObservedObject var feed: PeakingFeed
 
@@ -896,7 +880,7 @@ struct PeakingOverlay: View {
             if let image = feed.image {
                 Image(uiImage: image)
                     .resizable()
-                    .interpolation(.medium)
+                    .interpolation(.none)
             }
         }
         .allowsHitTesting(false)

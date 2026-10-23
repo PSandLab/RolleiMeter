@@ -190,16 +190,14 @@ final class CameraMeter: NSObject, ObservableObject,
         }
     }
 
+    
     func setManualFocus(_ position: Float) {
-        let p = min(max(position, 0), 1)
-        sessionQueue.async {
-            guard let dev = self.device, dev.isLockingFocusWithCustomLensPositionSupported else { return }
-            do {
-                try dev.lockForConfiguration()
-                dev.setFocusModeLocked(lensPosition: p, completionHandler: nil)
-                dev.unlockForConfiguration()
-            } catch {}
-        }
+        // Disabled: Phone lens stays in continuous autofocus.
+        // Focus dial only positions the LiDAR depth-of-field overlay.
+    }
+
+    func setManualFocusThrottled(_ position: Float) {
+        // Disabled: Phone lens stays in continuous autofocus.
     }
 
     func resumeAutoFocus() {
@@ -461,6 +459,81 @@ final class CameraMeter: NSObject, ObservableObject,
         setBias(next)
     }
 
+
+    // MARK: - LiDAR Pure Depth-of-Field Overlay
+
+    private var dofNear: Double = 0.9
+    private var dofFar: Double = 2.0
+    private var dofActive: Bool = false
+    private var latestDepthPixelBuffer: CVPixelBuffer?
+    private let dofLock = NSLock()
+    private let dofContext = CIContext(options: [.workingColorSpace: NSNull()])
+    private var dofBusy = false
+
+    /// GPU kernel: paints any pixel whose physical distance in metres is between nearDist and farDist
+    private static let dofKernel = CIColorKernel(source: """
+        kernel vec4 dofMask(__sample depthVal, float nearDist, float farDist) {
+            float d = depthVal.r;
+            if (d > 0.1 && d >= nearDist && d <= farDist) {
+                // Pure red overlay (45% opacity)
+                return vec4(1.0, 0.12, 0.12, 0.45);
+            }
+            return vec4(0.0, 0.0, 0.0, 0.0);
+        }
+    """)
+
+    /// Sets the physical depth-of-field slice in metres and immediately re-renders the overlay
+    func setDoFRange(near: Double, far: Double, active: Bool) {
+        dofLock.lock()
+        dofNear = near
+        dofFar = far
+        dofActive = active
+        let pb = latestDepthPixelBuffer
+        let flipped = previewFlipped
+        dofLock.unlock()
+
+        if !active {
+            DispatchQueue.main.async { self.peakingFeed.image = nil }
+            return
+        }
+
+        if let pb {
+            renderDoFOverlay(pb, near: near, far: far, flipped: flipped)
+        }
+    }
+
+    private func renderDoFOverlay(_ pb: CVPixelBuffer, near: Double, far: Double, flipped: Bool) {
+        dofLock.lock()
+        guard !dofBusy else {
+            dofLock.unlock()
+            return
+        }
+        dofBusy = true
+        dofLock.unlock()
+
+        peakQueue.async { [weak self] in
+            guard let self else { return }
+            defer {
+                self.dofLock.lock()
+                self.dofBusy = false
+                self.dofLock.unlock()
+            }
+
+            var image = CIImage(cvPixelBuffer: pb)
+            if flipped { image = image.oriented(.down) }
+
+            guard let kernel = CameraMeter.dofKernel,
+                  let output = kernel.apply(extent: image.extent, arguments: [image, Float(near), Float(far)]),
+                  let cg = self.dofContext.createCGImage(output, from: output.extent)
+            else { return }
+
+            let uiImage = UIImage(cgImage: cg)
+            DispatchQueue.main.async {
+                self.peakingFeed.image = uiImage
+            }
+        }
+    }
+
     // MARK: - Depth (LiDAR)
 
     func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
@@ -473,6 +546,16 @@ final class CameraMeter: NSObject, ObservableObject,
             ? depthData
             : depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
         let map = converted.depthDataMap
+        dofLock.lock()
+        latestDepthPixelBuffer = map
+        let renderNow = dofActive
+        let curNear = dofNear
+        let curFar = dofFar
+        let isFlipped = previewFlipped
+        dofLock.unlock()
+        if renderNow {
+            renderDoFOverlay(map, near: curNear, far: curFar, flipped: isFlipped)
+        }
 
         CVPixelBufferLockBaseAddress(map, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
@@ -564,7 +647,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let wantPeaking = peakingOn
         let peakFlipped = previewFlipped
         lock.unlock()
-        if wantPeaking { queuePeaking(pb, flipped: peakFlipped) }
+        // Sobel edge peaking removed in favor of LiDAR pure DoF overlay
 
         let e = frameExposure(sampleBuffer, dev)
         guard e.t > 0, e.iso > 0, e.n > 0 else { return }
