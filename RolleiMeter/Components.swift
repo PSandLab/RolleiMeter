@@ -371,13 +371,14 @@ struct FilmPanel: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            PanelTitle(text: "FILM", k: k)
+            // Yellow card background matching reference mockup
+            RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
+                .fill(Palette.accent)
+
+            PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
+
             RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                .fill(Palette.panelRaised)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
+                .fill(Palette.accentInk)
                 .overlay {
                     Text(readout)
                         .font(AppTypography.next(size: 34 * k, weight: .medium))
@@ -387,9 +388,9 @@ struct FilmPanel: View {
                         .contentTransition(.numericText())
                         .animation(.smooth(duration: 0.15), value: readout)
                 }
-                .padding(.horizontal, 15 * k)
-                .padding(.top, 69 * k)
-                .padding(.bottom, 15 * k)
+                .padding(.horizontal, 14 * k)
+                .padding(.top, 65 * k)
+                .padding(.bottom, 14 * k)
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -632,53 +633,50 @@ struct FocusPanel: View {
 
     private var subject: Double? {
         if manual { return Focus.distance(at: position) }
-        return hasLiDAR ? lidarDistance : nil
-    }
-
-    private var dofBand: (near: Double, far: Double)? {
-        guard let s = subject, s >= Focus.nearest - 0.001 else { return nil }
-        let r = DepthOfField.range(subject: s, n: aperture.n)
-        return (Focus.position(r.near), Focus.position(r.far))
+        return lidarDistance
     }
 
     var body: some View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FOCUS", k: k)
 
-            // Static Bed Dial Track (generously sized to fill panel below title)
+            // Static Bed Dial Track (No box or outline around lines)
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
                 let knobRadius: CGFloat = max(h * 0.38, 16 * k)
                 let usableWidth = max(w - (knobRadius * 2), 1)
+                let ribH = h - 14 * k
 
                 // Left is 0.0 (0.9m), Right is 1.0 (Infinity)
                 let knobX = knobRadius + CGFloat(min(max(position, 0.0), 1.0)) * usableWidth
 
                 ZStack(alignment: .leading) {
-                    // Recessed dark housing
-                    RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                        .fill(Color(hex: 0x060606))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
-                        )
-
-                    // Depth-of-Field Red Band (only visible when manually activated)
-                    if isManualActive, let band = dofBand {
-                        let leftX = knobRadius + CGFloat(min(max(band.near, 0.0), 1.0)) * usableWidth
-                        let rightX = knobRadius + CGFloat(min(max(band.far, 0.0), 1.0)) * usableWidth
-                        let bandW = max(rightX - leftX, 6 * k)
-
+                    // Small red gradient wash following the slider knob
+                    if isManualActive {
+                        let glowWidth = knobRadius * 3.8
                         RoundedRectangle(cornerRadius: 6 * k, style: .continuous)
-                            .fill(Color(hex: 0xFF1E1E).opacity(0.35))
-                            .frame(width: bandW, height: max(h - 12 * k, 1))
-                            .position(x: leftX + bandW / 2, y: h / 2)
+                            .fill(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 0.0),
+                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.40), location: 0.25),
+                                        .init(color: Color(hex: 0xFF1E1E).opacity(0.85), location: 0.50),
+                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.40), location: 0.75),
+                                        .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 1.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: glowWidth, height: ribH)
+                            .position(x: knobX, y: h / 2)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
                     }
 
-                    // STATIC Lines - Clean pure white vertical lines
+                    // Clean pure white vertical lines (no surrounding box)
                     Canvas { ctx, size in
-                        let ribH = size.height - 18 * k
                         let topY = (size.height - ribH) / 2
                         let botY = topY + ribH
 
@@ -699,13 +697,13 @@ struct FocusPanel: View {
                     }
                     .allowsHitTesting(false)
 
-                    // Red Circle Knob (Slides Left to Right) - ONLY visible when manually activated
+                    // Red Circle Knob - ONLY visible when manually activated
                     if isManualActive {
                         ZStack {
                             Circle()
                                 .fill(Color(hex: 0xFF2A2A).opacity(0.35))
-                                .frame(width: knobRadius * 2.5, height: knobRadius * 2.5)
-                                .blur(radius: 4 * k)
+                                .frame(width: knobRadius * 2.4, height: knobRadius * 2.4)
+                                .blur(radius: 3 * k)
 
                             Circle()
                                 .fill(
@@ -769,28 +767,28 @@ struct FocusPanel: View {
             .padding(.horizontal, 14 * k)
         }
         .overlay(alignment: .topLeading) {
-            if manual {
-                Button {
+            Button {
+                if manual {
                     stopHaptic.impactOccurred(intensity: 0.6)
                     onAuto()
-                } label: {
-                    Text("MF")
-                        .font(AppTypography.next(size: 20 * k, weight: .bold))
-                        .foregroundStyle(Palette.bad)
-                        .padding(.top, 17 * k)
-                        .padding(.leading, 18 * k)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Switch to autofocus")
+            } label: {
+                Text(manual ? "MF" : "AF")
+                    .font(AppTypography.next(size: 19 * k, weight: .bold))
+                    .foregroundStyle(manual ? Palette.bad : Palette.dim)
+                    .padding(.top, 17 * k)
+                    .padding(.leading, 18 * k)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(manual ? "Switch to autofocus" : "Autofocus active")
         }
         .overlay(alignment: .topTrailing) {
-            if manual, let subject {
+            if let subject {
                 Button(action: onUnits) {
                     Text(Fmt.distance(subject, feet: feet))
                         .font(AppTypography.mono(size: 19 * k, weight: .semibold))
-                        .foregroundStyle(tooClose ? Palette.bad : Palette.text)
+                        .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.dim))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .padding(.top, 17 * k)
@@ -799,6 +797,17 @@ struct FocusPanel: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Focus distance, \(Fmt.distance(subject, feet: feet))")
+            } else {
+                Button(action: onUnits) {
+                    Text("—")
+                        .font(AppTypography.mono(size: 19 * k, weight: .semibold))
+                        .foregroundStyle(Palette.dim)
+                        .padding(.top, 17 * k)
+                        .padding(.trailing, 18 * k)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Focus distance unavailable")
             }
         }
         .onAppear {

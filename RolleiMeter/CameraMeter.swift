@@ -583,6 +583,21 @@ final class CameraMeter: NSObject, ObservableObject,
         lensNow = dev.lensPosition
         lock.unlock()
 
+        if !hasLiDAR {
+            let focusM = focusDistance(forLensPosition: dev.lensPosition)
+            let now = CACurrentMediaTime()
+            if now - lastDepthPublish > 0.15 {
+                lastDepthPublish = now
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if focusM.isFinite && focusM > 0.1 {
+                        if let old = self.distance, abs(focusM - old) < max(0.05, 0.03 * old) { return }
+                        self.distance = focusM
+                    }
+                }
+            }
+        }
+
         let e = frameExposure(sampleBuffer, dev)
         guard e.t > 0, e.iso > 0, e.n > 0 else { return }
         let evCam = log2(e.n * e.n / e.t) - log2(e.iso / 100.0)
