@@ -87,7 +87,7 @@ struct ContentView: View {
     @AppStorage("hintCount") private var hintCount = 0
     @State private var spotRadius: CGFloat = 0.05
     @State private var pinchBase: CGFloat = 0.05
-    @State private var blink = false
+    @State private var flash: Double = 0
     @State private var previewSize = CGSize(width: 4, height: 3)
     @State private var rotation: ViewRotation = .landscapeRight
 
@@ -289,9 +289,13 @@ struct ContentView: View {
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         if frozenEV == nil {
             shutterBlink()
-            frozenPreviewImage = meter.previewSnapshot()
-            frozenEV = liveEV
-            frozenDist = meter.distance
+            let snapshot = meter.previewSnapshot()
+            // Fade the held frame in over the live image instead of swapping it in one frame.
+            withAnimation(.easeOut(duration: 0.28)) {
+                frozenPreviewImage = snapshot
+                frozenEV = liveEV
+                frozenDist = meter.distance
+            }
             meter.freezeDepth()
             meter.pause()
             if manualFocus {
@@ -304,9 +308,10 @@ struct ContentView: View {
 
     private func shutterBlink() {
         AudioServicesPlaySystemSound(1108)
-        blink = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-            withAnimation(.easeOut(duration: 0.2)) { blink = false }
+        // A soft, quick dip like a shutter closing, then a slow release; not a hard flash.
+        withAnimation(.easeOut(duration: 0.07)) { flash = 0.3 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
+            withAnimation(.easeInOut(duration: 0.5)) { flash = 0 }
         }
     }
 
@@ -319,7 +324,8 @@ struct ContentView: View {
         isResuming = true
         meter.unfreezeDepth()
         meter.resume {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            // Long, even crossfade from the held frame back to the live image.
+            withAnimation(.easeInOut(duration: 0.55)) {
                 self.frozenEV = nil
                 self.frozenDist = nil
                 self.frozenPreviewImage = nil
@@ -426,6 +432,7 @@ struct ContentView: View {
 
     private func preview(k: CGFloat) -> some View {
         let radius = 22 * k
+        let held = frozenEV != nil && !isResuming
         return GeometryReader { geo in
             ZStack {
                 CameraPreview(
@@ -449,6 +456,7 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                 } else if frozenEV != nil {
                     Color.black.opacity(0.35)
+                        .transition(.opacity)
                         .allowsHitTesting(false)
                 }
 
@@ -591,7 +599,7 @@ struct ContentView: View {
                 }
 
                 Color.black
-                    .opacity(blink ? 0.9 : 0)
+                    .opacity(flash)
                     .allowsHitTesting(false)
 
                 EVChip(damp: evDamp, frozen: (frozenEV != nil && !isResuming), spot: spotActive)
@@ -604,7 +612,9 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(held ? Palette.accent.opacity(0.75) : Color.white.opacity(0.12),
+                                  lineWidth: held ? 1.5 : 1)
+                    .animation(.easeInOut(duration: 0.35), value: held)
                     .allowsHitTesting(false)
             }
             .onAppear { previewSize = geo.size }
