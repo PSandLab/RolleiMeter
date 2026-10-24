@@ -792,8 +792,11 @@ final class CameraMeter: NSObject, ObservableObject,
         if now - lastPublish > 0.016 {
             lastPublish = now
             DispatchQueue.main.async { [weak self] in
-                self?.sceneEV = out
-                self?.spotDelta = delta
+                guard let self = self else { return }
+                // @Published notifies SwiftUI on every assignment, even with an equal value,
+                // so only write when the reading actually changed.
+                if self.sceneEV != out { self.sceneEV = out }
+                if self.spotDelta != delta { self.spotDelta = delta }
             }
         }
     }
