@@ -238,3 +238,26 @@ extension Focus {
         return FocusAdvice(label: best.label, sharp: sharp, lo: lo.label, hi: hi.label)
     }
 }
+
+/// Dummy film library for now; this becomes the real stock list when logging is built.
+struct FilmStock: Identifiable, Equatable {
+    let id: String
+    let name: String      // full name for the picker
+    let short: String     // what fits on the film strip
+    let iso: Int          // box speed
+
+    static let all: [FilmStock] = [
+        FilmStock(id: "ektar100", name: "Kodak Ektar 100", short: "Ektar", iso: 100),
+        FilmStock(id: "portra160", name: "Kodak Portra 160", short: "Portra 160", iso: 160),
+        FilmStock(id: "portra400", name: "Kodak Portra 400", short: "Portra 400", iso: 400),
+        FilmStock(id: "gold200", name: "Kodak Gold 200", short: "Gold 200", iso: 200),
+        FilmStock(id: "trix400", name: "Kodak Tri-X 400", short: "Tri-X", iso: 400),
+        FilmStock(id: "hp5", name: "Ilford HP5 Plus 400", short: "HP5+", iso: 400),
+        FilmStock(id: "fp4", name: "Ilford FP4 Plus 125", short: "FP4+", iso: 125),
+        FilmStock(id: "velvia50", name: "Fujifilm Velvia 50", short: "Velvia 50", iso: 50),
+        FilmStock(id: "superia400", name: "Fujifilm Superia 400", short: "Superia 400", iso: 400),
+        FilmStock(id: "cs800t", name: "CineStill 800T", short: "CineStill 800T", iso: 800)
+    ]
+
+    static func find(_ id: String) -> FilmStock { all.first { $0.id == id } ?? all[0] }
+}

@@ -76,6 +76,10 @@ struct ContentView: View {
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
     @State private var isResuming = false
+    @AppStorage("filmID") private var filmID = FilmStock.all[0].id
+    @AppStorage("frameNumber") private var frameNumber = 1
+    @AppStorage("rollLength") private var rollLength = 36
+    @State private var showFilmPicker = false
     // Wake-up cover: the held frame softens while the camera restarts, then dissolves into live.
     @State private var snapshotOpacity: Double = 1
     @State private var snapshotBlur: CGFloat = 0
@@ -154,12 +158,17 @@ struct ContentView: View {
                         .modifier(SoftCard(k: k, on: p, rule: true))
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
-                    MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
-                        .modifier(SoftCard(k: k, on: p, rule: true))
-                        .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
-
-                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
-                        .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
+                    FilmPanel(
+                        isoIndex: $isoIndex,
+                        useDIN: useDIN,
+                        filmName: FilmStock.find(filmID).short,
+                        boxISO: FilmStock.find(filmID).iso,
+                        frame: frameNumber,
+                        rollLength: rollLength,
+                        k: k,
+                        onTap: { showFilmPicker = true }
+                    )
+                    .cell(grid, col: 0, row: p ? 9 : 2, cols: p ? 6 : 3, rows: p ? 2 : 4)
 
                     preview(k: k)
                         .cell(grid, col: p ? 0 : 3, row: 1, cols: 6, rows: p ? 6 : 5)
@@ -195,10 +204,17 @@ struct ContentView: View {
                         onUnits: toggleUnits
                     )
                     .modifier(SoftCard(k: k, on: p))
-                    .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
+                    .cell(grid, col: p ? 0 : 9, row: p ? 11 : 2, cols: 3, rows: 2)
 
-                    HoldControl(frozen: (frozenEV != nil && !isResuming), k: k, action: toggleFreeze)
-                        .modifier(SoftCard(k: k, on: p))
+                    VStack(spacing: 0) {
+                        MeterPanel(modes: meterModes, index: meterIndex, k: k,
+                                   onPick: pickMeterMode, compact: true)
+                            .frame(height: 56 * k)
+                        HoldControl(frozen: (frozenEV != nil && !isResuming), k: k,
+                                    scale: 0.68, action: toggleFreeze)
+                            .frame(maxHeight: .infinity)
+                    }
+                    .modifier(SoftCard(k: k, on: p))
                         .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
 
                     // Last in the stack so the camera view (which overflows its cell) can't block taps.
@@ -254,6 +270,17 @@ struct ContentView: View {
                 rawDistance: { meter.distance }
             )
         }
+        .sheet(isPresented: $showFilmPicker) {
+            FilmPickerSheet(
+                selectedID: filmID,
+                rollLength: $rollLength,
+                onPick: { film in
+                    filmID = film.id
+                    if let i = ISOScale.values.firstIndex(of: film.iso) { isoIndex = i }
+                },
+                onNewRoll: { frameNumber = 1 }
+            )
+        }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
         .onChange(of: spot) { pushConfig() }
@@ -294,6 +321,7 @@ struct ContentView: View {
         if frozenEV == nil {
             shutterBlink()
             let snapshot = meter.previewSnapshot()
+            frameNumber = min(frameNumber + 1, rollLength)   // dummy: each hold counts as a frame
             wakeToken &+= 1            // cancels any pending wake-up cleanup
             snapshotOpacity = 1
             snapshotBlur = 0

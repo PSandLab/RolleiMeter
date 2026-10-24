@@ -325,6 +325,8 @@ struct MeterPanel: View {
     let index: Int
     let k: CGFloat
     let onPick: (Int) -> Void
+    /// One quiet line of words with no title or captions (used inside the Hold panel).
+    var compact: Bool = false
 
     private func caption(_ mode: MeterMode) -> String {
         switch mode {
@@ -345,18 +347,20 @@ struct MeterPanel: View {
                     } label: {
                         VStack(spacing: 6 * k) {
                             Text(modes[i].title)
-                                .font(AppTypography.next(size: 31 * k, weight: .medium))
+                                .font(AppTypography.next(size: (compact ? 30 : 31) * k, weight: .medium))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
-                            Text(caption(modes[i]))
-                                .font(AppTypography.next(size: 23 * k))
-                                .lineLimit(1)
+                            if !compact {
+                                Text(caption(modes[i]))
+                                    .font(AppTypography.next(size: 23 * k))
+                                    .lineLimit(1)
+                            }
                         }
-                        .foregroundStyle(i == index ? Palette.accent : Palette.text)
+                        .foregroundStyle(i == index ? Palette.accent : (compact ? Palette.dim : Palette.text))
                         .animation(.easeOut(duration: 0.18), value: index)
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 72 * k)
-                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.top, compact ? 0 : 72 * k)
+                        .frame(maxHeight: .infinity, alignment: compact ? .center : .top)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -364,8 +368,10 @@ struct MeterPanel: View {
                     .accessibilityAddTraits(i == index ? .isSelected : [])
                 }
             }
-            PanelTitle(text: "METER", k: k)
-                .allowsHitTesting(false)
+            if !compact {
+                PanelTitle(text: "METER", k: k)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -374,21 +380,27 @@ struct MeterPanel: View {
 
 struct FilmPanel: View {
     @Binding var isoIndex: Int
-    @Binding var useDIN: Bool
+    let useDIN: Bool
+    let filmName: String
+    let boxISO: Int
+    let frame: Int
+    let rollLength: Int
     let k: CGFloat
+    let onTap: () -> Void
 
     @State private var dragBase: Int?
 
     private var safeIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
 
-    private var readout: String {
+    private var speedText: String {
         let value = ISOScale.label(ISOScale.values[safeIndex], din: useDIN)
-        return (useDIN ? "DIN" : "ISO") + "  \u{2022}  " + value
+        return useDIN ? value + " DIN" : "ISO " + value
     }
+
+    private var readout: String { filmName + "  \u{2022}  " + speedText }
 
     var body: some View {
         ZStack(alignment: .top) {
-            // Yellow card background matching reference mockup
             RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
                 .fill(Palette.accent)
 
@@ -397,13 +409,22 @@ struct FilmPanel: View {
             RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
                 .fill(Palette.accentInk)
                 .overlay {
-                    Text(readout)
-                        .font(AppTypography.next(size: 34 * k, weight: .medium))
-                        .foregroundStyle(Palette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.15), value: readout)
+                    VStack(spacing: 6 * k) {
+                        Text("FRAME  \(frame) / \(rollLength)")
+                            .font(AppTypography.font(size: 22 * k, weight: .medium))
+                            .tracking(1.4 * k)
+                            .foregroundStyle(Palette.text.opacity(0.55))
+                            .contentTransition(.numericText())
+                            .animation(.smooth(duration: 0.2), value: frame)
+                        Text(readout)
+                            .font(AppTypography.next(size: 34 * k, weight: .medium))
+                            .foregroundStyle(Palette.text)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .contentTransition(.numericText())
+                            .animation(.smooth(duration: 0.15), value: readout)
+                    }
+                    .padding(.horizontal, 12 * k)
                 }
                 .padding(.horizontal, 14 * k)
                 .padding(.top, 65 * k)
@@ -412,12 +433,12 @@ struct FilmPanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
-            withAnimation(.easeInOut(duration: 0.2)) { useDIN.toggle() }
+            onTap()
         }
         .onLongPressGesture(minimumDuration: 0.5) {
-            guard let hundred = ISOScale.values.firstIndex(of: 100), isoIndex != hundred else { return }
+            guard let box = ISOScale.values.firstIndex(of: boxISO), isoIndex != box else { return }
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-            isoIndex = hundred
+            isoIndex = box
         }
         .gesture(
             DragGesture(minimumDistance: 8)
@@ -427,7 +448,7 @@ struct FilmPanel: View {
                     let target = min(max((dragBase ?? safeIndex) + steps, 0), ISOScale.values.count - 1)
                     guard target != isoIndex else { return }
                     isoIndex = target
-                    if ISOScale.values[target] == 100 {
+                    if ISOScale.values[target] == boxISO {
                         UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
                     } else {
                         UISelectionFeedbackGenerator().selectionChanged()
@@ -436,8 +457,9 @@ struct FilmPanel: View {
                 .onEnded { _ in dragBase = nil }
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Film speed")
+        .accessibilityLabel("Film, frame \(frame) of \(rollLength)")
         .accessibilityValue(readout)
+        .accessibilityHint("Tap to choose film")
     }
 }
 
@@ -1049,6 +1071,7 @@ struct PeakingOverlay: View {
 struct HoldControl: View {
     let frozen: Bool
     let k: CGFloat
+    var scale: CGFloat = 1
     let action: () -> Void
 
     var body: some View {
@@ -1065,7 +1088,7 @@ struct HoldControl: View {
     private var holdLabel: some View {
         ZStack(alignment: .trailing) {
             Text(frozen ? "hold" : "live")
-                .font(AppTypography.next(size: 29 * k))
+                .font(AppTypography.next(size: 29 * k * (scale < 1 ? 0.9 : 1)))
                 .foregroundStyle(frozen ? Palette.accent : Palette.dim)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 17 * k)
@@ -1076,10 +1099,10 @@ struct HoldControl: View {
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
                 Circle()
                     .fill(frozen ? Palette.accent : Color.white)
-                    .frame(width: 126 * k, height: 126 * k)
+                    .frame(width: 126 * k * scale, height: 126 * k * scale)
                     .scaleEffect(frozen ? 0.9 : 1.0)
             }
-            .frame(width: 175 * k, height: 175 * k)
+            .frame(width: 175 * k * scale, height: 175 * k * scale)
             .padding(.trailing, 7 * k)
         }
     }
