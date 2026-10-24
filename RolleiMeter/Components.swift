@@ -383,8 +383,6 @@ struct FilmPanel: View {
     let useDIN: Bool
     let filmName: String
     let boxISO: Int
-    let frame: Int
-    let rollLength: Int
     let k: CGFloat
     let onTap: () -> Void
 
@@ -409,22 +407,14 @@ struct FilmPanel: View {
             RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
                 .fill(Palette.accentInk)
                 .overlay {
-                    VStack(spacing: 6 * k) {
-                        Text("FRAME  \(frame) / \(rollLength)")
-                            .font(AppTypography.font(size: 22 * k, weight: .medium))
-                            .tracking(1.4 * k)
-                            .foregroundStyle(Palette.text.opacity(0.55))
-                            .contentTransition(.numericText())
-                            .animation(.smooth(duration: 0.2), value: frame)
-                        Text(readout)
-                            .font(AppTypography.next(size: 34 * k, weight: .medium))
-                            .foregroundStyle(Palette.text)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .contentTransition(.numericText())
-                            .animation(.smooth(duration: 0.15), value: readout)
-                    }
-                    .padding(.horizontal, 12 * k)
+                    Text(readout)
+                        .font(AppTypography.next(size: 34 * k, weight: .medium))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .contentTransition(.numericText())
+                        .animation(.smooth(duration: 0.15), value: readout)
+                        .padding(.horizontal, 12 * k)
                 }
                 .padding(.horizontal, 14 * k)
                 .padding(.top, 65 * k)
@@ -457,9 +447,44 @@ struct FilmPanel: View {
                 .onEnded { _ in dragBase = nil }
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Film, frame \(frame) of \(rollLength)")
+        .accessibilityLabel("Film")
         .accessibilityValue(readout)
         .accessibilityHint("Tap to choose film")
+    }
+}
+
+// MARK: - Frame counter
+
+struct FramePanel: View {
+    let frame: Int
+    let rollLength: Int
+    let k: CGFloat
+    let onTap: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            HStack(alignment: .firstTextBaseline, spacing: 10 * k) {
+                Text("\(frame)")
+                    .font(AppTypography.next(size: 78 * k, weight: .bold))
+                    .foregroundStyle(Palette.text)
+                    .contentTransition(.numericText())
+                Text("/ \(rollLength)")
+                    .font(AppTypography.next(size: 34 * k, weight: .medium))
+                    .foregroundStyle(Palette.dim)
+            }
+            .animation(.smooth(duration: 0.2), value: frame)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 40 * k)
+
+            PanelTitle(text: "FRAME", k: k)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            UISelectionFeedbackGenerator().selectionChanged()
+            onTap()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Frame \(frame) of \(rollLength)")
     }
 }
 
@@ -1071,39 +1096,52 @@ struct PeakingOverlay: View {
 struct HoldControl: View {
     let frozen: Bool
     let k: CGFloat
-    var scale: CGFloat = 1
+    let modes: [MeterMode]
+    let meterIndex: Int
+    let onPickMeter: (Int) -> Void
     let action: () -> Void
 
     var body: some View {
-        buttonContent.buttonStyle(PressStyle(scale: 0.97))
-    }
-
-    private var buttonContent: some View {
-        Button(action: action) {
-            holdLabel
-                .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
-        }
-    }
-
-    private var holdLabel: some View {
         ZStack(alignment: .trailing) {
-            Text(frozen ? "hold" : "live")
-                .font(AppTypography.next(size: 29 * k * (scale < 1 ? 0.9 : 1)))
-                .foregroundStyle(frozen ? Palette.accent : Palette.dim)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 17 * k)
-
-            ZStack {
-                Circle()
-                    .fill(Color(hex: 0x070707))
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
-                Circle()
-                    .fill(frozen ? Palette.accent : Color.white)
-                    .frame(width: 126 * k * scale, height: 126 * k * scale)
-                    .scaleEffect(frozen ? 0.9 : 1.0)
+            VStack(alignment: .leading, spacing: 8 * k) {
+                ForEach(modes.indices, id: \.self) { i in
+                    Button {
+                        guard i != meterIndex else { return }
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        onPickMeter(i)
+                    } label: {
+                        Text(modes[i].title)
+                            .font(AppTypography.next(size: 31 * k, weight: i == meterIndex ? .semibold : .medium))
+                            .foregroundStyle(i == meterIndex ? Palette.accent : Palette.dim)
+                            .animation(.easeOut(duration: 0.18), value: meterIndex)
+                            .frame(minWidth: 120 * k, minHeight: 44 * k, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(modes[i].title + " metering")
+                    .accessibilityAddTraits(i == meterIndex ? .isSelected : [])
+                }
             }
-            .frame(width: 175 * k * scale, height: 175 * k * scale)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 17 * k)
+
+            Button(action: action) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: 0x070707))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+                    Circle()
+                        .fill(frozen ? Palette.accent : Color.white)
+                        .frame(width: 126 * k, height: 126 * k)
+                        .scaleEffect(frozen ? 0.9 : 1.0)
+                }
+                .frame(width: 175 * k, height: 175 * k)
+                .contentShape(Circle())
+                .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
+            }
+            .buttonStyle(PressStyle(scale: 0.97))
             .padding(.trailing, 7 * k)
+            .accessibilityLabel(frozen ? "Release hold" : "Hold reading")
         }
     }
 }
