@@ -1035,7 +1035,8 @@ struct PeakingOverlay: View {
             if let image = feed.image {
                 Image(uiImage: image)
                     .resizable()
-                    .interpolation(.none)
+                    .interpolation(.high)
+                    .antialiased(true)
             }
         }
         .allowsHitTesting(false)

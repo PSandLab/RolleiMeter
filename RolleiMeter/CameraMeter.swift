@@ -396,9 +396,16 @@ final class CameraMeter: NSObject, ObservableObject,
             let image = CIImage(cvPixelBuffer: pb).oriented(rotation.imageOrientation)
 
             guard let kernel = CameraMeter.dofKernel,
-                  let output = kernel.apply(extent: image.extent, arguments: [image, Float(near), Float(far)]),
-                  let cg = self.dofContext.createCGImage(output, from: output.extent)
+                  let mask = kernel.apply(extent: image.extent, arguments: [image, Float(near), Float(far)])
             else { return }
+
+            // Display only: soften the hard 1-pixel stair-steps of the depth mask. The depth data
+            // and every distance reading are untouched.
+            let output = mask.clampedToExtent()
+                .applyingGaussianBlur(sigma: 1.0)
+                .cropped(to: mask.extent)
+
+            guard let cg = self.dofContext.createCGImage(output, from: output.extent) else { return }
 
             let uiImage = UIImage(cgImage: cg)
             DispatchQueue.main.async {
