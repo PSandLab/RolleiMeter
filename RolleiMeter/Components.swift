@@ -36,10 +36,10 @@ struct LiquidGrid {
         return CGSize(width: d.width * k, height: d.height * k)
     }
 
-    func rect(col: CGFloat, row: CGFloat, cols: Int, rows: Int) -> CGRect {
+    func rect(col: Int, row: Int, cols: Int, rows: Int) -> CGRect {
         CGRect(
-            x: col * Self.colPitch * k,
-            y: row * Self.rowPitch * k,
+            x: CGFloat(col) * Self.colPitch * k,
+            y: CGFloat(row) * Self.rowPitch * k,
             width: (CGFloat(cols) * Self.colPitch - 50) * k,
             height: (CGFloat(rows) * Self.rowPitch - 49) * k
         )
@@ -47,7 +47,7 @@ struct LiquidGrid {
 }
 
 extension View {
-    func cell(_ grid: LiquidGrid, col: CGFloat, row: CGFloat, cols: Int, rows: Int) -> some View {
+    func cell(_ grid: LiquidGrid, col: Int, row: Int, cols: Int, rows: Int) -> some View {
         let r = grid.rect(col: col, row: row, cols: cols, rows: rows)
         return self
             .frame(width: r.width, height: r.height)
@@ -1048,7 +1048,6 @@ struct PeakingOverlay: View {
 struct HoldControl: View {
     let frozen: Bool
     let k: CGFloat
-    var tall: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -1062,44 +1061,26 @@ struct HoldControl: View {
         }
     }
 
-    @ViewBuilder
     private var holdLabel: some View {
-        if tall {
-            VStack(spacing: 0) {
-                Text(frozen ? "hold" : "live")
-                    .font(AppTypography.next(size: 29 * k))
-                    .foregroundStyle(frozen ? Palette.accent : Palette.dim)
-                    .padding(.top, 22 * k)
-                Spacer(minLength: 0)
-                holdDisc
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            ZStack(alignment: .trailing) {
-                Text(frozen ? "hold" : "live")
-                    .font(AppTypography.next(size: 29 * k))
-                    .foregroundStyle(frozen ? Palette.accent : Palette.dim)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 17 * k)
+        ZStack(alignment: .trailing) {
+            Text(frozen ? "hold" : "live")
+                .font(AppTypography.next(size: 29 * k))
+                .foregroundStyle(frozen ? Palette.accent : Palette.dim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 17 * k)
 
-                holdDisc
-                    .padding(.trailing, 7 * k)
+            ZStack {
+                Circle()
+                    .fill(Color(hex: 0x070707))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+                Circle()
+                    .fill(frozen ? Palette.accent : Color.white)
+                    .frame(width: 126 * k, height: 126 * k)
+                    .scaleEffect(frozen ? 0.9 : 1.0)
             }
+            .frame(width: 175 * k, height: 175 * k)
+            .padding(.trailing, 7 * k)
         }
-    }
-
-    private var holdDisc: some View {
-        ZStack {
-            Circle()
-                .fill(Color(hex: 0x070707))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
-            Circle()
-                .fill(frozen ? Palette.accent : Color.white)
-                .frame(width: 126 * k, height: 126 * k)
-                .scaleEffect(frozen ? 0.9 : 1.0)
-        }
-        .frame(width: 175 * k, height: 175 * k)
     }
 }
 
