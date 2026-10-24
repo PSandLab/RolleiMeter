@@ -75,6 +75,7 @@ struct ContentView: View {
     @State private var frozenEV: Double?
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
+    @State private var isResuming = false
     @State private var showSettings = false
     @State private var spotActive = false
     @State private var spot = CGPoint(x: 0.5, y: 0.5)
@@ -181,7 +182,7 @@ struct ContentView: View {
                         tooClose: tooClose,
                         aperture: resolvedAperture,
                         feet: useFeet,
-                        isHeld: frozenEV != nil,
+                        isHeld: (frozenEV != nil && !isResuming),
                         k: k,
                         onBegin: beginFocusDrag,
                         onSlide: slideFocus,
@@ -192,7 +193,7 @@ struct ContentView: View {
                     .modifier(SoftCard(k: k, on: p))
                     .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
-                    HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
+                    HoldControl(frozen: (frozenEV != nil && !isResuming), k: k, action: toggleFreeze)
                         .modifier(SoftCard(k: k, on: p))
                         .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
 
@@ -232,7 +233,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 UIApplication.shared.isIdleTimerDisabled = true
-                meter.start()
+                if frozenEV == nil {
+                    meter.start()
+                }
             } else {
                 UIApplication.shared.isIdleTimerDisabled = false
                 meter.stop()
@@ -282,14 +285,15 @@ struct ContentView: View {
     }
 
     private func toggleFreeze() {
+        guard !isResuming else { return }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         if frozenEV == nil {
             shutterBlink()
             frozenPreviewImage = meter.previewSnapshot()
             frozenEV = liveEV
             frozenDist = meter.distance
-            // Freeze the LiDAR depth map snapshot in memory
             meter.freezeDepth()
+            meter.pause()
             if manualFocus {
                 updateDoFOverlay()
             }
@@ -311,12 +315,19 @@ struct ContentView: View {
     }
 
     private func unfreeze() {
-        frozenEV = nil
-        frozenDist = nil
-        frozenPreviewImage = nil
+        guard frozenEV != nil || isResuming else { return }
+        isResuming = true
         meter.unfreezeDepth()
-        if manualFocus {
-            updateDoFOverlay()
+        meter.resume {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                self.frozenEV = nil
+                self.frozenDist = nil
+                self.frozenPreviewImage = nil
+                self.isResuming = false
+                if self.manualFocus {
+                    self.updateDoFOverlay()
+                }
+            }
         }
     }
 
@@ -583,7 +594,7 @@ struct ContentView: View {
                     .opacity(blink ? 0.9 : 0)
                     .allowsHitTesting(false)
 
-                EVChip(damp: evDamp, frozen: frozenEV != nil, spot: spotActive)
+                EVChip(damp: evDamp, frozen: (frozenEV != nil && !isResuming), spot: spotActive)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(10)
                     .allowsHitTesting(false)

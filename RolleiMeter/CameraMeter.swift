@@ -39,6 +39,10 @@ final class CameraMeter: NSObject, ObservableObject,
     private static let phoneFocalMM = 6.8
     private var phoneMinFocusMM = 200.0
 
+    // Resume sync & warm-up
+    private var resumeFrameCount = 0
+    private var onResumeReady: (() -> Void)?
+
     // LiDAR Pure Depth-of-Field Overlay & Snapshot Cloning
     private var dofNear: Double = 0.9
     private var dofFar: Double = 2.0
@@ -153,6 +157,33 @@ final class CameraMeter: NSObject, ObservableObject,
     func stop() {
         sessionQueue.async {
             if self.session.isRunning { self.session.stopRunning() }
+        }
+    }
+
+    /// Powers down the camera sensor completely during HOLD to eliminate battery drain.
+    func pause() {
+        sessionQueue.async {
+            if self.session.isRunning {
+                self.session.stopRunning()
+            }
+        }
+    }
+
+    /// Resumes the camera and notifies when valid frames have arrived and light has stabilized.
+    func resume(onReady: (() -> Void)? = nil) {
+        sessionQueue.async {
+            self.lock.lock()
+            self.resumeFrameCount = 0
+            self.onResumeReady = onReady
+            self.lock.unlock()
+
+            if !self.session.isRunning {
+                self.session.startRunning()
+            } else {
+                if let onReady = onReady {
+                    DispatchQueue.main.async { onReady() }
+                }
+            }
         }
     }
 
@@ -327,12 +358,14 @@ final class CameraMeter: NSObject, ObservableObject,
     private func configureAndRun() {
         if !configured {
             configured = buildSession(lidar: true) || buildSession(lidar: false)
-            if configured, let dev = device { tune(dev) }
+            if configured, let dev = device {
+                tune(dev)
+                currentBias = 0
+                lastBiasUpdate = 0
+                setBias(0)
+            }
         }
         if configured {
-            currentBias = 0
-            lastBiasUpdate = 0
-            setBias(0)
             if !session.isRunning { session.startRunning() }
         }
     }
@@ -614,10 +647,24 @@ final class CameraMeter: NSObject, ObservableObject,
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let dev = device, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        var readyCallback: (() -> Void)?
         lock.lock()
+        if onResumeReady != nil {
+            resumeFrameCount += 1
+            if resumeFrameCount >= 3 {
+                readyCallback = onResumeReady
+                onResumeReady = nil
+            }
+        }
         latestPreviewPixelBuffer = pb
         lensNow = dev.lensPosition
         lock.unlock()
+
+        if let readyCallback = readyCallback {
+            DispatchQueue.main.async {
+                readyCallback()
+            }
+        }
 
         if !hasLiDAR {
             let focusM = focusDistance(forLensPosition: dev.lensPosition)

@@ -13,20 +13,11 @@ targets:
     platform: iOS
     sources:
       - path: RolleiMeter
-        excludes:
-          - Fonts/**
-      - path: RolleiMeter/Fonts/AtkinsonHyperlegibleMono.ttf
-        buildPhase: resources
-      - path: RolleiMeter/Fonts/AtkinsonHyperlegibleNext.ttf
-        buildPhase: resources
     info:
       path: RolleiMeter/Info.plist
       properties:
         CFBundleDisplayName: RolleiMeter
         NSCameraUsageDescription: The camera is used to measure light.
-        UIAppFonts:
-          - AtkinsonHyperlegibleMono.ttf
-          - AtkinsonHyperlegibleNext.ttf
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

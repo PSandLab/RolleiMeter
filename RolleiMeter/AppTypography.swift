@@ -1,8 +1,6 @@
 import SwiftUI
 
 enum AppTypography {
-    static func registerBundledFonts() {}
-
     static func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
     }
