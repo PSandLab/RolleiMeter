@@ -106,68 +106,11 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { screen in
-            let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
-            let k = grid.k
-            let p = grid.portrait
-
-            ZStack {
-                Palette.background
-
-                ZStack(alignment: .topLeading) {
-                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
-                        .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
-
-                    MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
-                        .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
-
-                    FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
-                        .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
-
-                    preview(k: k)
-                        .cell(grid, col: p ? 0 : 3, row: 1, cols: 6, rows: p ? 6 : 5)
-
-                    AperturePanel(
-                        index: resolvedApertureIndex,
-                        auto: autoAperture,
-                        lamp: autoLampState,
-                        k: k,
-                        onPick: pickAperture,
-                        onTap: toggleAutoAperture,
-                        onHome: returnHomeAperture
-                    )
-                    .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
-
-                    FocusPanel(
-                        position: focusPos,
-                        manual: manualFocus,
-                        touching: focusTouching,
-                        available: meter.canFocusManually,
-                        lidarDistance: shownDistance,
-                        hasLiDAR: meter.hasLiDAR,
-                        tooClose: tooClose,
-                        aperture: resolvedAperture,
-                        feet: useFeet,
-                        isHeld: frozenEV != nil,
-                        k: k,
-                        onBegin: beginFocusDrag,
-                        onSlide: slideFocus,
-                        onEnd: endFocusDrag,
-                        onAuto: resumeAutoFocus,
-                        onUnits: toggleUnits
-                    )
-                    .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
-
-                    HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
-                        .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
-
-                    // Last in the stack so the camera view (which overflows its cell) can't block taps.
-                    topBar(k: k)
-                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: 1)
-                }
-                .frame(width: grid.size.width, height: grid.size.height)
-                .offset(y: grid.yShift)
+            if screen.size.height > screen.size.width {
+                portraitLayout(screen)
+            } else {
+                landscapeLayout(screen)
             }
-            .frame(width: screen.size.width, height: screen.size.height)
         }
         .ignoresSafeArea()
         .background(Palette.background.ignoresSafeArea())
@@ -233,6 +176,128 @@ struct ContentView: View {
         .onChange(of: advice?.label) {
             if advice != nil { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.45) }
         }
+    }
+
+    // MARK: - Layouts
+
+    private func landscapeLayout(_ screen: GeometryProxy) -> some View {
+        let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
+        let k = grid.k
+
+        return ZStack {
+            Palette.background
+
+            ZStack(alignment: .topLeading) {
+                shutterPanel(k).cell(grid, col: 0, row: 0, cols: 3, rows: 2)
+                meterPanel(k).cell(grid, col: 0, row: 2, cols: 3, rows: 2)
+                filmPanel(k).cell(grid, col: 0, row: 4, cols: 3, rows: 2)
+                preview(k: k).cell(grid, col: 3, row: 1, cols: 6, rows: 5)
+                aperturePanel(k).cell(grid, col: 9, row: 0, cols: 3, rows: 2)
+                focusPanel(k).cell(grid, col: 9, row: 2, cols: 3, rows: 2)
+                holdPanel(k).cell(grid, col: 9, row: 4, cols: 3, rows: 2)
+                // Last so the camera view (which overflows its cell) can't block taps.
+                topBar(k: k).cell(grid, col: 3, row: 0, cols: 6, rows: 1)
+            }
+            .frame(width: grid.size.width, height: grid.size.height)
+        }
+        .frame(width: screen.size.width, height: screen.size.height)
+    }
+
+    /// Portrait: gear on top, then full-width Shutter, Aperture and Film strips,
+    /// the viewfinder filling the middle, and Focus + Hold along the bottom.
+    private func portraitLayout(_ screen: GeometryProxy) -> some View {
+        let w = screen.size.width
+        let k = max(0.40, min(w / 780.0, 0.58))
+        let pad: CGFloat = 14
+        let gap = 18 * k
+        let rowW = w - pad * 2
+
+        return ZStack {
+            Palette.background
+
+            VStack(spacing: gap) {
+                topBar(k: k, centered: true)
+                    .frame(width: rowW, height: 70 * k)
+                    .padding(.top, screen.safeAreaInsets.top)
+                    .zIndex(1)
+
+                shutterPanel(k)
+                    .frame(width: rowW, height: 189 * k)
+                    .zIndex(1)
+
+                aperturePanel(k)
+                    .frame(width: rowW, height: 150 * k)
+                    .zIndex(1)
+
+                filmPanel(k)
+                    .frame(width: rowW, height: 140 * k)
+                    .zIndex(1)
+
+                preview(k: k)
+                    .frame(width: rowW)
+                    .frame(maxHeight: .infinity)
+                    .zIndex(0)
+
+                HStack(spacing: gap) {
+                    focusPanel(k).frame(width: rowW * 0.42)
+                    holdPanel(k).frame(maxWidth: .infinity)
+                }
+                .frame(width: rowW, height: 189 * k)
+                .padding(.bottom, screen.safeAreaInsets.bottom)
+                .zIndex(1)
+            }
+            .frame(width: w, height: screen.size.height, alignment: .top)
+        }
+        .frame(width: w, height: screen.size.height)
+    }
+
+    private func shutterPanel(_ k: CGFloat) -> some View {
+        ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
+    }
+
+    private func meterPanel(_ k: CGFloat) -> some View {
+        MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
+    }
+
+    private func filmPanel(_ k: CGFloat) -> some View {
+        FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
+    }
+
+    private func holdPanel(_ k: CGFloat) -> some View {
+        HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
+    }
+
+    private func aperturePanel(_ k: CGFloat) -> some View {
+        AperturePanel(
+            index: resolvedApertureIndex,
+            auto: autoAperture,
+            lamp: autoLampState,
+            k: k,
+            onPick: pickAperture,
+            onTap: toggleAutoAperture,
+            onHome: returnHomeAperture
+        )
+    }
+
+    private func focusPanel(_ k: CGFloat) -> some View {
+        FocusPanel(
+            position: focusPos,
+            manual: manualFocus,
+            touching: focusTouching,
+            available: meter.canFocusManually,
+            lidarDistance: shownDistance,
+            hasLiDAR: meter.hasLiDAR,
+            tooClose: tooClose,
+            aperture: resolvedAperture,
+            feet: useFeet,
+            isHeld: frozenEV != nil,
+            k: k,
+            onBegin: beginFocusDrag,
+            onSlide: slideFocus,
+            onEnd: endFocusDrag,
+            onAuto: resumeAutoFocus,
+            onUnits: toggleUnits
+        )
     }
 
     private func pushConfig() {
@@ -566,13 +631,15 @@ struct ContentView: View {
     }
 
     /// Slim bar above the viewfinder: app name on the left, Liquid Glass gear on the right.
-    private func topBar(k: CGFloat) -> some View {
+    private func topBar(k: CGFloat, centered: Bool = false) -> some View {
         HStack {
-            Text("ROLLEIMETER")
-                .font(AppTypography.next(size: 22 * k, weight: .medium))
-                .tracking(2.6 * k)
-                .foregroundStyle(Palette.dim)
-                .padding(.leading, 17 * k)
+            if !centered {
+                Text("ROLLEIMETER")
+                    .font(AppTypography.next(size: 22 * k, weight: .medium))
+                    .tracking(2.6 * k)
+                    .foregroundStyle(Palette.dim)
+                    .padding(.leading, 17 * k)
+            }
             Spacer()
             Button {
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred()
@@ -587,6 +654,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Settings")
+            if centered { Spacer() }
         }
     }
 
