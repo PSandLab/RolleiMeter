@@ -225,6 +225,8 @@ struct ContentView: View {
                     .frame(width: rowW, height: 189 * k)
                     .zIndex(1)
 
+                hairline(rowW)
+
                 aperturePanel(k)
                     .frame(width: rowW, height: 150 * k)
                     .zIndex(1)
@@ -237,6 +239,10 @@ struct ContentView: View {
                     .frame(width: rowW)
                     .frame(maxHeight: .infinity)
                     .zIndex(0)
+
+                meterPanel(k, compact: true)
+                    .frame(width: rowW, height: 70 * k)
+                    .zIndex(1)
 
                 HStack(spacing: gap) {
                     focusPanel(k).frame(width: rowW * 0.42)
@@ -251,12 +257,19 @@ struct ContentView: View {
         .frame(width: w, height: screen.size.height)
     }
 
+    /// Leica-style rule between readouts: no boxes, just a fine line.
+    private func hairline(_ width: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.10))
+            .frame(width: width, height: 0.5)
+    }
+
     private func shutterPanel(_ k: CGFloat) -> some View {
         ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
     }
 
-    private func meterPanel(_ k: CGFloat) -> some View {
-        MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
+    private func meterPanel(_ k: CGFloat, compact: Bool = false) -> some View {
+        MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode, compact: compact)
     }
 
     private func filmPanel(_ k: CGFloat) -> some View {

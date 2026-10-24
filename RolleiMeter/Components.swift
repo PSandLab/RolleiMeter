@@ -123,7 +123,7 @@ extension View {
 private struct PanelTitle: View {
     let text: String
     let k: CGFloat
-    var color: Color = Palette.text
+    var color: Color = Palette.dim
 
     var body: some View {
         Text(text)
@@ -325,6 +325,8 @@ struct MeterPanel: View {
     let index: Int
     let k: CGFloat
     let onPick: (Int) -> Void
+    /// One quiet line of words with no title or captions (portrait).
+    var compact: Bool = false
 
     private func caption(_ mode: MeterMode) -> String {
         switch mode {
@@ -345,18 +347,20 @@ struct MeterPanel: View {
                     } label: {
                         VStack(spacing: 6 * k) {
                             Text(modes[i].title)
-                                .font(AppTypography.next(size: 31 * k, weight: .medium))
+                                .font(AppTypography.next(size: (compact ? 34 : 31) * k, weight: .medium))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
-                            Text(caption(modes[i]))
-                                .font(AppTypography.next(size: 23 * k))
-                                .lineLimit(1)
+                            if !compact {
+                                Text(caption(modes[i]))
+                                    .font(AppTypography.next(size: 23 * k))
+                                    .lineLimit(1)
+                            }
                         }
-                        .foregroundStyle(i == index ? Palette.accent : Palette.text)
+                        .foregroundStyle(i == index ? Palette.accent : (compact ? Palette.dim : Palette.text))
                         .animation(.easeOut(duration: 0.18), value: index)
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 72 * k)
-                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.top, compact ? 0 : 72 * k)
+                        .frame(maxHeight: .infinity, alignment: compact ? .center : .top)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -364,8 +368,10 @@ struct MeterPanel: View {
                     .accessibilityAddTraits(i == index ? .isSelected : [])
                 }
             }
-            PanelTitle(text: "METER", k: k)
-                .allowsHitTesting(false)
+            if !compact {
+                PanelTitle(text: "METER", k: k)
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
