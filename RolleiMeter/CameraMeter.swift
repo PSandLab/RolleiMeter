@@ -77,7 +77,6 @@ final class CameraMeter: NSObject, ObservableObject,
     private var lastPublish: CFTimeInterval = 0
     private var lastDepthPublish: CFTimeInterval = 0
 
-    private let highlightStops = 1.5
     private var currentBias: Float = 0
     private var lastBiasUpdate: CFTimeInterval = 0
 
@@ -113,6 +112,61 @@ final class CameraMeter: NSObject, ObservableObject,
     private static let matrixWeightTotal: Double = {
         matrixGrid.reduce(0) { $0 + $1.weight }
     }()
+
+    // The Rec. 709 luma weights folded into the sRGB-to-linear table. Each entry is the same
+    // product the per-pixel code used to compute, so the sums are bit-for-bit unchanged.
+    private static let lutR: [Double] = lut.map { 0.2126 * $0 }
+    private static let lutG: [Double] = lut.map { 0.7152 * $0 }
+    private static let lutB: [Double] = lut.map { 0.0722 * $0 }
+    private static let matrixWeights: [Double] = matrixGrid.map { $0.weight }
+    private static let highlightDivisor: Double = pow(2.0, 1.5)
+
+    /// Sample offsets inside the spot circle (13 x 13 grid, same order as before).
+    private static let spotOffsets: [(u: Double, v: Double)] = {
+        let steps = 13
+        var out: [(u: Double, v: Double)] = []
+        for j in 0..<steps {
+            for i in 0..<steps {
+                let u = (Double(i) + 0.5) / Double(steps) * 2 - 1
+                let v = (Double(j) + 0.5) / Double(steps) * 2 - 1
+                if u * u + v * v > 1 { continue }
+                out.append((u, v))
+            }
+        }
+        return out
+    }()
+
+    // Frame-queue only: pixel byte offsets of the matrix grid for the current buffer layout,
+    // and a scratch buffer for the highlight percentile. Rebuilt if the layout ever changes.
+    private var planWidth = 0
+    private var planHeight = 0
+    private var planStride = 0
+    private var matrixOffsets: [Int] = []
+    private let highlightScratch = UnsafeMutablePointer<Double>.allocate(capacity: 48 * 36)
+
+    deinit { highlightScratch.deallocate() }
+
+    /// The k-th smallest value (0-based), the same value `sort()[k]` would give, in linear time.
+    private static func kthSmallest(_ a: UnsafeMutablePointer<Double>, count: Int, k: Int) -> Double {
+        var lo = 0
+        var hi = count - 1
+        while lo < hi {
+            let pivot = a[(lo + hi) >> 1]
+            var i = lo
+            var j = hi
+            while i <= j {
+                while a[i] < pivot { i += 1 }
+                while a[j] > pivot { j -= 1 }
+                if i <= j {
+                    let t = a[i]; a[i] = a[j]; a[j] = t
+                    i += 1
+                    j -= 1
+                }
+            }
+            if k <= j { hi = j } else if k >= i { lo = i } else { return a[k] }
+        }
+        return a[k]
+    }
 
     private static func settled(_ value: Double, _ current: inout Double?) -> Double {
         let step = 1.0 / 3.0
@@ -539,6 +593,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let sy = Double(pt.y)
 
         var values: [Double] = []
+        values.reserveCapacity(49)
         let steps = 7
         for j in 0..<steps {
             for i in 0..<steps {
@@ -581,9 +636,9 @@ final class CameraMeter: NSObject, ObservableObject,
     // MARK: - Frame processing (exposure)
 
     private func frameExposure(_ sb: CMSampleBuffer, _ dev: AVCaptureDevice) -> (t: Double, iso: Double, n: Double) {
-        var t = CMTimeGetSeconds(dev.exposureDuration)
-        var iso = Double(dev.iso)
-        var n = Double(dev.lensAperture)
+        var t: Double?
+        var iso: Double?
+        var n: Double?
 
         if let raw = CMGetAttachment(sb, key: kCGImagePropertyExifDictionary, attachmentModeOut: nil),
            let exif = raw as? NSDictionary {
@@ -592,7 +647,10 @@ final class CameraMeter: NSObject, ObservableObject,
                let v = (arr.first as? NSNumber)?.doubleValue, v > 0 { iso = v }
             if let v = exif[kCGImagePropertyExifFNumber as String] as? Double, v > 0 { n = v }
         }
-        return (t, iso, n)
+        // Device values are only a fallback; skip the property reads when EXIF has everything.
+        return (t ?? CMTimeGetSeconds(dev.exposureDuration),
+                iso ?? Double(dev.iso),
+                n ?? Double(dev.lensAperture))
     }
 
     func sampleFrozenDepth(at pt: CGPoint) -> Double? {
@@ -612,6 +670,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let sy = Double(pt.y)
         let r = 0.03
         var values: [Double] = []
+        values.reserveCapacity(49)
         let steps = 7
         for j in 0..<steps {
             for i in 0..<steps {
@@ -656,8 +715,12 @@ final class CameraMeter: NSObject, ObservableObject,
                 onResumeReady = nil
             }
         }
+        let lensPos = dev.lensPosition
         latestPreviewPixelBuffer = pb
-        lensNow = dev.lensPosition
+        lensNow = lensPos
+        let m = mode
+        let sp = spot
+        let rad = spotRadius
         lock.unlock()
 
         if let readyCallback = readyCallback {
@@ -667,10 +730,10 @@ final class CameraMeter: NSObject, ObservableObject,
         }
 
         if !hasLiDAR {
-            let focusM = focusDistance(forLensPosition: dev.lensPosition)
             let now = CACurrentMediaTime()
             if now - lastDepthPublish > 0.15 {
                 lastDepthPublish = now
+                let focusM = focusDistance(forLensPosition: lensPos)
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     if focusM.isFinite && focusM > 0.1 {
@@ -685,12 +748,6 @@ final class CameraMeter: NSObject, ObservableObject,
         guard e.t > 0, e.iso > 0, e.n > 0 else { return }
         let evCam = log2(e.n * e.n / e.t) - log2(e.iso / 100.0)
 
-        lock.lock()
-        let m = mode
-        let sp = spot
-        let rad = spotRadius
-        lock.unlock()
-
         CVPixelBufferLockBaseAddress(pb, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pb) else { return }
@@ -698,31 +755,45 @@ final class CameraMeter: NSObject, ObservableObject,
         let h = CVPixelBufferGetHeight(pb)
         let bpr = CVPixelBufferGetBytesPerRow(pb)
         let ptr = base.assumingMemoryBound(to: UInt8.self)
-        let lut = CameraMeter.lut
+        let lutR = CameraMeter.lutR
+        let lutG = CameraMeter.lutG
+        let lutB = CameraMeter.lutB
 
         func lum(_ x: Int, _ y: Int) -> Double {
             let o = y * bpr + x * 4
-            let b = lut[Int(ptr[o])]
-            let g = lut[Int(ptr[o + 1])]
-            let r = lut[Int(ptr[o + 2])]
-            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+            return lutR[Int(ptr[o + 2])] + lutG[Int(ptr[o + 1])] + lutB[Int(ptr[o])]
         }
 
-        func matrixSample(needPoints: Bool) -> (y: Double, ys: [Double]) {
-            let grid = CameraMeter.matrixGrid
-            var ys: [Double] = []
-            if needPoints { ys.reserveCapacity(grid.count) }
-            var sum = 0.0
+        if planWidth != w || planHeight != h || planStride != bpr {
             let dw = Double(w)
             let dh = Double(h)
-            for pt in grid {
+            matrixOffsets = CameraMeter.matrixGrid.map { pt in
                 let px = min(max(Int(pt.fx * dw), 0), w - 1)
                 let py = min(max(Int(pt.fy * dh), 0), h - 1)
-                let y = lum(px, py)
-                if needPoints { ys.append(y) }
-                sum += pt.weight * y
+                return py * bpr + px * 4
             }
-            return (sum / CameraMeter.matrixWeightTotal, ys)
+            planWidth = w
+            planHeight = h
+            planStride = bpr
+        }
+
+        let offsets = matrixOffsets
+        let scratch = highlightScratch
+
+        func matrixSample(needPoints: Bool) -> Double {
+            let weights = CameraMeter.matrixWeights
+            var sum = 0.0
+            offsets.withUnsafeBufferPointer { offs in
+                weights.withUnsafeBufferPointer { wts in
+                    for i in 0..<offs.count {
+                        let o = offs[i]
+                        let y = lutR[Int(ptr[o + 2])] + lutG[Int(ptr[o + 1])] + lutB[Int(ptr[o])]
+                        if needPoints { scratch[i] = y }
+                        sum += wts[i] * y
+                    }
+                }
+            }
+            return sum / CameraMeter.matrixWeightTotal
         }
 
         let yRaw: Double
@@ -733,33 +804,25 @@ final class CameraMeter: NSObject, ObservableObject,
             let cx = Double(sp.x) * Double(w)
             let cy = Double(sp.y) * Double(h)
             let r = Double(rad) * Double(w)
-            let steps = 13
             var sum = 0.0
             var count = 0.0
-            for j in 0..<steps {
-                for i in 0..<steps {
-                    let u = (Double(i) + 0.5) / Double(steps) * 2 - 1
-                    let v = (Double(j) + 0.5) / Double(steps) * 2 - 1
-                    if u * u + v * v > 1 { continue }
-                    let x = min(max(Int(cx + u * r), 0), w - 1)
-                    let y = min(max(Int(cy + v * r), 0), h - 1)
-                    sum += lum(x, y)
-                    count += 1
-                }
+            for o in CameraMeter.spotOffsets {
+                let x = min(max(Int(cx + o.u * r), 0), w - 1)
+                let y = min(max(Int(cy + o.v * r), 0), h - 1)
+                sum += lum(x, y)
+                count += 1
             }
             yRaw = count > 0 ? sum / count : 0.18
-            deltaNow = log2(max(yRaw, 0.0005) / max(matrixSample(needPoints: false).y, 0.0005))
+            deltaNow = log2(max(yRaw, 0.0005) / max(matrixSample(needPoints: false), 0.0005))
 
         case .matrix:
-            yRaw = matrixSample(needPoints: false).y
+            yRaw = matrixSample(needPoints: false)
 
         case .highlight:
-            let sample = matrixSample(needPoints: true)
-            var ys = sample.ys
-            let yMatrix = sample.y
-            ys.sort()
-            let p98 = ys[Int(Double(ys.count - 1) * 0.98)]
-            yRaw = max(yMatrix, p98 / pow(2.0, highlightStops))
+            let yMatrix = matrixSample(needPoints: true)
+            let n = offsets.count
+            let p98 = CameraMeter.kthSmallest(scratch, count: n, k: Int(Double(n - 1) * 0.98))
+            yRaw = max(yMatrix, p98 / CameraMeter.highlightDivisor)
         }
 
         let yRef = max(yRaw, 0.0005)
