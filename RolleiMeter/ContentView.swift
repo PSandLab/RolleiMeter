@@ -76,6 +76,10 @@ struct ContentView: View {
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
     @State private var isResuming = false
+    // Wake-up cover: the held frame softens while the camera restarts, then dissolves into live.
+    @State private var snapshotOpacity: Double = 1
+    @State private var snapshotBlur: CGFloat = 0
+    @State private var wakeToken = 0
     @State private var showSettings = false
     @State private var spotActive = false
     @State private var spot = CGPoint(x: 0.5, y: 0.5)
@@ -290,6 +294,9 @@ struct ContentView: View {
         if frozenEV == nil {
             shutterBlink()
             let snapshot = meter.previewSnapshot()
+            wakeToken &+= 1            // cancels any pending wake-up cleanup
+            snapshotOpacity = 1
+            snapshotBlur = 0
             // Fade the held frame in over the live image instead of swapping it in one frame.
             withAnimation(.easeOut(duration: 0.28)) {
                 frozenPreviewImage = snapshot
@@ -322,16 +329,37 @@ struct ContentView: View {
     private func unfreeze() {
         guard frozenEV != nil || isResuming else { return }
         isResuming = true
+        wakeToken &+= 1
+        let token = wakeToken
         meter.unfreezeDepth()
+
+        // Immediate feedback: the held frame starts to soften while the camera wakes up.
+        withAnimation(.easeInOut(duration: 0.7)) { snapshotBlur = 7 }
+
         meter.resume {
-            // Long, even crossfade from the held frame back to the live image.
-            withAnimation(.easeInOut(duration: 0.55)) {
-                self.frozenEV = nil
-                self.frozenDist = nil
-                self.frozenPreviewImage = nil
-                self.isResuming = false
-                if self.manualFocus {
-                    self.updateDoFOverlay()
+            // Give auto-exposure a moment to settle before revealing the live image.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                guard token == self.wakeToken else { return }
+                withAnimation(.easeInOut(duration: 0.95)) {
+                    self.snapshotOpacity = 0
+                    self.snapshotBlur = 18
+                    self.frozenEV = nil
+                    self.frozenDist = nil
+                    self.isResuming = false
+                    if self.manualFocus {
+                        self.updateDoFOverlay()
+                    }
+                }
+                // Remove the (now invisible) snapshot once the dissolve has finished.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    guard token == self.wakeToken else { return }
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) {
+                        self.frozenPreviewImage = nil
+                        self.snapshotOpacity = 1
+                        self.snapshotBlur = 0
+                    }
                 }
             }
         }
@@ -449,7 +477,9 @@ struct ContentView: View {
                         .resizable()
                         .scaledToFill()
                         .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: snapshotBlur, opaque: true)
                         .clipped()
+                        .opacity(snapshotOpacity)
                         .overlay(Palette.lensLight.opacity(0.04))
                         .transition(.opacity)
                         .allowsHitTesting(false)
