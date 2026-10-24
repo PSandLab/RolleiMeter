@@ -15,6 +15,37 @@ private struct GlassCircle: ViewModifier {
     }
 }
 
+/// Portrait only: a gentle card with a hairline edge (and optionally a rule under the title)
+/// so neighbouring readouts never run into each other.
+private struct SoftCard: ViewModifier {
+    let k: CGFloat
+    let on: Bool
+    var rule: Bool = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if on {
+            let shape = RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
+            content
+                .background(shape.fill(Color.white.opacity(0.045)))
+                .overlay(alignment: .top) {
+                    if rule {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.09))
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 16 * k)
+                            .padding(.top, 62 * k)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5).allowsHitTesting(false))
+        } else {
+            content
+        }
+    }
+}
+
 private struct SpotReticle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -115,9 +146,11 @@ struct ContentView: View {
 
                 ZStack(alignment: .topLeading) {
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
+                        .modifier(SoftCard(k: k, on: p, rule: true))
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     MeterPanel(modes: meterModes, index: meterIndex, k: k, onPick: pickMeterMode)
+                        .modifier(SoftCard(k: k, on: p, rule: true))
                         .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     FilmPanel(isoIndex: $isoIndex, useDIN: $useDIN, k: k)
@@ -135,6 +168,7 @@ struct ContentView: View {
                         onTap: toggleAutoAperture,
                         onHome: returnHomeAperture
                     )
+                    .modifier(SoftCard(k: k, on: p, rule: true))
                     .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FocusPanel(
@@ -155,9 +189,11 @@ struct ContentView: View {
                         onAuto: resumeAutoFocus,
                         onUnits: toggleUnits
                     )
+                    .modifier(SoftCard(k: k, on: p))
                     .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     HoldControl(frozen: frozenEV != nil, k: k, action: toggleFreeze)
+                        .modifier(SoftCard(k: k, on: p))
                         .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
 
                     // Last in the stack so the camera view (which overflows its cell) can't block taps.
