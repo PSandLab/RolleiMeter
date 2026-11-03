@@ -34,8 +34,9 @@ struct GearPickerScreen: View {
 
                 LabeledContent("Lens") {
                     Text(gear.hasLens ? gear.lensName : "Body only")
+                        .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
 
                 if gear.hasLens {

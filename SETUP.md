@@ -1,39 +1,52 @@
 # RolleiMeter
 
+A light meter and film logbook for people shooting film. Native SwiftUI, iOS 17 and later, with Liquid Glass on iOS 26 and later.
+
 The GitHub workflow builds an **unsigned** .ipa. Sign and install it with your own signer.
 
 ## Build
-Actions tab > Build IPA > Run workflow. Download the `RolleiMeter-ipa` artifact, unzip, sign `RolleiMeter.ipa`.
+Actions tab > Build IPA > Run workflow. Download the `RolleiMeter-ipa` artifact, unzip, sign `RolleiMeter.ipa`. Locally, `python3 build.py` does the same and drops the file in `~/Downloads`.
 
-## Using it
-Landscape only, both directions. Dark, with nothing hidden behind menus: every control is on the screen, laid out on a 12 x 6 grid.
+## The viewfinder
+The camera fills the middle of the screen. Everything else is a floating readout tile, so nothing is hidden behind a menu.
 
-- **Viewfinder** (centre). The live camera. **Tap** to measure distance there (white bracket = where LiDAR reads). **Press, hold and drag** to spot meter that point (circle; pinch resizes). The two points are independent: meter the face, focus on the eyes.
-- **SHUTTER** (top left). The metered shutter speed for the selected aperture. The wheel turns to the Rollei's nearest marked speed. Yellow = correct, orange = slower than 1/60, red = out of range (the amount over or under is shown instead of "sec").
-- **METER** (middle left). Multi, Bright (highlights) or Spot. Tap to switch.
-- **FILM** (bottom left, yellow). Film speed. **Drag** sideways to change it in thirds of a stop, **tap** to switch ISO / DIN, **hold** to jump back to 100.
-- **EV bar** (top centre). Exposure compensation, -2 to +2 in thirds. Drag along the bar, double-tap to reset to 0.
-- **APERTURE** (top right). Drag sideways to pick f/2.8 to f/22. **Tap** for auto aperture (picks the widest stop that still gives a usable shutter speed; an "A" lights in green / orange / red), **hold** to jump back to f/8.
-- **FOCUS** (middle right). Manual focus on the Rollei's own scale: 0.9 m at the left, infinity at the right, with the lens's marked distances. Put a finger on the panel and **slide left / right**: the lens follows. The **red band** is the depth of field at the selected aperture, so you can see at a glance what will be sharp, and the **number** at the top right is the distance you've set (tap it to switch metres / feet). While you slide, the viewfinder dims and the sharp areas turn red (focus peaking); lift your finger and the red stays for two seconds. **Double-tap** to go back to autofocus. Top left says AF or MF. In autofocus, LiDAR iPhones show the measured distance and its red band instead.
-- **Round button** (bottom right), or a **volume button**, freezes exposure and distance ("hold"). Press again to release.
-- **SET** (top right of the viewfinder): units, calibration and arm offset. Top left of the viewfinder shows EV, HOLD / SPOT and any compensation.
-- Full-screen: status bar and home indicator are hidden (swipe up from the bottom edge to reach the home bar).
+- **Viewfinder.** Tap to measure the distance there (the white bracket is where LiDAR reads). Press, hold and drag to spot meter that point; pinch to resize the circle. The two points are independent: meter the face, focus on the eyes.
+- **Shutter.** The metered speed for the selected aperture. The wheel turns to the gear's nearest marked speed. Accent colour = correct, orange = slower than 1/60, red = out of range (the amount over or under is shown instead of "seconds").
+- **Film.** Film name, the speed you are rating it at, and the camera it lives in. **Drag** sideways to rate the ISO in third stops, **tap** to open the logbook, **hold** to snap back to the box speed.
+- **Frame.** Frame number against the roll length, plus how many frames are logged. Tap to open the frame list.
+- **Aperture.** Drag sideways to pick a stop. **Tap** for auto aperture (the widest stop that still gives a usable shutter speed; "AUTO" lights in green, orange or red), **hold** to jump back to the default stop.
+- **Focus.** Manual focus on the lens's own scale, 0.9 m at the left and infinity at the right. Slide to rack focus. The **amber band** is the depth of field at the selected aperture, so you can see what will be sharp, and the number at the top right is the distance you set (tap to switch metres / feet). **Double-tap** to return to autofocus. "Autofocus" reads green while the LiDAR measurement is valid and red when the subject is closer than the lens can focus.
+- **Shutter button** (bottom right), or a volume button, freezes exposure and distance — "hold". While held it becomes a discard button and a log button; the log button saves the frame with its photo, then releases.
+- **Metering menu** (left of the shutter button): Multi, Bright or Spot.
+- **Top bar.** The ±EV pill opens exposure compensation; the stack icon opens the logbook on the Scans tab; the gear opens Settings.
+
+## The logbook
+A three-tab sheet, all standard iOS lists.
+
+- **Roll.** The loaded stock with its artwork and frame count, the camera and lens in use, the film library, share actions, and "Complete roll".
+- **Film library.** Searchable, grouped by brand, filtered by Colour / B&W / Slide / Custom. Pick a stock, choose the speed variant, the roll length, and whether it is expired (the app adds about a stop of compensation per decade for colour negative). Custom stocks you save are kept in the Custom tab.
+- **Camera & Lens.** A drill-down: pick a body by brand, then its mount, then the lens. Fixed-lens bodies mount in one tap. Custom bodies and lenses can be built and saved here.
+- **Frames.** Every logged frame grouped by roll, with a thumbnail, the exposure and the note. Swipe to delete; tap for the full record, the photo viewer and a share action.
+- **Scans.** Import a folder of lab scans or individual files, match them to frames, nudge the match with a stepper, then write EXIF/XMP into the files or share them.
 
 ## Metering
 - **Multi:** centre-weighted average of the frame, placed at middle grey.
 - **Bright:** same, except if the bright end of the scene (98th percentile) would land more than 1.5 stops above grey, the reading is raised so it sits at +1.5. It can only ever give the same or less exposure than Multi.
 - **Spot:** the circle you held.
-- **The preview shows the metered exposure.** The phone's exposure is steered so the metered reference sits at middle grey. Tap a bright spot and the whole view darkens by the same number of stops the shutter speed moves. Bright mode darkens by exactly the protection it applies. The preview takes a second or two to settle after a change; the shutter speeds don't wait for it.
-- HDR, low-light boost and wide colour are switched off to keep the pixels plain. True RAW isn't available for live metering on iOS.
+- **The preview shows the metered exposure.** The phone's exposure is steered so the metered reference sits at middle grey. Tap a bright spot and the whole view darkens by the same number of stops the shutter speed moves. Bright mode darkens by exactly the protection it applies.
 
 ## Calibrate (optional)
-Leave it at 0 and shoot a roll first. To check: in full sun at ISO 100, f/16 should show about 1/125. Faster? Tap Calibrate down. Slower? Up. Each tap is 1/3 stop.
+Leave it at 0 and shoot a roll first. To check: in full sun at ISO 100, f/16 should show about 1/125. Faster? Tap Calibration down. Slower? Up. Each tap is 1/3 stop.
+
+## Design notes
+- Colours come from the system: `systemBackground`, `secondarySystemGroupedBackground`, `.label`, `.separator`, plus one amber accent declared in the asset catalog (`AccentColor`).
+- Readouts use the system material; Liquid Glass is reserved for the control layer (the shutter button, the EV pill and the round buttons) exactly as Apple's guidance asks.
+- Text uses Dynamic Type styles in the sheets and a `k`-scaled type ramp in the meter, so the instrument stays legible at any screen size.
+- The logbook, gear picker and scan matcher are plain `List`/`Form` flows: system rows, separators, swipe actions, search fields and empty states.
 
 ## Notes
 - The sensor is natively landscape, so metering and LiDAR read it unrotated. Turning the phone between the two landscape orientations only turns the preview.
-- Depth of field uses a 0.03 mm circle of confusion and the Sonnar's 40 mm focal length.
+- Depth of field uses a 0.03 mm circle of confusion and the configured lens focal length.
 - LiDAR reads roughly 0.3 m to 5 m. Beyond that the distance readout disappears. Non-LiDAR phones have no distance readout.
-- iOS sets focus as a 0 to 1 lens position, not a distance. The app converts your distance to that using a typical focal length for the main camera, so the distance on the slider is approximate. Trust the red peaking for what is actually sharp, and compare with the LiDAR reading in autofocus to see how close the two are.
-- The red band uses the Rollei's depth of field (40 mm lens, 0.03 mm circle of confusion), not the phone's.
-- Peaking is only calculated while you are using the slider, so it costs nothing the rest of the time. If it lights up too much or too little, change `peakThreshold` at the top of `CameraMeter.swift` (higher = less red); `peakWash` sets how strong the red fill is.
-- Untested on a device. If something looks wrong, say what it does.
+- iOS sets focus as a 0 to 1 lens position, not a distance. The app converts your distance to that using a typical focal length for the main camera, so the distance on the slider is approximate. Trust the peaking for what is actually sharp, and compare with the LiDAR reading in autofocus.
+- Peaking is only calculated while you are using the slider, so it costs nothing the rest of the time. If it lights up too much or too little, change `peakThreshold` at the top of `CameraMeter.swift`.

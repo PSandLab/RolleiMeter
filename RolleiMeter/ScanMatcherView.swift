@@ -169,7 +169,7 @@ struct ScanMatcherTabView: View {
         } header: {
             Text("Scans")
         } footer: {
-            Text("Scans are matched to frames in filename order, starting with frame 1. Turn on reverse order if the lab numbered the files backwards.")
+            Text("Scans are matched to frames in filename order, starting with the first logged frame. Turn on reverse order if the lab numbered the files backwards.")
         }
     }
 
