@@ -2,14 +2,18 @@ import SwiftUI
 
 // MARK: - Meter tiles
 
-/// Floating readout tile for the camera meter. Liquid Glass on iOS 26+,
-/// system material below. Apply after padding so the surface hugs the content.
+/// Floating readout tile for the camera meter.
+///
+/// Apple reserves Liquid Glass for the control/navigation layer, so readouts
+/// use the standard material the system supplies for chrome over live content.
+/// Glass is kept for the shutter, the EV pill and the round buttons.
 struct MeterTile: ViewModifier {
     let k: CGFloat
 
     func body(content: Content) -> some View {
-        content.floatingSurface(
-            RoundedRectangle(cornerRadius: Metrics.tileRadius * k, style: .continuous)
+        content.background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: Metrics.tileRadius * k, style: .continuous)
         )
     }
 }

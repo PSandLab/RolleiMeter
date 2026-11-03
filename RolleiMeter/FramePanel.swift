@@ -58,5 +58,6 @@ struct FramePanel: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isUnloaded ? "No film roll loaded" : "Frame \(frame) of \(rollLength)")
         .accessibilityHint("Opens the frame log")
+        .accessibilityAddTraits(.isButton)
     }
 }

@@ -227,7 +227,6 @@ struct ContentView: View {
         .background(Palette.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
-        .persistentSystemOverlays(.hidden)
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             if mode == .spot { mode = .matrix }

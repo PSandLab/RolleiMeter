@@ -55,6 +55,7 @@ struct HoldControl: View {
                 holdButton
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.34, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isSaved)
     }
@@ -106,13 +107,13 @@ struct HoldControl: View {
             ZStack {
                 Circle()
                     .fill(Color.white)
-                    .frame(width: 116 * k, height: 116 * k)
+                    .frame(width: 100 * k, height: 100 * k)
 
                 Circle()
                     .strokeBorder(Color.white.opacity(0.9), lineWidth: 3 * k)
-                    .frame(width: 128 * k, height: 128 * k)
+                    .frame(width: 112 * k, height: 112 * k)
             }
-            .frame(width: 150 * k, height: 150 * k)
+            .frame(width: 134 * k, height: 134 * k)
             .contentShape(Circle())
             .floatingSurface(Circle(), interactive: true)
         }

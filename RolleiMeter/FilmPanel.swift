@@ -107,5 +107,6 @@ struct FilmPanel: View {
         .accessibilityLabel("Film")
         .accessibilityValue(isUnloaded ? "No film loaded" : "\(filmName), \(speedLine)")
         .accessibilityHint("Tap to choose film. Drag horizontally to rate the ISO.")
+        .accessibilityAddTraits(.isButton)
     }
 }

@@ -36,6 +36,7 @@ struct FilmLogbookSheet: View {
             .tag(2)
         }
         .tint(Palette.accent)
+        .preferredColorScheme(.dark)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .onAppear { selectedTab = initialTab }
