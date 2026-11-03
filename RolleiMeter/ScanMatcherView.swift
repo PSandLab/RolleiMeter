@@ -609,6 +609,7 @@ private struct FrameScanRow: View {
                 if let scan, let scanNumber {
                     Text("Scan \(scanNumber) · \(scan.displayName)")
                         .font(.caption)
+                        .monospacedDigit()
                         .foregroundStyle(Palette.textDim)
                         .lineLimit(1)
                         .truncationMode(.middle)
