@@ -35,6 +35,7 @@ struct GearPickerScreen: View {
 
                 LabeledContent("Lens") {
                     Text(gear.hasLens ? gear.lensName : "Body only")
+                        .font(Geist.text(.body))
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -61,6 +62,7 @@ struct GearPickerScreen: View {
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No camera selected")
+                        .font(Geist.text(.body))
                     Text(gear.hasLens
                          ? "Lens saved: \(gear.lensName)"
                          : "The meter is showing every stop.")
@@ -145,7 +147,7 @@ struct GearPickerScreen: View {
                     ListGlyph(systemName: "camera.aperture")
                     VStack(alignment: .leading, spacing: 2) {
                         Text(gear.hasLens ? "Change lens" : "Choose a lens")
-                        Text("Browse one row per lens, versions inside")
+                        Text("Browse by focal length, then choose a version")
                             .font(Geist.text(.subheadline))
                             .foregroundStyle(.secondary)
                     }
@@ -470,6 +472,7 @@ struct CameraDetailView: View {
                 } label: {
                     GearProfileRow(title: "Body only",
                                    subtitle: "Use the body without a lens",
+                                   systemImage: "camera",
                                    isActive: isBodyOnlyActive)
                 }
 

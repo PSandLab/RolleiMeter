@@ -262,7 +262,7 @@ private struct ActiveRollRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
-                        .font(Geist.text(.headline))
+                        .font(Geist.serifText(.headline))
                         .lineLimit(1)
 
                     Text(roll.isBonusFrames

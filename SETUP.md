@@ -23,9 +23,9 @@ The camera fills the middle of the screen. Everything else is a floating readout
 ## The logbook
 A three-tab sheet, all standard iOS lists.
 
-- **Roll.** The loaded stock with its artwork and frame count, the camera and lens in use, the film library, share actions, and "Complete roll".
-- **Film library.** Searchable, grouped by brand, filtered by Colour / B&W / Slide / Custom. Pick a stock, choose the speed variant, the roll length, and whether it is expired (the app adds about a stop of compensation per decade for colour negative). Custom stocks you save are kept in the Custom tab.
-- **Camera & Lens.** A drill-down: pick a body by brand, then its mount, then the lens. Fixed-lens bodies mount in one tap. Custom bodies and lenses can be built and saved here.
+- **Roll.** The loaded stock with its artwork and frame count, the camera and lens in use, share actions. Tap the card to change film; **press and hold** the bar underneath to complete the roll.
+- **Film library.** Searchable, grouped by brand, filtered by Colour / B&W / Slide / Custom. Pick a stock, choose the speed variant, the roll length, and whether it is expired (the app adds about a stop of compensation per decade for colour negative). **Press and hold** the bar to load it — the log pops back to the roll when it is in the camera. Custom stocks are kept in the Custom tab.
+- **Camera & Lens.** Brands first (Popular, plus a Vintage & rare shelf for one-off and discontinued makers), then a brand's bodies, then the mount. Fixed-lens bodies mount in one tap; interchangeable bodies offer "Body only", "Use an adapter" (any lens, f/1.2 to f/32) and the native-mount lenses. Lenses are listed as `24mm f/2.8` with the number of versions; versions (New FD, AI-S, Pre-AI …) are chosen on the lens page. Custom bodies and lenses can be built and saved here.
 - **Frames.** Every logged frame grouped by roll, with a thumbnail, the exposure and the note. Swipe to delete; tap for the full record, the photo viewer and a share action.
 - **Scans.** Import a folder of lab scans or individual files, match them to frames, nudge the match with a stepper, then write EXIF/XMP into the files or share them.
 
@@ -39,6 +39,7 @@ A three-tab sheet, all standard iOS lists.
 Leave it at 0 and shoot a roll first. To check: in full sun at ISO 100, f/16 should show about 1/125. Faster? Tap Calibration down. Slower? Up. Each tap is 1/3 stop.
 
 ## Design notes
+- Type is **Geist** (Sans for interface copy, Mono for readouts, Serif for the wordmark and film names), bundled under the SIL Open Font License.
 - Colours come from the system: `systemBackground`, `secondarySystemGroupedBackground`, `.label`, `.separator`, plus one amber accent declared in the asset catalog (`AccentColor`).
 - Readouts use the system material; Liquid Glass is reserved for the control layer (the shutter button, the EV pill and the round buttons) exactly as Apple's guidance asks.
 - Text uses Dynamic Type styles in the sheets and a `k`-scaled type ramp in the meter, so the instrument stays legible at any screen size.

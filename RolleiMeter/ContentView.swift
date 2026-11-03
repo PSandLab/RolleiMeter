@@ -792,8 +792,8 @@ struct ContentView: View {
     private func topBar(k: CGFloat) -> some View {
         HStack(spacing: 8 * k) {
             Text("ROLLEIMETER")
-                .font(AppTypography.next(size: 22 * k, weight: .medium))
-                .tracking(2.6 * k)
+                .font(Geist.serif(23 * k))
+                .tracking(1.8 * k)
                 .foregroundStyle(Palette.dim)
                 .padding(.leading, 17 * k)
                 .lineLimit(1)
