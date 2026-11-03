@@ -476,7 +476,7 @@ private struct CameraInlineLensPicker: View {
             }
 
             VStack(spacing: 4) {
-                ForEach(visibleLenses.prefix(24)) { entry in
+                ForEach(Array(visibleLenses.prefix(24))) { entry in
                     let spec = entry.lens
                     let isChosen = activeGear.cameraId == camera.id && activeGear.lensId == spec.id
 
@@ -490,14 +490,14 @@ private struct CameraInlineLensPicker: View {
                                 minShutter: camera.minShutter,
                                 maxShutter: camera.maxShutter,
                                 lensId: spec.id,
-                                lensName: entry.baseTitle,
+                                lensName: spec.model,
                                 minAperture: spec.minAperture,
                                 maxAperture: spec.maxAperture
                             )
                         )
                     } label: {
                         HStack(spacing: 8) {
-                            Text(entry.baseTitle)
+                            Text(spec.model)
                                 .font(AppTypography.next(size: 13, weight: .medium))
                                 .foregroundStyle(isChosen ? Palette.accent : Palette.text)
                                 .lineLimit(1)
@@ -555,7 +555,7 @@ private struct StandaloneLensBrowser: View {
             .pickerStyle(.segmented)
 
             VStack(spacing: 4) {
-                ForEach(filtered.prefix(30)) { entry in
+                ForEach(Array(filtered.prefix(30))) { entry in
                     let spec = entry.lens
                     let isMounted = activeGear.lensId == spec.id
                     Button {
@@ -563,7 +563,7 @@ private struct StandaloneLensBrowser: View {
                     } label: {
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.baseTitle)
+                                Text(spec.model)
                                     .font(AppTypography.next(size: 14, weight: .semibold))
                                     .foregroundStyle(isMounted ? Palette.accent : Palette.text)
                                     .lineLimit(1)
