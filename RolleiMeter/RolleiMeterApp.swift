@@ -5,7 +5,7 @@ struct RolleiMeterApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environment(\.font, AppTypography.regular(size: 17))
+                .tint(Palette.accent)
         }
     }
 }

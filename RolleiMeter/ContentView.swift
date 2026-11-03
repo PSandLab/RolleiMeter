@@ -2,63 +2,6 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 
-private struct GlassCircle: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Circle())
-        } else {
-            content
-                .background(Circle().fill(Palette.panel))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
-        }
-    }
-}
-
-private struct GlassCapsule: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            content
-                .background(Capsule().fill(Palette.panel))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
-        }
-    }
-}
-
-/// Portrait only: a gentle card with a hairline edge (and optionally a rule under the title)
-/// so neighbouring readouts never run into each other.
-private struct SoftCard: ViewModifier {
-    let k: CGFloat
-    let on: Bool
-    var rule: Bool = false
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if on {
-            let shape = RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
-            content
-                .background(shape.fill(Color.white.opacity(0.045)))
-                .overlay(alignment: .top) {
-                    if rule {
-                        Rectangle()
-                            .fill(Color.white.opacity(0.09))
-                            .frame(height: 0.5)
-                            .padding(.horizontal, 16 * k)
-                            .padding(.top, 62 * k)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5).allowsHitTesting(false))
-        } else {
-            content
-        }
-    }
-}
-
 private struct SpotReticle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -186,7 +129,7 @@ struct ContentView: View {
 
                 ZStack(alignment: .topLeading) {
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, speeds: activeShutterSpeeds, k: k)
-                        .modifier(SoftCard(k: k, on: p, rule: true))
+                        .meterTile(k: k)
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FilmPanel(
@@ -202,6 +145,7 @@ struct ContentView: View {
                             showFilmLogbook = true
                         }
                     )
+                    .meterTile(k: k)
                     .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
 
                     FramePanel(
@@ -215,7 +159,7 @@ struct ContentView: View {
                             showFilmLogbook = true
                         }
                     )
-                    .modifier(SoftCard(k: k, on: p, rule: true))
+                    .meterTile(k: k)
                     .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     preview(k: k)
@@ -231,7 +175,7 @@ struct ContentView: View {
                         onTap: toggleAutoAperture,
                         onHome: returnHomeAperture
                     )
-                    .modifier(SoftCard(k: k, on: p, rule: true))
+                    .meterTile(k: k)
                     .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FocusPanel(
@@ -252,7 +196,7 @@ struct ContentView: View {
                         onAuto: resumeAutoFocus,
                         onUnits: toggleUnits
                     )
-                    .modifier(SoftCard(k: k, on: p))
+                    .meterTile(k: k)
                     .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     HoldControl(
@@ -267,7 +211,7 @@ struct ContentView: View {
                         onConfirmLog: confirmAndLogHeldFrame,
                         onDiscardHold: unfreeze
                     )
-                    .modifier(SoftCard(k: k, on: p))
+                    .meterTile(k: k)
                     .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
 
                     // Last in the stack so the camera view (which overflows its cell) can't block taps.
@@ -281,10 +225,8 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .background(Palette.background.ignoresSafeArea())
-        .dynamicTypeSize(.large)
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
-        .persistentSystemOverlays(.hidden)
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             if mode == .spot { mode = .matrix }
@@ -597,7 +539,6 @@ struct ContentView: View {
 
     private func preview(k: CGFloat) -> some View {
         let radius = 22 * k
-        let held = frozenEV != nil && !isResuming
         return GeometryReader { geo in
             ZStack {
                 CameraPreview(
@@ -698,7 +639,6 @@ struct ContentView: View {
                                     style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
                         Circle().fill(Palette.lensLight).frame(width: 2.5, height: 2.5)
                     }
-                    .shadow(color: Palette.lensDark.opacity(0.40), radius: 1.5)
                     .frame(width: d, height: d)
                     .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
                     .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
@@ -708,9 +648,8 @@ struct ContentView: View {
 
                     if let delta = meter.spotDelta {
                         Text(Fmt.stops(delta))
-                            .font(AppTypography.font(size: 13, weight: .medium))
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
                             .foregroundStyle(Palette.lensLight)
-                            .shadow(color: Palette.lensDark.opacity(0.8), radius: 2)
                             .contentTransition(.numericText())
                             .position(x: spot.x * geo.size.width,
                                       y: max(14, spot.y * geo.size.height - d / 2 - 14))
@@ -729,38 +668,34 @@ struct ContentView: View {
                 }
 
                 if showHint {
-                    VStack(spacing: 4) {
-                        Text("Tap: distance   \u{00B7}   Hold: spot meter")
-                        Text("Tap aperture: auto   \u{00B7}   Slide focus: manual")
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Tap the scene to focus", systemImage: "hand.tap")
+                        Label("Touch and hold to spot meter", systemImage: "viewfinder")
                     }
-                    .font(AppTypography.next(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.lensLight)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Palette.lensDark.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
+                    .labelStyle(.titleAndIcon)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .position(x: geo.size.width / 2, y: geo.size.height * 0.28)
                     .transition(.opacity)
                     .allowsHitTesting(false)
                 }
 
                 if meter.denied {
-                    VStack(spacing: 10) {
-                        Text("Camera access is off")
-                            .font(AppTypography.next(size: 16, weight: .semibold))
-                            .foregroundStyle(Palette.text)
-                        Button {
+                    ContentUnavailableView {
+                        Label("Camera Access Off", systemImage: "video.slash")
+                    } description: {
+                        Text("Allow camera access in Settings so the meter can read the scene.")
+                    } actions: {
+                        Button("Open Settings") {
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 UIApplication.shared.open(url)
                             }
-                        } label: {
-                            Text("OPEN SETTINGS")
-                                .font(AppTypography.next(size: 12, weight: .semibold))
-                                .tracking(1)
-                                .foregroundStyle(Palette.accent)
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                     }
                     .padding(20)
                 }
@@ -776,77 +711,56 @@ struct ContentView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(held ? Palette.accent.opacity(0.75) : Color.white.opacity(0.12),
-                                  lineWidth: held ? 1.5 : 1)
-                    .animation(.easeInOut(duration: 0.35), value: held)
-                    .allowsHitTesting(false)
-            }
             .onAppear { previewSize = geo.size }
             .onChange(of: geo.size) { _, newSize in previewSize = newSize }
         }
     }
 
-    /// Slim bar above the viewfinder: app name on the left, ±EV & Scans/Gear & Settings on the right.
+    /// Top chrome: the app, exposure compensation, and the two entry points.
     private func topBar(k: CGFloat) -> some View {
-        HStack(spacing: 8 * k) {
-            Text("ROLLEIMETER")
-                .font(AppTypography.next(size: 22 * k, weight: .medium))
-                .tracking(2.6 * k)
-                .foregroundStyle(Palette.dim)
-                .padding(.leading, 17 * k)
+        HStack(spacing: 10 * k) {
+            Text("RolleiMeter")
+                .font(.system(size: 20 * k, weight: .semibold))
+                .foregroundStyle(Palette.text)
+                .padding(.leading, 20 * k)
                 .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 8 * k)
 
-            // ±EV Compensation Pill
             Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Haptics.press()
                 showEvPopover.toggle()
             } label: {
-                Text(abs(logStore.totalEvComp) >= 0.05 ? formatEvComp(logStore.totalEvComp) : "±EV")
-                    .font(AppTypography.mono(size: 19 * k, weight: .bold))
-                    .foregroundStyle(abs(logStore.totalEvComp) >= 0.05 ? Palette.accent : Palette.text)
-                    .padding(.horizontal, 14 * k)
-                    .frame(height: 62 * k)
-                    .modifier(GlassCapsule())
+                let compensated = abs(logStore.totalEvComp) >= 0.05
+                Text(compensated ? formatEvComp(logStore.totalEvComp) : "EV")
+                    .font(.system(size: 15 * k, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(compensated ? Palette.onAccent : Palette.text)
+                    .padding(.horizontal, 16 * k)
+                    .frame(height: 42 * k)
+                    .contentShape(Capsule())
+                    .floatingSurface(Capsule(), tint: compensated ? Palette.accent : nil, interactive: true)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Exposure compensation")
+            .accessibilityValue(formatEvComp(logStore.totalEvComp))
             .popover(isPresented: $showEvPopover) {
                 ExposureCompDialPopover(store: logStore)
                     .presentationCompactAdaptation(.popover)
             }
 
-            // Lab Scan Matcher & Gear Quick Button
-            Button {
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            GlassCircleButton(systemName: "photo.stack", size: 42 * k) {
+                Haptics.press()
                 logbookInitialTab = 2
                 showFilmLogbook = true
-            } label: {
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 24 * k, weight: .medium))
-                    .foregroundStyle(Palette.text)
-                    .frame(width: 66 * k, height: 66 * k)
-                    .modifier(GlassCircle())
-                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Lab Scan Matcher and Film Logbook")
+            .accessibilityLabel("Scans and film log")
 
-            Button {
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            GlassCircleButton(systemName: "gearshape", size: 42 * k) {
+                Haptics.press()
                 showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 28 * k, weight: .medium))
-                    .foregroundStyle(Palette.text)
-                    .frame(width: 70 * k, height: 70 * k)
-                    .modifier(GlassCircle())
-                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
             .accessibilityLabel("Settings")
+            .padding(.trailing, 20 * k)
         }
     }
 
@@ -891,155 +805,111 @@ private struct ExposureCompDialPopover: View {
 
     var body: some View {
         let idx = store.manualEvCompIndex.clamped(to: 0...(EV_COMP_STOPS.count - 1))
-        let manualEv = EV_COMP_STOPS[idx]
         let totalEv = store.totalEvComp
-        let isNonZero = idx != zeroIdx
 
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("EXPOSURE BIAS")
-                    .font(AppTypography.next(size: 11, weight: .semibold))
-                    .tracking(1.4)
-                    .foregroundStyle(Palette.dim)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Exposure Compensation")
+                    .font(.headline)
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                if isNonZero {
-                    Button {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.snappy(duration: 0.22)) {
-                            store.manualEvCompIndex = zeroIdx
-                        }
-                    } label: {
-                        Text("Reset")
-                            .font(AppTypography.next(size: 12, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
+                if idx != zeroIdx {
+                    Button("Reset") {
+                        Haptics.tap()
+                        withAnimation(.snappy) { store.manualEvCompIndex = zeroIdx }
                     }
-                    .buttonStyle(.plain)
+                    .font(.subheadline.weight(.semibold))
                 }
             }
 
             if store.rollState.isSlideFilm {
-                HStack(spacing: 10) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
-                    Text("Slide film locks exposure bias to 0.0 EV to protect highlights.")
-                        .font(AppTypography.next(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.textSub)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
+                Label("Slide film locks exposure bias at 0 EV to protect highlights.",
+                      systemImage: "lock")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
-                // Tactile Stepper Row (-1/3 / Readout / +1/3)
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     Button {
-                        guard idx > 0 else { return }
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.snappy(duration: 0.18)) {
-                            store.manualEvCompIndex = idx - 1
-                        }
+                        step(-1, from: idx)
                     } label: {
                         Image(systemName: "minus")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(idx > 0 ? Palette.text : Palette.faint)
                             .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.08), in: Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
                     .disabled(idx <= 0)
+                    .accessibilityLabel("Decrease exposure")
 
-                    VStack(spacing: 2) {
+                    VStack(spacing: 3) {
                         Text(formatEvComp(totalEv))
-                            .font(AppTypography.next(size: 28, weight: .bold).monospacedDigit())
+                            .font(.system(size: 30, weight: .semibold))
+                            .monospacedDigit()
                             .foregroundStyle(abs(totalEv) >= 0.05 ? Palette.accent : Palette.text)
                             .contentTransition(.numericText())
 
-                        if store.rollState.activeExpiredCompEv > 0.05 {
-                            Text("Includes +\(String(format: "%.1f", store.rollState.activeExpiredCompEv)) EV expired film comp")
-                                .font(AppTypography.next(size: 10, weight: .medium))
-                                .foregroundStyle(Palette.dim)
-                        } else {
-                            Text("1/3-stop steps")
-                                .font(AppTypography.next(size: 11, weight: .medium))
-                                .foregroundStyle(Palette.dim)
-                        }
+                        Text(store.rollState.activeExpiredCompEv > 0.05
+                             ? String(format: "includes +%.1f EV for expired film", store.rollState.activeExpiredCompEv)
+                             : "Third-stop steps")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
 
                     Button {
-                        guard idx < EV_COMP_STOPS.count - 1 else { return }
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.snappy(duration: 0.18)) {
-                            store.manualEvCompIndex = idx + 1
-                        }
+                        step(1, from: idx)
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(idx < EV_COMP_STOPS.count - 1 ? Palette.text : Palette.faint)
                             .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.08), in: Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
                     .disabled(idx >= EV_COMP_STOPS.count - 1)
+                    .accessibilityLabel("Increase exposure")
                 }
 
-                // Interactive Machined Exposure Scale (-3 .. 0 .. +3)
-                GeometryReader { geo in
-                    let w = geo.size.width
-                    let count = EV_COMP_STOPS.count
-                    let stepW = w / CGFloat(max(count - 1, 1))
-
-                    ZStack(alignment: .topLeading) {
-                        // Tick marks
-                        HStack(spacing: 0) {
-                            ForEach(0..<count, id: \.self) { i in
-                                let isWhole = i % 3 == 0
-                                let isSelected = i == idx
-                                let isZero = i == zeroIdx
-                                VStack(spacing: 5) {
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(isSelected ? Palette.accent : (isZero ? Palette.text : (isWhole ? Color.white.opacity(0.55) : Color.white.opacity(0.22))))
-                                        .frame(width: isSelected ? 2.5 : (isWhole ? 1.5 : 1.0),
-                                               height: isSelected ? 18 : (isWhole ? 13 : 8))
-                                        .frame(height: 18, alignment: .bottom)
-
-                                    if isWhole {
-                                        let wholeVal = Int(EV_COMP_STOPS[i].rounded())
-                                        Text(wholeVal > 0 ? "+\(wholeVal)" : "\(wholeVal)")
-                                            .font(AppTypography.mono(size: 10, weight: isSelected ? .bold : .medium))
-                                            .foregroundStyle(isSelected ? Palette.accent : Palette.dim)
-                                    } else {
-                                        Text(" ")
-                                            .font(AppTypography.mono(size: 10, weight: .medium))
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
+                VStack(spacing: 2) {
+                    Slider(
+                        value: Binding(
+                            get: { Double(idx) },
+                            set: { newValue in
+                                let target = Int(newValue.rounded())
+                                guard target != store.manualEvCompIndex else { return }
+                                Haptics.tap()
+                                store.manualEvCompIndex = target
                             }
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                let ratio = (value.location.x / max(w, 1)).clamped(to: 0...1)
-                                let target = Int((ratio * CGFloat(count - 1)).rounded()).clamped(to: 0...(count - 1))
-                                if target != store.manualEvCompIndex {
-                                    if target == zeroIdx || target % 3 == 0 {
-                                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
-                                    } else {
-                                        UISelectionFeedbackGenerator().selectionChanged()
-                                    }
-                                    store.manualEvCompIndex = target
-                                }
-                            }
+                        ),
+                        in: 0...Double(EV_COMP_STOPS.count - 1),
+                        step: 1
                     )
+                    .tint(Palette.accent)
+                    .accessibilityLabel("Exposure compensation")
+                    .accessibilityValue(formatEvComp(totalEv))
+
+                    HStack {
+                        Text("−3")
+                        Spacer()
+                        Text("0")
+                        Spacer()
+                        Text("+3")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .frame(height: 38)
             }
         }
-        .padding(16)
-        .frame(width: 286)
-        .background(Palette.panel)
+        .padding(18)
+        .frame(width: 300)
+    }
+
+    private func step(_ direction: Int, from idx: Int) {
+        let target = (idx + direction).clamped(to: 0...(EV_COMP_STOPS.count - 1))
+        guard target != idx else { return }
+        Haptics.tap()
+        withAnimation(.snappy(duration: 0.18)) {
+            store.manualEvCompIndex = target
+        }
     }
 }

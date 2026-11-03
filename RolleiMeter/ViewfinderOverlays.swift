@@ -20,8 +20,10 @@ struct PeakingOverlay: View {
     }
 }
 
-// MARK: - Hold button (Smooth Sliding Metering Selector + Morphs into Confirm Log + Cancel on Hold)
+// MARK: - Hold button
 
+/// Metering mode picker plus the shutter-style hold button. When a reading is
+/// held it morphs into Discard / Log frame.
 struct HoldControl: View {
     let frozen: Bool
     var frameNumber: Int = 1
@@ -34,255 +36,137 @@ struct HoldControl: View {
     var onConfirmLog: () -> Void = {}
     var onDiscardHold: () -> Void = {}
 
-    @Namespace private var morphNamespace
-    @Namespace private var meterSlideNamespace
-    @State private var isScrubbingMeter: Bool = false
+    private var safeIndex: Int { min(max(meterIndex, 0), max(modes.count - 1, 0)) }
+    private var currentMode: MeterMode { modes.isEmpty ? .matrix : modes[safeIndex] }
 
     var body: some View {
-        ZStack {
+        HStack(spacing: 0) {
             if !frozen {
-                HStack(spacing: 0) {
-                    smoothMeterSelector
-                        .padding(.leading, 14 * k)
-
-                    Spacer(minLength: 0)
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+                meterMenu
+                    .padding(.leading, 18 * k)
+                    .transition(.opacity)
             }
 
-            HStack {
-                Spacer(minLength: 0)
-                shutterOrMorphedActions
-            }
-            .padding(.trailing, 7 * k)
-            .padding(.leading, frozen ? 12 * k : 0)
-        }
-        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: frozen)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isSaved)
-    }
+            Spacer(minLength: 8 * k)
 
-    // Smooth thumb-scrubbable & tappable iOS 26/27 sliding selector
-    private var smoothMeterSelector: some View {
-        let rowHeight: CGFloat = 50 * k
-        let totalHeight: CGFloat = rowHeight * CGFloat(max(modes.count, 1))
-
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(modes.indices, id: \.self) { i in
-                let selected = (i == meterIndex)
-                ZStack(alignment: .leading) {
-                    if selected {
-                        Capsule()
-                            .fill(Palette.accent.opacity(isScrubbingMeter ? 0.24 : 0.16))
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Palette.accent.opacity(0.55), lineWidth: 1)
-                            )
-                            .matchedGeometryEffect(id: "meterModePill", in: meterSlideNamespace)
-                    }
-
-                    HStack(spacing: 8 * k) {
-                        Circle()
-                            .fill(selected ? Palette.accent : Color.white.opacity(0.22))
-                            .frame(width: 7 * k, height: 7 * k)
-
-                        Text(modes[i].title)
-                            .font(AppTypography.next(size: 27 * k, weight: selected ? .semibold : .medium))
-                            .foregroundStyle(selected ? Palette.accent : Palette.dim)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 14 * k)
-                }
-                .frame(width: 146 * k, height: rowHeight, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-        }
-        .padding(4 * k)
-        .background(
-            RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.75)
-                )
-        )
-        .scaleEffect(isScrubbingMeter ? 1.03 : 1.0)
-        .animation(.snappy(duration: 0.22, extraBounce: 0.0), value: meterIndex)
-        .animation(.snappy(duration: 0.18, extraBounce: 0.0), value: isScrubbingMeter)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if !isScrubbingMeter {
-                        isScrubbingMeter = true
-                    }
-                    let y = value.location.y - (4 * k)
-                    let rawIdx = Int((y / max(rowHeight, 1)).rounded(.down))
-                    let clamped = min(max(rawIdx, 0), modes.count - 1)
-                    if clamped != meterIndex {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        onPickMeter(clamped)
-                    }
-                }
-                .onEnded { _ in
-                    isScrubbingMeter = false
-                }
-        )
-        .frame(height: totalHeight + 8 * k)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Metering mode")
-        .accessibilityValue(modes[min(max(meterIndex, 0), modes.count - 1)].title)
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment:
-                let next = min(meterIndex + 1, modes.count - 1)
-                if next != meterIndex { onPickMeter(next) }
-            case .decrement:
-                let prev = max(meterIndex - 1, 0)
-                if prev != meterIndex { onPickMeter(prev) }
-            @unknown default:
-                break
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var shutterOrMorphedActions: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 14 * k) {
-                morphedButtonsContent(useLiquidGlass: true)
-            }
-        } else {
-            morphedButtonsContent(useLiquidGlass: false)
-        }
-    }
-
-    @ViewBuilder
-    private func morphedButtonsContent(useLiquidGlass: Bool) -> some View {
-        if frozen {
-            HStack(spacing: 14 * k) {
-                // Cancel / Discard Hold Button (Red X)
-                Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    onDiscardHold()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Palette.bad.opacity(useLiquidGlass ? 0.24 : 0.20))
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Palette.bad.opacity(0.65), lineWidth: 1.5)
-                            )
-
-                        Image(systemName: "xmark")
-                            .font(.system(size: 38 * k, weight: .bold))
-                            .foregroundStyle(Palette.bad)
-                    }
-                    .frame(width: 118 * k, height: 118 * k)
-                    .contentShape(Circle())
-                    .modifier(LiquidHoldGlassModifier(
-                        enabled: useLiquidGlass,
-                        tint: Palette.bad.opacity(0.28),
-                        id: "holdDiscard",
-                        namespace: morphNamespace
-                    ))
-                }
-                .buttonStyle(PressStyle(scale: 0.94))
-                .accessibilityLabel("Discard reading")
-
-                // Confirm & Log Frame Button (Green Plus + Checkmark)
-                Button {
-                    guard !isSaved else { return }
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    onConfirmLog()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: 0x070707))
-                            .overlay(Circle().strokeBorder(Palette.good.opacity(0.45), lineWidth: 1.5))
-
-                        Circle()
-                            .fill(Palette.good)
-                            .frame(width: 126 * k, height: 126 * k)
-
-                        VStack(spacing: 2 * k) {
-                            HStack(spacing: 2 * k) {
-                                if !isSaved {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 22 * k, weight: .black))
-                                }
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 34 * k, weight: .black))
-                            }
-                            .foregroundStyle(Color.black)
-
-                            Text(String(format: "#%02d", frameNumber))
-                                .font(AppTypography.mono(size: 16 * k, weight: .bold))
-                                .foregroundStyle(Color.black.opacity(0.82))
-                        }
-                    }
-                    .frame(width: 162 * k, height: 162 * k)
-                    .contentShape(Circle())
-                    .modifier(LiquidHoldGlassModifier(
-                        enabled: useLiquidGlass,
-                        tint: Palette.good.opacity(0.35),
-                        id: "holdPrimary",
-                        namespace: morphNamespace
-                    ))
-                }
-                .buttonStyle(PressStyle(scale: 0.95))
-                .accessibilityLabel("Log frame \(frameNumber)")
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-        } else {
-            Button(action: onHold) {
-                ZStack {
-                    Circle()
-                        .fill(Color(hex: 0x070707))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 126 * k, height: 126 * k)
-                }
-                .frame(width: 175 * k, height: 175 * k)
-                .contentShape(Circle())
-                .modifier(LiquidHoldGlassModifier(
-                    enabled: useLiquidGlass,
-                    tint: nil,
-                    id: "holdPrimary",
-                    namespace: morphNamespace
-                ))
-            }
-            .buttonStyle(PressStyle(scale: 0.97))
-            .accessibilityLabel("Hold reading")
-        }
-    }
-}
-
-private struct LiquidHoldGlassModifier: ViewModifier {
-    let enabled: Bool
-    let tint: Color?
-    let id: String
-    let namespace: Namespace.ID
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), enabled {
-            if let tint {
-                content
-                    .glassEffect(.regular.tint(tint).interactive(), in: Circle())
-                    .glassEffectID(id, in: namespace)
+            if frozen {
+                heldActions
             } else {
-                content
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .glassEffectID(id, in: namespace)
+                holdButton
             }
-        } else {
-            content
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.34, dampingFraction: 0.8), value: frozen)
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isSaved)
+    }
+
+    // MARK: Metering
+
+    private var meterMenu: some View {
+        Menu {
+            Picker("Metering", selection: Binding(
+                get: { safeIndex },
+                set: { newValue in
+                    guard newValue != safeIndex else { return }
+                    Haptics.tap()
+                    onPickMeter(newValue)
+                }
+            )) {
+                ForEach(modes.indices, id: \.self) { i in
+                    Text(modes[i].title).tag(i)
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 3 * k) {
+                Text("Metering")
+                    .font(.system(size: 13 * k, weight: .medium))
+                    .foregroundStyle(Palette.textSub)
+
+                HStack(spacing: 5 * k) {
+                    Text(currentMode.title)
+                        .font(.system(size: 19 * k, weight: .semibold))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 11 * k, weight: .semibold))
+                        .foregroundStyle(Palette.textDim)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Metering mode")
+        .accessibilityValue(currentMode.title)
+    }
+
+    // MARK: Shutter
+
+    private var holdButton: some View {
+        Button(action: onHold) {
+            ZStack {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 100 * k, height: 100 * k)
+
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.9), lineWidth: 3 * k)
+                    .frame(width: 112 * k, height: 112 * k)
+            }
+            .frame(width: 134 * k, height: 134 * k)
+            .contentShape(Circle())
+            .floatingSurface(Circle(), interactive: true)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 14 * k)
+        .accessibilityLabel("Hold reading")
+        .accessibilityHint("Freezes the meter so you can log the frame")
+    }
+
+    private var heldActions: some View {
+        HStack(spacing: 16 * k) {
+            Button {
+                Haptics.press()
+                onDiscardHold()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 26 * k, weight: .semibold))
+                    .foregroundStyle(Palette.bad)
+                    .frame(width: 62 * k, height: 62 * k)
+                    .contentShape(Circle())
+                    .floatingSurface(Circle(), interactive: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Discard reading")
+
+            Button {
+                guard !isSaved else { return }
+                Haptics.success()
+                onConfirmLog()
+            } label: {
+                VStack(spacing: 2 * k) {
+                    Image(systemName: isSaved ? "checkmark" : "checkmark")
+                        .font(.system(size: 26 * k, weight: .semibold))
+                    Text(isSaved ? "Saved" : String(format: "#%02d", frameNumber))
+                        .font(.system(size: 13 * k, weight: .semibold).monospacedDigit())
+                }
+                .foregroundStyle(Palette.onAccent)
+                .frame(width: 118 * k, height: 118 * k)
+                .contentShape(Circle())
+                .background(Circle().fill(Palette.accent))
+            }
+            .buttonStyle(PressStyle(scale: 0.96))
+            .accessibilityLabel(isSaved ? "Frame saved" : "Log frame \(frameNumber)")
+        }
+        .padding(.trailing, 16 * k)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
     }
 }
 
 // MARK: - Viewfinder overlays
 
+/// Quiet status line drawn on the viewfinder: EV, and whether a reading is held.
 struct EVChip: View {
     @ObservedObject var damp: Damper
     let frozen: Bool
@@ -291,21 +175,23 @@ struct EVChip: View {
     var body: some View {
         HStack(spacing: 6) {
             if frozen {
-                Text("HOLD").foregroundStyle(Palette.accent)
+                Text("Hold")
+                    .foregroundStyle(Palette.accent)
             }
             if spot {
-                Text("SPOT")
+                Text("Spot")
             }
             Text("EV " + String(format: "%.1f", damp.values[0]))
                 .monospacedDigit()
         }
-        .font(AppTypography.font(size: 11, weight: .medium))
-        .foregroundStyle(Palette.text)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: Capsule())
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -352,7 +238,6 @@ struct FocusMarker: View {
                 .frame(width: 2.5, height: 2.5)
         }
         .frame(width: 30, height: 30)
-        .shadow(color: Palette.lensDark.opacity(0.45), radius: 1.5)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }

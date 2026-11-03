@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Film speed
+// MARK: - Film
 
+/// The loaded stock, the speed you are rating it at, and the camera it lives in.
 struct FilmPanel: View {
     @Binding var isoIndex: Int
     let useDIN: Bool
@@ -23,55 +24,59 @@ struct FilmPanel: View {
         return useDIN ? value + "\u{00B0}" : "ISO " + value
     }
 
-    private var readout: String {
-        if isUnloaded {
-            return dragBase != nil ? speedText : "Load Film"
-        }
-        if useDIN {
-            return "\(filmName) \u{00B7} \(ISOScale.label(currentISO, din: true))\u{00B0}"
-        }
-        if currentISO != boxISO {
-            return "\(filmName) @ \(currentISO)"
-        }
+    private var title: String {
+        if isUnloaded { return dragBase != nil ? speedText : "No film loaded" }
         return filmName
     }
 
+    private var speedLine: String {
+        if isUnloaded { return "Tap to choose a stock" }
+        if useDIN { return "\(ISOScale.label(currentISO, din: true))\u{00B0}" }
+        if currentISO != boxISO { return "\(speedText) \u{00B7} rated from \(boxISO)" }
+        return speedText
+    }
+
     var body: some View {
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
-                .fill(Palette.accent)
+        VStack(alignment: .leading, spacing: 0) {
+            PanelTitle(text: "Film", k: k)
 
-            if cameraBadge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
-            } else {
-                Text(cameraBadge.uppercased())
-                    .font(AppTypography.next(size: 22 * k, weight: .medium))
-                    .tracking(1.6 * k)
-                    .foregroundStyle(Palette.accentInk)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 22 * k)
-                    .padding(.trailing, 18 * k)
-                    .padding(.top, 17 * k)
-            }
+            Spacer(minLength: 0)
 
-            RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                .fill(Palette.accentInk)
-                .overlay {
-                    Text(readout)
-                        .font(AppTypography.next(size: 36 * k, weight: .semibold))
-                        .foregroundStyle(isUnloaded ? Palette.accent : Palette.text)
+            VStack(alignment: .leading, spacing: 4 * k) {
+                HStack(spacing: 7 * k) {
+                    if !isUnloaded {
+                        Circle()
+                            .fill(Palette.accent)
+                            .frame(width: 8 * k, height: 8 * k)
+                    }
+                    Text(title)
+                        .font(.system(size: 26 * k, weight: .semibold))
+                        .foregroundStyle(isUnloaded ? Palette.textSub : Palette.text)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                        .padding(.horizontal, 14 * k)
+                        .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.15), value: readout)
                 }
-                .padding(.horizontal, 14 * k)
-                .padding(.top, 65 * k)
-                .padding(.bottom, 14 * k)
+
+                Text(speedLine)
+                    .font(.system(size: 15 * k, weight: .medium))
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .contentTransition(.numericText())
+
+                if !cameraBadge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(cameraBadge)
+                        .font(.system(size: 13 * k, weight: .regular))
+                        .foregroundStyle(Palette.textDim)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 20 * k)
+
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .animation(.smooth(duration: 0.15), value: speedLine)
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
@@ -100,7 +105,8 @@ struct FilmPanel: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Film")
-        .accessibilityValue(readout)
-        .accessibilityHint("Tap to choose film, drag horizontally to rate ISO")
+        .accessibilityValue(isUnloaded ? "No film loaded" : "\(filmName), \(speedLine)")
+        .accessibilityHint("Tap to choose film. Drag horizontally to rate the ISO.")
+        .accessibilityAddTraits(.isButton)
     }
 }

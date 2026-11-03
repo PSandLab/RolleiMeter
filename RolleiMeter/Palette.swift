@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 extension Color {
     /// 0xRRGGBB, sRGB.
@@ -11,33 +12,43 @@ extension Color {
     }
 }
 
-/// One dark palette. Black body, near-black panels, white type, a single yellow accent.
-/// Green / orange / red are reserved for exposure and focus state.
+/// Semantic color tokens.
+///
+/// Everything maps to a system color so the app adapts to Dark Mode,
+/// Increase Contrast and Reduce Transparency like a system app. The vintage
+/// yellow survives as the single brand accent, declared in the asset catalog
+/// (`AccentColor`) instead of being hard-coded in views.
 enum Palette {
-    static let background = Color.black
-    static let bg = Color.black
-    static let panel = Color(hex: 0x111111)
-    static let panelRaised = Color(hex: 0x1A1A1A)
+    // Surfaces
+    static let background = Color(uiColor: .systemBackground)
+    static let bg = Color(uiColor: .systemBackground)
+    static let panel = Color(uiColor: .secondarySystemBackground)
+    static let panelRaised = Color(uiColor: .tertiarySystemBackground)
+    static let groupedBackground = Color(uiColor: .systemGroupedBackground)
+    static let groupedCell = Color(uiColor: .secondarySystemGroupedBackground)
 
-    static let text = Color.white
-    static let textSub = Color(hex: 0x9E9EA6)
-    static let textDim = Color(hex: 0x6E6E6E)
-    static let dim = Color(hex: 0x6E6E6E)
-    static let faint = Color(hex: 0x3A3A3A)
-    static let border = Color.white.opacity(0.09)
+    // Type
+    static let text = Color(uiColor: .label)
+    static let textSub = Color(uiColor: .secondaryLabel)
+    static let textDim = Color(uiColor: .tertiaryLabel)
+    static let dim = Color(uiColor: .tertiaryLabel)
+    static let faint = Color(uiColor: .quaternaryLabel)
+    static let border = Color(uiColor: .separator)
 
-    /// The yellow on the active film card, the EV marker and the metered shutter speed.
-    static let accent = Color(hex: 0xFFC800)
-    /// Dark brown-black inset used inside the yellow film card.
-    static let accentInk = Color(hex: 0x1C1608)
+    /// Metered shutter speed, EV marker and selection states.
+    static let accent = Color.accentColor
+    /// Text drawn on top of the accent fill (only for high-emphasis buttons).
+    static let accentInk = Color(uiColor: .label)
+    /// Foreground for content sitting *on* the amber accent fill.
+    static let onAccent = Color.black
 
-    static let good = Color(hex: 0x3DDC6B)
-    static let slow = Color(hex: 0xFF9500)
-    static let bad = Color(hex: 0xFF453A)
+    static let good = Color(uiColor: .systemGreen)
+    static let slow = Color(uiColor: .systemOrange)
+    static let bad = Color(uiColor: .systemRed)
 
-    /// Marks drawn over the live image.
-    static let lensLight = Color(hex: 0xF1EEE6)
-    static let lensDark = Color(hex: 0x262626)
+    /// Marks drawn over the live camera image, which is always photographic.
+    static let lensLight = Color.white
+    static let lensDark = Color.black
 }
 
 extension Comparable {
