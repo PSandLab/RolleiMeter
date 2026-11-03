@@ -79,18 +79,21 @@ enum Exposure {
         return n * n / pow(2.0, evAtISO)
     }
 
-    static func result(for t: Double) -> ShutterResult {
-        if t < Rollei.fastest {
-            return ShutterResult(label: "500", t: Rollei.fastest, status: .tooFast,
-                                 deviation: log2(Rollei.fastest / t))
+    static func result(for t: Double, speeds: [(label: String, t: Double)] = Rollei.speeds) -> ShutterResult {
+        let activeSpeeds = speeds.isEmpty ? Rollei.speeds : speeds
+        let fastest = activeSpeeds.first ?? ("500", Rollei.fastest)
+        let slowest = activeSpeeds.last ?? ("2", Rollei.slowest)
+        if t < fastest.t {
+            return ShutterResult(label: fastest.label, t: fastest.t, status: .tooFast,
+                                 deviation: log2(fastest.t / t))
         }
-        if t > Rollei.slowest {
-            return ShutterResult(label: "2", t: Rollei.slowest, status: .tooSlow,
-                                 deviation: -log2(t / Rollei.slowest))
+        if t > slowest.t {
+            return ShutterResult(label: slowest.label, t: slowest.t, status: .tooSlow,
+                                 deviation: -log2(t / slowest.t))
         }
-        var best = Rollei.speeds[0]
+        var best = fastest
         var bestDist = Double.greatestFiniteMagnitude
-        for s in Rollei.speeds {
+        for s in activeSpeeds {
             let d = abs(log2(t / s.t))
             if d < bestDist {
                 bestDist = d

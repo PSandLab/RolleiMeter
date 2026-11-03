@@ -6,25 +6,52 @@ import UIKit
 struct FramePanel: View {
     let frame: Int
     let rollLength: Int
+    var isUnloaded: Bool = false
+    var loggedCount: Int = 0
     let k: CGFloat
     let onTap: () -> Void
 
+    private var isBonus: Bool { !isUnloaded && frame > rollLength }
+
     var body: some View {
         ZStack(alignment: .top) {
-            HStack(alignment: .firstTextBaseline, spacing: 10 * k) {
-                Text("\(frame)")
-                    .font(AppTypography.next(size: 78 * k, weight: .bold))
-                    .foregroundStyle(Palette.text)
-                    .contentTransition(.numericText())
-                Text("/ \(rollLength)")
-                    .font(AppTypography.next(size: 34 * k, weight: .medium))
-                    .foregroundStyle(Palette.dim)
+            if isUnloaded {
+                HStack(alignment: .firstTextBaseline, spacing: 8 * k) {
+                    Text("--")
+                        .font(AppTypography.next(size: 72 * k, weight: .bold))
+                        .foregroundStyle(Palette.dim)
+                    Text("/ --")
+                        .font(AppTypography.next(size: 32 * k, weight: .medium))
+                        .foregroundStyle(Palette.faint)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 40 * k)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10 * k) {
+                    Text(isBonus ? "+\(frame)" : "\(frame)")
+                        .font(AppTypography.next(size: 78 * k, weight: .bold))
+                        .foregroundStyle(isBonus ? Palette.good : Palette.text)
+                        .contentTransition(.numericText())
+                    Text("/ \(rollLength)")
+                        .font(AppTypography.next(size: 34 * k, weight: .medium))
+                        .foregroundStyle(Palette.dim)
+                }
+                .animation(.smooth(duration: 0.2), value: frame)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 40 * k)
             }
-            .animation(.smooth(duration: 0.2), value: frame)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.top, 40 * k)
 
-            PanelTitle(text: "FRAME", k: k)
+            HStack {
+                PanelTitle(text: "FRAME", k: k)
+                if loggedCount > 0 {
+                    Spacer()
+                    Text("\(loggedCount) LOG")
+                        .font(AppTypography.mono(size: 16 * k, weight: .bold))
+                        .foregroundStyle(Palette.accent)
+                        .padding(.top, 18 * k)
+                        .padding(.trailing, 18 * k)
+                }
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -32,6 +59,6 @@ struct FramePanel: View {
             onTap()
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Frame \(frame) of \(rollLength)")
+        .accessibilityLabel(isUnloaded ? "No film roll loaded" : "Frame \(frame) of \(rollLength)")
     }
 }

@@ -60,6 +60,7 @@ private struct SpotReticle: Shape {
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var meter = CameraMeter()
+    @StateObject private var logStore = FilmLogStore()
 
     @State private var evDamp = Damper(count: 1, initial: 2, stiffness: 70, damping: 12)
 
@@ -76,10 +77,11 @@ struct ContentView: View {
     @State private var frozenDist: Double?
     @State private var frozenPreviewImage: UIImage?
     @State private var isResuming = false
-    @AppStorage("filmID") private var filmID = FilmStock.all[0].id
-    @AppStorage("frameNumber") private var frameNumber = 1
-    @AppStorage("rollLength") private var rollLength = 36
-    @State private var showFilmPicker = false
+    @State private var showFilmLogbook = false
+    @State private var logbookInitialTab = 0
+    @State private var capturedMoment: CapturedMoment? = nil
+    @State private var momentSaved: Bool = false
+    @State private var showEvPopover: Bool = false
     // Wake-up cover: the held frame softens while the camera restarts, then dissolves into live.
     @State private var snapshotOpacity: Double = 1
     @State private var snapshotBlur: CGFloat = 0
@@ -106,23 +108,36 @@ struct ContentView: View {
     @State private var peakingVisible = false
     @State private var peakingTask: Task<Void, Never>?
 
+    private var activeShutterSpeeds: [(label: String, t: Double)] {
+        clampShutterStopsForGear(logStore.activeGear)
+    }
+
+    private var activeApertureStops: [(label: String, n: Double)] {
+        clampApertureStopsForGear(logStore.activeGear)
+    }
+
     private var safeISOIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
-    private var apertureIndex: Int { min(max(apertureStop, 0), Rollei.stops.count - 1) }
+    private var apertureIndex: Int { min(max(apertureStop, 0), max(0, activeApertureStops.count - 1)) }
 
     private var autoApertureIndex: Int {
         let reading = ev
-        for i in Rollei.stops.indices {
-            let t = Exposure.idealShutter(ev100: reading, iso: iso, comp: comp, n: Rollei.stops[i].n)
-            if t >= Rollei.fastest { return i }
+        let stops = activeApertureStops
+        let fastest = activeShutterSpeeds.first?.t ?? Rollei.fastest
+        for i in stops.indices {
+            let t = Exposure.idealShutter(ev100: reading, iso: iso, comp: comp, n: stops[i].n)
+            if t >= fastest { return i }
         }
-        return Rollei.stops.count - 1
+        return max(0, stops.count - 1)
     }
 
     private var resolvedApertureIndex: Int { autoAperture ? autoApertureIndex : apertureIndex }
-    private var resolvedAperture: (label: String, n: Double) { Rollei.stops[resolvedApertureIndex] }
+    private var resolvedAperture: (label: String, n: Double) {
+        let stops = activeApertureStops
+        return stops[min(max(resolvedApertureIndex, 0), max(0, stops.count - 1))]
+    }
 
     private var iso: Double { Double(ISOScale.values[safeISOIndex]) }
-    private var comp: Double { 0.0 }
+    private var comp: Double { logStore.totalEvComp }
     private var liveEV: Double { meter.sceneEV + calibration }
     private var ev: Double { frozenEV ?? liveEV }
 
@@ -149,35 +164,54 @@ struct ContentView: View {
             let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
             let k = grid.k
             let p = grid.portrait
+            let roll = logStore.rollState
+            let gear = logStore.activeGear
+            let gearShort = [gear.cameraName, gear.lensName].filter { !$0.isEmpty }.joined(separator: " · ")
 
             ZStack {
                 Palette.background
 
                 ZStack(alignment: .topLeading) {
-                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, k: k)
+                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, speeds: activeShutterSpeeds, k: k)
                         .modifier(SoftCard(k: k, on: p, rule: true))
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FilmPanel(
                         isoIndex: $isoIndex,
                         useDIN: useDIN,
-                        filmName: FilmStock.find(filmID).short,
-                        boxISO: FilmStock.find(filmID).iso,
+                        filmName: shortFilmBadge(name: roll.filmName, iso: roll.boxIso),
+                        boxISO: roll.boxIso,
+                        isUnloaded: roll.isUnloaded,
+                        evComp: logStore.totalEvComp,
+                        gearBadge: gearShort,
                         k: k,
-                        onTap: { showFilmPicker = true }
+                        onTap: {
+                            logbookInitialTab = 0
+                            showFilmLogbook = true
+                        }
                     )
                     .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
 
-                    FramePanel(frame: frameNumber, rollLength: rollLength, k: k,
-                               onTap: { showFilmPicker = true })
-                        .modifier(SoftCard(k: k, on: p, rule: true))
-                        .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
+                    FramePanel(
+                        frame: roll.currentFrame,
+                        rollLength: roll.maxFrames,
+                        isUnloaded: roll.isUnloaded,
+                        loggedCount: logStore.loggedFrames.count,
+                        k: k,
+                        onTap: {
+                            logbookInitialTab = 1
+                            showFilmLogbook = true
+                        }
+                    )
+                    .modifier(SoftCard(k: k, on: p, rule: true))
+                    .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
 
                     preview(k: k)
                         .cell(grid, col: p ? 0 : 3, row: 1, cols: 6, rows: p ? 6 : 5)
 
                     AperturePanel(
                         index: resolvedApertureIndex,
+                        stops: activeApertureStops,
                         auto: autoAperture,
                         lamp: autoLampState,
                         k: k,
@@ -233,9 +267,14 @@ struct ContentView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             if mode == .spot { mode = .matrix }
+            if !logStore.rollState.isUnloaded,
+               let boxIdx = ISOScale.values.firstIndex(of: logStore.rollState.boxIso) {
+                isoIndex = boxIdx
+            }
             pushConfig()
             evDamp.set([ev])
             meter.start()
+            LocationCache.shared.refreshIfAuthorized()
             hintCount += 1
             if hintCount <= 3 {
                 showHint = true
@@ -268,16 +307,13 @@ struct ContentView: View {
                 rawDistance: { meter.distance }
             )
         }
-        .sheet(isPresented: $showFilmPicker) {
-            FilmPickerSheet(
-                selectedID: filmID,
-                rollLength: $rollLength,
-                onPick: { film in
-                    filmID = film.id
-                    if let i = ISOScale.values.firstIndex(of: film.iso) { isoIndex = i }
-                },
-                onNewRoll: { frameNumber = 1 }
-            )
+        .sheet(isPresented: $showFilmLogbook) {
+            FilmLogbookSheet(store: logStore, initialTab: logbookInitialTab)
+        }
+        .onChange(of: logStore.rollState.boxIso) { _, newBoxIso in
+            if let idx = ISOScale.values.firstIndex(of: newBoxIso) {
+                isoIndex = idx
+            }
         }
         .onChange(of: mode) { pushConfig() }
         .onChange(of: spotActive) { pushConfig() }
@@ -319,15 +355,36 @@ struct ContentView: View {
         if frozenEV == nil {
             shutterBlink()
             let snapshot = meter.previewSnapshot()
-            frameNumber = min(frameNumber + 1, rollLength)   // dummy: each hold counts as a frame
             wakeToken &+= 1            // cancels any pending wake-up cleanup
             snapshotOpacity = 1
             snapshotBlur = 0
+            momentSaved = false
+
+            let heldEV = liveEV
+            let idealT = Exposure.idealShutter(ev100: heldEV, iso: iso, comp: comp, n: resolvedAperture.n)
+            let shutterRes = Exposure.result(for: idealT, speeds: activeShutterSpeeds)
+            let formattedShutter = shutterRes.label.hasSuffix("\"") ? shutterRes.label.replacingOccurrences(of: "\"", with: "s") : "1/\(shutterRes.label)"
+            let formattedAperture = "f/\(resolvedAperture.label)"
+            let computedZone = Int((5.0 + (meter.spotDelta ?? 0.0)).rounded()).clamped(to: 0...10)
+
+            let moment = logStore.captureMoment(
+                shutterSpeed: formattedShutter,
+                aperture: formattedAperture,
+                iso: Int(iso.rounded()),
+                sceneEv: heldEV,
+                compensatedEv: heldEV - comp,
+                zone: computedZone,
+                meterMode: engineMode.rawValue.uppercased(),
+                isAutoExposure: autoAperture,
+                previewImage: snapshot
+            )
+
             // Fade the held frame in over the live image instead of swapping it in one frame.
             withAnimation(.easeOut(duration: 0.28)) {
                 frozenPreviewImage = snapshot
-                frozenEV = liveEV
+                frozenEV = heldEV
                 frozenDist = meter.distance
+                capturedMoment = moment
             }
             meter.freezeDepth()
             meter.pause()
@@ -357,6 +414,8 @@ struct ContentView: View {
         isResuming = true
         wakeToken &+= 1
         let token = wakeToken
+        capturedMoment = nil
+        momentSaved = false
         meter.unfreezeDepth()
 
         // Immediate feedback: the held frame starts to soften while the camera wakes up.
@@ -436,7 +495,7 @@ struct ContentView: View {
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
             autoAperture = false
-            apertureStop = min(max(index, 0), Rollei.stops.count - 1)
+            apertureStop = min(max(index, 0), max(0, activeApertureStops.count - 1))
         }
         if manualFocus {
             updateDoFOverlay()
@@ -457,7 +516,7 @@ struct ContentView: View {
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             autoAperture = false
-            apertureStop = 3
+            apertureStop = min(3, max(0, activeApertureStops.count - 1))
         }
         if manualFocus {
             updateDoFOverlay()
@@ -663,6 +722,28 @@ struct ContentView: View {
                     .padding(10)
                     .allowsHitTesting(false)
 
+                // Floating iOS 27 Liquid Glass "Log Frame" Pill when HOLD is active
+                if held, let moment = capturedMoment {
+                    MinimalLogFrameButton(
+                        moment: moment,
+                        isSaved: momentSaved,
+                        onLogFrame: {
+                            _ = logStore.recordMoment(moment)
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                momentSaved = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                                if self.frozenEV != nil && !self.isResuming {
+                                    self.unfreeze()
+                                }
+                            }
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -678,15 +759,95 @@ struct ContentView: View {
         }
     }
 
-    /// Slim bar above the viewfinder: app name on the left, Liquid Glass gear on the right.
+    /// Slim bar above the viewfinder: app name on the left, ±EV & Scans/Gear & Settings on the right.
     private func topBar(k: CGFloat) -> some View {
-        HStack {
+        HStack(spacing: 8 * k) {
             Text("ROLLEIMETER")
                 .font(AppTypography.next(size: 22 * k, weight: .medium))
                 .tracking(2.6 * k)
                 .foregroundStyle(Palette.dim)
                 .padding(.leading, 17 * k)
+                .lineLimit(1)
+
             Spacer()
+
+            // ±EV Compensation Pill
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showEvPopover.toggle()
+            } label: {
+                Text(abs(logStore.totalEvComp) >= 0.05 ? formatEvComp(logStore.totalEvComp) : "±EV")
+                    .font(AppTypography.mono(size: 19 * k, weight: .bold))
+                    .foregroundStyle(abs(logStore.totalEvComp) >= 0.05 ? Palette.accent : Palette.text)
+                    .padding(.horizontal, 14 * k)
+                    .frame(height: 62 * k)
+                    .background(Palette.panel, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showEvPopover) {
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("EXPOSURE COMPENSATION")
+                            .font(AppTypography.label(11, weight: .bold))
+                            .foregroundStyle(Palette.accent)
+                        Spacer()
+                        Button("Reset 0 EV") {
+                            MechanicalHaptics.tick()
+                            logStore.manualEvCompIndex = EV_COMP_STOPS.firstIndex(of: 0.0) ?? 9
+                        }
+                        .font(AppTypography.label(11, weight: .bold))
+                        .foregroundStyle(Palette.textSub)
+                    }
+
+                    if logStore.rollState.isSlideFilm {
+                        Text("Slide film is locked to 0.0 EV for highlight protection.")
+                            .font(AppTypography.label(12, weight: .medium))
+                            .foregroundStyle(Palette.slow)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(Array(EV_COMP_STOPS.enumerated()), id: \.offset) { idx, stop in
+                                    let sel = logStore.manualEvCompIndex == idx
+                                    Button {
+                                        MechanicalHaptics.tick()
+                                        logStore.manualEvCompIndex = idx
+                                    } label: {
+                                        Text(formatEvComp(stop))
+                                            .font(AppTypography.mono(11, weight: .bold))
+                                            .foregroundStyle(sel ? .black : Palette.text)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 7)
+                                            .background(sel ? Palette.accent : Color.white.opacity(0.08), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+                .frame(minWidth: 280)
+                .background(Palette.panelRaised)
+                .presentationCompactAdaptation(.popover)
+            }
+
+            // Lab Scan Matcher & Gear Quick Button
+            Button {
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                logbookInitialTab = 2
+                showFilmLogbook = true
+            } label: {
+                Image(systemName: "photo.stack")
+                    .font(.system(size: 24 * k, weight: .medium))
+                    .foregroundStyle(Palette.text)
+                    .frame(width: 66 * k, height: 66 * k)
+                    .modifier(GlassCircle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Lab Scan Matcher and Film Logbook")
+
             Button {
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                 showSettings = true
@@ -729,7 +890,7 @@ struct ContentView: View {
         guard autoAperture else { return .off }
         let t = Exposure.idealShutter(ev100: ev, iso: iso, comp: comp,
                                       n: resolvedAperture.n)
-        let reading = Exposure.result(for: t)
+        let reading = Exposure.result(for: t, speeds: activeShutterSpeeds)
         if reading.deviation != nil { return .bad }
         return reading.isSlow ? .slow : .good
     }

@@ -8,6 +8,9 @@ struct FilmPanel: View {
     let useDIN: Bool
     let filmName: String
     let boxISO: Int
+    var isUnloaded: Bool = false
+    var evComp: Double = 0.0
+    var gearBadge: String = ""
     let k: CGFloat
     let onTap: () -> Void
 
@@ -20,26 +23,54 @@ struct FilmPanel: View {
         return useDIN ? value + " DIN" : "ISO " + value
     }
 
-    private var readout: String { filmName + "  \u{2022}  " + speedText }
+    private var readout: String {
+        if isUnloaded {
+            return "LOAD FILM  \u{2022}  " + speedText
+        }
+        return filmName + "  \u{2022}  " + speedText
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
                 .fill(Palette.accent)
 
-            PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
+            HStack {
+                PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
+                if abs(evComp) >= 0.05 {
+                    Spacer()
+                    Text(formatEvComp(evComp))
+                        .font(AppTypography.mono(size: 18 * k, weight: .bold))
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, 8 * k)
+                        .padding(.vertical, 3 * k)
+                        .background(Palette.accentInk, in: Capsule())
+                        .padding(.top, 14 * k)
+                        .padding(.trailing, 16 * k)
+                }
+            }
 
             RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
                 .fill(Palette.accentInk)
                 .overlay {
-                    Text(readout)
-                        .font(AppTypography.next(size: 34 * k, weight: .medium))
-                        .foregroundStyle(Palette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.15), value: readout)
-                        .padding(.horizontal, 12 * k)
+                    VStack(spacing: 2 * k) {
+                        Text(readout)
+                            .font(AppTypography.next(size: 32 * k, weight: .medium))
+                            .foregroundStyle(isUnloaded ? Palette.accent : Palette.text)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .contentTransition(.numericText())
+                            .animation(.smooth(duration: 0.15), value: readout)
+
+                        if !gearBadge.isEmpty {
+                            Text(gearBadge)
+                                .font(AppTypography.next(size: 16 * k, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                    }
+                    .padding(.horizontal, 12 * k)
                 }
                 .padding(.horizontal, 14 * k)
                 .padding(.top, 65 * k)

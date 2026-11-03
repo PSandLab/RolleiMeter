@@ -7,25 +7,27 @@ struct ShutterPanel: View {
     let iso: Double
     let comp: Double
     let aperture: (label: String, n: Double)
+    var speeds: [(label: String, t: Double)] = Rollei.speeds
     let k: CGFloat
 
-    private static let labels: [String] = Rollei.speeds.reversed().map { $0.label }
+    private var labels: [String] { speeds.reversed().map { $0.label } }
 
     private var reading: ShutterResult {
         let t = Exposure.idealShutter(ev100: damp.values[0], iso: iso, comp: comp, n: aperture.n)
-        return Exposure.result(for: t)
+        return Exposure.result(for: t, speeds: speeds)
     }
 
     @State private var position: Double = 0
 
     var body: some View {
         let r = reading
-        let index = Self.labels.firstIndex(of: r.label) ?? 0
+        let currentLabels = labels
+        let index = currentLabels.firstIndex(of: r.label) ?? 0
         let tint: Color = r.deviation != nil ? Palette.bad : (r.isSlow ? Palette.slow : Palette.accent)
         let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "slow" : "sec")
 
         ZStack(alignment: .top) {
-            ShutterWheel(position: position, labels: Self.labels, tint: tint, sub: sub, k: k)
+            ShutterWheel(position: position, labels: currentLabels, tint: tint, sub: sub, k: k)
             PanelTitle(text: "SHUTTER", k: k)
         }
         .onAppear { position = Double(index) }
@@ -36,7 +38,7 @@ struct ShutterPanel: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Shutter speed")
-        .accessibilityValue(r.deviation == nil ? "1/\(r.label) second" : sub)
+        .accessibilityValue(r.deviation == nil ? (r.label.hasSuffix("\"") ? "\(r.label) seconds" : "1/\(r.label) second") : sub)
     }
 }
 
@@ -64,7 +66,9 @@ private struct ShutterWheel: View, Animatable {
                 let color: Color = active ? tint : Palette.text.opacity(0.8)
 
                 let ad = abs(d)
-                let number = Text("1/" + labels[i])
+                let rawLabel = labels[i]
+                let displayStr = rawLabel.hasSuffix("\"") ? rawLabel : ("1/" + rawLabel)
+                let number = Text(displayStr)
                     .font(AppTypography.next(size: 42 * k, weight: active ? .bold : .medium))
                     .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
                 ctx.draw(ctx.resolve(number), at: CGPoint(x: x, y: 108 * k), anchor: .center)

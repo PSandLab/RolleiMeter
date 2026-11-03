@@ -9,6 +9,7 @@ enum AutoLampState {
 
 struct AperturePanel: View {
     let index: Int
+    var stops: [(label: String, n: Double)] = Rollei.stops
     let auto: Bool
     let lamp: AutoLampState
     let k: CGFloat
@@ -16,7 +17,7 @@ struct AperturePanel: View {
     let onTap: () -> Void
     let onHome: () -> Void
 
-    private let homeIndex = 3
+    private var homeIndex: Int { min(3, max(0, stops.count - 1)) }
 
     @State private var position: Double = 0
     @State private var base: Double?
@@ -25,7 +26,7 @@ struct AperturePanel: View {
     @State private var pressToken = 0
     @State private var lastDetent = -1
 
-    private var stopCount: Int { Rollei.stops.count }
+    private var stopCount: Int { max(1, stops.count) }
     private var nearest: Int { min(max(Int(position.rounded()), 0), stopCount - 1) }
     private var pitch: CGFloat { 81 * k }
 
@@ -40,7 +41,7 @@ struct AperturePanel: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            ApertureWheel(position: position, labels: Rollei.stops.map { $0.label },
+            ApertureWheel(position: position, labels: stops.map { $0.label },
                           tint: auto ? lampColor : Palette.text, k: k)
             PanelTitle(text: "APERTURE", k: k)
         }

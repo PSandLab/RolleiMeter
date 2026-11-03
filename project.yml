@@ -17,7 +17,10 @@ targets:
       path: RolleiMeter/Info.plist
       properties:
         CFBundleDisplayName: RolleiMeter
-        NSCameraUsageDescription: The camera is used to measure light.
+        NSCameraUsageDescription: The camera is used to measure light and capture reference frames for your film logbook.
+        NSLocationWhenInUseUsageDescription: Location is used to tag GPS coordinates onto logged film frames and EXIF metadata.
+        NSPhotoLibraryAddUsageDescription: Allows saving tagged film scans and reference frames to your Photo Library.
+        LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
