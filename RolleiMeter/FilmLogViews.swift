@@ -10,6 +10,7 @@ struct FilmLogbookSheet: View {
     @ObservedObject var store: FilmLogStore
     var initialTab: Int = 0
 
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedTab: Int = 0
     @State private var shareSheetItem: ShareSheetItem?
 
@@ -30,6 +31,13 @@ struct FilmLogbookSheet: View {
             NavigationStack {
                 ScanMatcherTabView(store: store) { items in
                     shareSheetItem = ShareSheetItem(items: items)
+                }
+                .navigationTitle("Scans")
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
             .tabItem { Label("Scans", systemImage: "photo.stack") }

@@ -36,12 +36,12 @@ struct ScanMatcherTabView: View {
     @ObservedObject var store: FilmLogStore
     let onShareItems: ([Any]) -> Void
 
-    @State private var selectedRollKey: String?
+    @State private var selectedRollKey: String? = nil
     @State private var importedScans: [ImportedLabScan] = []
     @State private var isLoadingScans = false
     @State private var reverseScanOrder = false
     @State private var cascadeShiftAtFrame: [Int: Int] = [:]
-    @State private var injectionStatusMessage: String?
+    @State private var injectionStatusMessage: String? = nil
     @State private var isInjectingExif = false
     @State private var showFolderImporter = false
     @State private var showPhotoFilesImporter = false
@@ -60,6 +60,10 @@ struct ScanMatcherTabView: View {
             scansSection
 
             if let currentRoll, !frames.isEmpty {
+                // Keep the write/share actions within reach before the long
+                // frame lists, the way a native task screen front-loads its action.
+                exportSection(frames: frames, scans: scans, matchedCount: matchedCount)
+
                 if !scans.isEmpty {
                     matchSection(
                         roll: currentRoll,
@@ -68,8 +72,6 @@ struct ScanMatcherTabView: View {
                         matchedCount: matchedCount
                     )
                 }
-
-                exportSection(frames: frames, scans: scans, matchedCount: matchedCount)
 
                 framesSection(roll: currentRoll, scans: scans, shifts: shifts)
             }
@@ -99,7 +101,7 @@ struct ScanMatcherTabView: View {
     private func rollSection(rolls: [LoggedRoll], currentRoll: LoggedRoll?) -> some View {
         Section {
             if let currentRoll {
-                Picker("Roll", selection: rollSelectionBinding(rolls: rolls)) {
+                Picker("Active roll", selection: rollSelectionBinding(rolls: rolls)) {
                     ForEach(rolls) { roll in
                         Text(rollMenuTitle(roll)).tag(roll.id)
                     }
