@@ -102,8 +102,7 @@ struct GearPickerScreen: View {
     private var activeCameraBrand: String? {
         guard !gear.cameraId.isEmpty else { return nil }
         return GearCatalogCache.allCameras(customCameras: store.customCameras)
-            .first { $0.id == gear.cameraId }?
-            .brand
+            .first { $0.id == gear.cameraId }?.brand
     }
 
     private var activeCameraSubtitle: String {
@@ -173,9 +172,7 @@ struct GearPickerScreen: View {
         } header: {
             Text("Custom gear")
         } footer: {
-            if store.customCameras.isEmpty && store.customLenses.isEmpty {
-                Text("Custom gear is saved on this iPhone and can be swiped away at any time.")
-            }
+            Text("Custom cameras and lenses also appear in the catalogs above.")
         }
     }
 }
@@ -280,7 +277,7 @@ private struct GearCameraRow: View {
                 Text(camera.model)
                     .lineLimit(2)
                 Text(summary)
-                    .font(.subheadline)
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -392,7 +389,11 @@ struct CameraDetailView: View {
             } header: {
                 Text("Lens")
             } footer: {
-                Text("Lenses made for the \(formatMountBadge(camera.mount)) mount.")
+                if mountLenses.isEmpty {
+                    Text("No catalog lens uses the \(formatMountBadge(camera.mount)) mount yet. Add one under Custom gear.")
+                } else {
+                    Text("Lenses made for the \(formatMountBadge(camera.mount)) mount.")
+                }
             }
         }
     }
@@ -487,7 +488,7 @@ private struct GearProfileRow: View {
                     .foregroundStyle(Palette.text)
                     .lineLimit(2)
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
             }
@@ -624,7 +625,7 @@ private struct GearLensRow: View {
                     .foregroundStyle(Palette.text)
                     .lineLimit(2)
                 Text("\(lens.brand) · \(formatMountBadge(lens.mount)) · \(formatApertureRange(lens.minAperture, lens.maxAperture))")
-                    .font(.subheadline)
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
             }
@@ -657,12 +658,12 @@ private extension FocalLengthCategory {
     var sectionTitle: String {
         switch self {
         case .all: return "All"
-        case .ultraWide: return "24 mm and wider"
+        case .ultraWide: return "≤ 24 mm"
         case .w28: return "28 mm"
         case .w35: return "35 mm"
         case .std50: return "50 mm"
         case .port85: return "85 mm"
-        case .tele105Plus: return "105 mm and longer"
+        case .tele105Plus: return "105 mm +"
         case .zoom: return "Zooms"
         }
     }
