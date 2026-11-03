@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 // MARK: - Gear picker
@@ -144,7 +145,7 @@ struct GearPickerScreen: View {
                     ListGlyph(systemName: "camera.aperture")
                     VStack(alignment: .leading, spacing: 2) {
                         Text(gear.hasLens ? "Change lens" : "Choose a lens")
-                        Text("Browse lenses by focal length")
+                        Text("Browse one row per lens, versions inside")
                             .font(Geist.text(.subheadline))
                             .foregroundStyle(.secondary)
                     }
@@ -178,135 +179,229 @@ struct GearPickerScreen: View {
     }
 }
 
-// MARK: - Camera catalog
+// MARK: - Camera brand index
 
-/// Every camera in the catalog, grouped by brand. Rows push the mount profiles
-/// of the selected body.
+/// Popular brands, in the order the camera index presents them.
+private let cameraPopularBrandOrder: [String] = [
+    "Leica", "Nikon", "Canon", "Pentax", "Olympus", "Minolta", "Contax",
+    "Fujifilm", "Rollei", "Yashica", "Voigtländer", "Mamiya", "Hasselblad",
+    "Ricoh", "Konica"
+]
+
+/// The camera catalog as a brand index: 271 bodies are unusable in one list,
+/// so this screen lists brands first and pushes the bodies of one brand.
 struct CameraCatalogList: View {
     @ObservedObject var store: FilmLogStore
 
     @State private var searchText = ""
 
     var body: some View {
-        let sections = cameraSections()
+        let cameras = GearCatalogCache.allCameras(customCameras: store.customCameras)
+        let groups = cameraBrandGroups(from: cameras)
+        let activeBrand = activeCameraBrand(in: cameras, activeCameraId: store.activeGear.cameraId)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let brandMatches = matchingBrands(in: groups, query: query)
+        let cameraMatches = matchingCameras(in: cameras, query: query)
+        let popular = popularBrandGroups(from: groups)
+        let rare = rareBrandGroups(from: groups)
+        let rareCameraCount = rare.reduce(0) { $0 + $1.count }
+        let customCameras = store.customCameras.sorted {
+            if $0.brand != $1.brand {
+                return $0.brand.localizedStandardCompare($1.brand) == .orderedAscending
+            }
+            return $0.model.localizedStandardCompare($1.model) == .orderedAscending
+        }
 
         List {
-            ForEach(sections) { section in
-                Section {
-                    ForEach(section.cameras) { camera in
-                        NavigationLink {
-                            CameraDetailView(store: store, camera: camera)
-                        } label: {
-                            GearCameraRow(camera: camera,
-                                          isActive: camera.id == store.activeGear.cameraId)
+            if query.isEmpty {
+                if !popular.isEmpty {
+                    Section {
+                        ForEach(popular) { group in
+                            NavigationLink {
+                                CameraBrandScreen(store: store, brand: group.brand)
+                            } label: {
+                                CameraBrandRow(group: group,
+                                               isActive: group.brand == activeBrand)
+                            }
                         }
+                    } header: {
+                        Text("Popular")
                     }
-                } header: {
-                    Text(section.title)
+                }
+
+                if !rare.isEmpty {
+                    Section {
+                        NavigationLink {
+                            RareBrandScreen(store: store)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ListGlyph(systemName: "clock.arrow.circlepath")
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Rare brands")
+                                        .font(Geist.text(.body))
+                                        .foregroundStyle(Palette.text)
+                                    Text("\(countText(rareCameraCount, singular: "camera", plural: "cameras")) · \(countText(rare.count, singular: "brand", plural: "brands"))")
+                                        .font(Geist.text(.subheadline))
+                                        .foregroundStyle(Palette.textSub)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    } header: {
+                        Text("Vintage & rare")
+                    } footer: {
+                        Text("Bodies from small and discontinued makers, kept out of the popular list.")
+                    }
+                }
+
+                if !customCameras.isEmpty {
+                    Section {
+                        ForEach(customCameras) { camera in
+                            NavigationLink {
+                                CameraDetailView(store: store, camera: camera)
+                            } label: {
+                                CameraModelRow(camera: camera,
+                                               subtitle: cameraRowSubtitle(camera, includingBrand: true),
+                                               isActive: camera.id == store.activeGear.cameraId)
+                            }
+                        }
+                    } header: {
+                        Text("Custom")
+                    } footer: {
+                        Text("Cameras you added yourself.")
+                    }
+                }
+            } else {
+                if !brandMatches.isEmpty {
+                    Section {
+                        ForEach(brandMatches) { group in
+                            NavigationLink {
+                                CameraBrandScreen(store: store, brand: group.brand)
+                            } label: {
+                                CameraBrandRow(group: group,
+                                               isActive: group.brand == activeBrand)
+                            }
+                        }
+                    } header: {
+                        Text("Brands")
+                    }
+                }
+
+                if !cameraMatches.isEmpty {
+                    Section {
+                        ForEach(cameraMatches) { camera in
+                            NavigationLink {
+                                CameraDetailView(store: store, camera: camera)
+                            } label: {
+                                CameraModelRow(camera: camera,
+                                               subtitle: cameraRowSubtitle(camera, includingBrand: true),
+                                               isActive: camera.id == store.activeGear.cameraId)
+                            }
+                        }
+                    } header: {
+                        Text("Cameras")
+                    }
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .searchable(text: $searchText, prompt: "Search cameras")
+        .searchable(text: $searchText, prompt: "Search brands or cameras")
         .overlay {
-            if sections.isEmpty {
+            if !query.isEmpty && brandMatches.isEmpty && cameraMatches.isEmpty {
                 ContentUnavailableView.search(text: searchText)
             }
         }
         .navigationTitle("Camera")
         .navigationBarTitleDisplayMode(.inline)
     }
-
-    private func cameraSections() -> [CameraCatalogSection] {
-        let cameras = filteredCameras
-        let custom = cameras.filter(\.isCustom)
-        let catalog = cameras.filter { !$0.isCustom }
-
-        var buckets: [String: [CameraGearSpec]] = [:]
-        for camera in catalog {
-            buckets[camera.brand, default: []].append(camera)
-        }
-
-        var sections: [CameraCatalogSection] = []
-        if !custom.isEmpty {
-            sections.append(CameraCatalogSection(id: "custom", title: "Custom", cameras: sorted(custom)))
-        }
-        for brand in buckets.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
-            sections.append(CameraCatalogSection(id: brand,
-                                                 title: brand,
-                                                 cameras: sorted(buckets[brand] ?? [])))
-        }
-        return sections
-    }
-
-    private func sorted(_ cameras: [CameraGearSpec]) -> [CameraGearSpec] {
-        cameras.sorted { $0.model.localizedStandardCompare($1.model) == .orderedAscending }
-    }
-
-    private var filteredCameras: [CameraGearSpec] {
-        let all = GearCatalogCache.allCameras(customCameras: store.customCameras)
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return all }
-
-        return all
-            .map { camera in
-                (camera: camera,
-                 score: fuzzyMatchScore(query: query,
-                                        target: "\(camera.brand) \(camera.model) \(camera.mount) \(camera.fixedLensName)"))
-            }
-            .filter { $0.score > 0 }
-            .sorted { $0.score > $1.score }
-            .map { $0.camera }
-    }
 }
 
-private struct CameraCatalogSection: Identifiable {
-    let id: String
-    let title: String
-    let cameras: [CameraGearSpec]
-}
-
-private struct GearCameraRow: View {
-    let camera: CameraGearSpec
-    let isActive: Bool
+/// The bodies of one brand. Pushes the mount profiles of the selected body.
+struct CameraBrandScreen: View {
+    @ObservedObject var store: FilmLogStore
+    let brand: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            CameraBrandLogo(brand: camera.brand, size: 40)
+        let cameras = GearCatalogCache.allCameras(customCameras: store.customCameras)
+            .filter { $0.brand == brand }
+            .sorted { $0.model.localizedStandardCompare($1.model) == .orderedAscending }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(camera.model)
-                    .lineLimit(2)
-                Text(summary)
-                    .font(Geist.monoText(.subheadline))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-
-            if isActive {
-                Image(systemName: "checkmark")
-                    .font(Geist.text(.body, .semibold))
-                    .foregroundStyle(Palette.accent)
-                    .accessibilityLabel("In use")
+        List {
+            Section {
+                ForEach(cameras) { camera in
+                    NavigationLink {
+                        CameraDetailView(store: store, camera: camera)
+                    } label: {
+                        CameraModelRow(camera: camera,
+                                       subtitle: cameraRowSubtitle(camera, includingBrand: false),
+                                       isActive: camera.id == store.activeGear.cameraId)
+                    }
+                }
+            } header: {
+                Text("Bodies")
+            } footer: {
+                Text("Every \(brand) body in the catalog.")
             }
         }
+        .listStyle(.insetGrouped)
+        .overlay {
+            if cameras.isEmpty {
+                ContentUnavailableView("No cameras",
+                                       systemImage: "camera",
+                                       description: Text("No \(brand) body is in the catalog."))
+            }
+        }
+        .navigationTitle(brand)
+        .navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private var summary: String {
-        if camera.isFixed {
-            return camera.fixedLensName.isEmpty ? "Fixed lens" : camera.fixedLensName
+/// The leftover brands: one-off and obscure bodies that would otherwise clutter
+/// the popular part of the index. Any brand added to the JSON later that is not
+/// on the popular list lands here automatically.
+struct RareBrandScreen: View {
+    @ObservedObject var store: FilmLogStore
+
+    var body: some View {
+        let cameras = GearCatalogCache.allCameras(customCameras: store.customCameras)
+        let groups = rareBrandGroups(from: cameraBrandGroups(from: cameras))
+        let activeBrand = activeCameraBrand(in: cameras, activeCameraId: store.activeGear.cameraId)
+
+        List {
+            Section {
+                ForEach(groups) { group in
+                    NavigationLink {
+                        CameraBrandScreen(store: store, brand: group.brand)
+                    } label: {
+                        CameraBrandRow(group: group,
+                                       isActive: group.brand == activeBrand)
+                    }
+                }
+            } header: {
+                Text("Brands")
+            } footer: {
+                Text("One-off and obscure bodies, grouped by brand.")
+            }
         }
-        return "\(formatMountBadge(camera.mount)) · \(shutterRangeText(camera.minShutter, camera.maxShutter))"
+        .listStyle(.insetGrouped)
+        .overlay {
+            if groups.isEmpty {
+                ContentUnavailableView("No rare brands",
+                                       systemImage: "camera",
+                                       description: Text("Every brand in the catalog is listed under Popular."))
+            }
+        }
+        .navigationTitle("Vintage & rare")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 // MARK: - Camera detail (mount profiles)
 
-/// The mount profiles of one body: the fixed lens it was built around, or a
-/// lens for each lens the mount accepts. Selecting a profile mounts it and pops
-/// back to the catalog.
+/// The mount profiles of one body: the fixed lens it was built around, or the
+/// native-mount lenses, an adapter profile for anything else, or no lens at
+/// all. Mounting a profile pops back to the catalog.
 struct CameraDetailView: View {
     @ObservedObject var store: FilmLogStore
     let camera: CameraGearSpec
@@ -378,22 +473,31 @@ struct CameraDetailView: View {
                                    isActive: isBodyOnlyActive)
                 }
 
+                Button {
+                    mount(adapterProfile)
+                } label: {
+                    GearProfileRow(title: "Use an adapter",
+                                   subtitle: "Any lens you can mount",
+                                   systemImage: "arrow.triangle.swap",
+                                   isActive: isAdapterActive)
+                }
+
                 ForEach(mountLenses) { entry in
-                    Button {
-                        mount(profile(for: entry.lens))
+                    NavigationLink {
+                        LensDetailView(store: store, entry: entry, hostCamera: camera)
                     } label: {
-                        GearProfileRow(title: entry.lens.model,
-                                       subtitle: "\(entry.lens.brand) · \(formatApertureRange(entry.lens.minAperture, entry.lens.maxAperture))",
-                                       isActive: isLensActive(entry.lens))
+                        GearProfileRow(title: lensRowTitle(entry),
+                                       subtitle: lensRowSubtitle(entry),
+                                       isActive: isEntryActive(entry))
                     }
                 }
             } header: {
                 Text("Lens")
             } footer: {
                 if mountLenses.isEmpty {
-                    Text("No catalog lens uses the \(formatMountBadge(camera.mount)) mount yet. Add one under Custom gear.")
+                    Text("No catalog lens uses the \(formatMountBadge(camera.mount)) mount yet. Add one under Custom gear.\nAdapter: any lens you can mount, from f/1.2 to f/32.")
                 } else {
-                    Text("Lenses made for the \(formatMountBadge(camera.mount)) mount.")
+                    Text("Lenses made for the \(formatMountBadge(camera.mount)) mount.\nAdapter: any lens you can mount, from f/1.2 to f/32.")
                 }
             }
         }
@@ -420,9 +524,16 @@ struct CameraDetailView: View {
         return gear.cameraId == camera.id && !gear.hasLens
     }
 
-    private func isLensActive(_ lens: LensGearSpec) -> Bool {
+    private var isAdapterActive: Bool {
         let gear = store.activeGear
-        return gear.cameraId == camera.id && gear.lensId == lens.id
+        return gear.cameraId == camera.id && gear.lensId == adapterProfile.lensId
+    }
+
+    private func isEntryActive(_ entry: PrewarmedLensEntry) -> Bool {
+        let gear = store.activeGear
+        guard gear.cameraId == camera.id, !gear.lensId.isEmpty else { return false }
+        if gear.lensId == entry.lens.id { return true }
+        return entry.variants.contains { $0.spec.id == gear.lensId }
     }
 
     private var fixedProfile: ActiveGearProfile {
@@ -455,7 +566,9 @@ struct CameraDetailView: View {
         )
     }
 
-    private func profile(for lens: LensGearSpec) -> ActiveGearProfile {
+    /// Anything the user can physically fit through an adapter: the body keeps
+    /// its own shutter range and mount, the lens range is the widest usable.
+    private var adapterProfile: ActiveGearProfile {
         ActiveGearProfile(
             cameraId: camera.id,
             cameraName: camera.model,
@@ -463,10 +576,10 @@ struct CameraDetailView: View {
             isFixedLens: false,
             minShutter: camera.minShutter,
             maxShutter: camera.maxShutter,
-            lensId: lens.id,
-            lensName: lens.model,
-            minAperture: lens.minAperture,
-            maxAperture: lens.maxAperture
+            lensId: "\(camera.id)_adapter",
+            lensName: "Adapted lens",
+            minAperture: 1.2,
+            maxAperture: 32.0
         )
     }
 
@@ -477,44 +590,13 @@ struct CameraDetailView: View {
     }
 }
 
-private struct GearProfileRow: View {
-    let title: String
-    let subtitle: String
-    let isActive: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(2)
-                Text(subtitle)
-                    .font(Geist.monoText(.subheadline))
-                    .foregroundStyle(Palette.textSub)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-
-            if isActive {
-                Image(systemName: "checkmark")
-                    .font(Geist.text(.body, .semibold))
-                    .foregroundStyle(Palette.accent)
-                    .accessibilityLabel("Mounted")
-            }
-        }
-        .contentShape(Rectangle())
-    }
-}
-
 // MARK: - Lens catalog
 
-/// Every lens in the catalog, grouped by focal-length category. Selecting a
-/// lens updates the active gear's lens and pops back.
+/// Every lens in the catalog, grouped by focal-length category. There is one
+/// row per family; the versions live in `LensDetailView`.
 struct LensCatalogList: View {
     @ObservedObject var store: FilmLogStore
 
-    @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
 
     var body: some View {
@@ -524,11 +606,11 @@ struct LensCatalogList: View {
             ForEach(sections) { section in
                 Section {
                     ForEach(section.entries) { entry in
-                        Button {
-                            mount(entry.lens)
+                        NavigationLink {
+                            LensDetailView(store: store, entry: entry)
                         } label: {
-                            GearLensRow(lens: entry.lens,
-                                        isActive: isActive(entry.lens))
+                            GearLensRow(entry: entry,
+                                        isActive: isEntryActive(entry))
                         }
                     }
                 } header: {
@@ -559,9 +641,7 @@ struct LensCatalogList: View {
 
         var categorized = Set<String>()
         for category in FocalLengthCategory.allCases where category != .all {
-            let matches = catalog.filter {
-                matchesFocalCategory(model: $0.lens.model, category: category)
-            }
+            let matches = catalog.filter { entryCategory($0) == category }
             guard !matches.isEmpty else { continue }
             categorized.formUnion(matches.map { $0.lens.id })
             sections.append(LensCatalogSection(id: category.rawValue,
@@ -575,6 +655,18 @@ struct LensCatalogList: View {
             sections.append(LensCatalogSection(id: "other", title: "Other", entries: other))
         }
         return sections
+    }
+
+    private func entryCategory(_ entry: PrewarmedLensEntry) -> FocalLengthCategory? {
+        if zoomFocalRange(entry.lens.model) != nil { return .zoom }
+        let mm = entry.focalLengthMm
+        guard mm > 0, mm < 9999 else { return nil }
+        if mm <= 25 { return .ultraWide }
+        if mm <= 31 { return .w28 }
+        if mm <= 43 { return .w35 }
+        if mm <= 65 { return .std50 }
+        if mm <= 100 { return .port85 }
+        return .tele105Plus
     }
 
     private var filteredEntries: [PrewarmedLensEntry] {
@@ -593,19 +685,11 @@ struct LensCatalogList: View {
             .map { $0.entry }
     }
 
-    private func isActive(_ lens: LensGearSpec) -> Bool {
-        store.activeGear.lensId == lens.id
-    }
-
-    private func mount(_ lens: LensGearSpec) {
-        var updated = store.activeGear
-        updated.lensId = lens.id
-        updated.lensName = lens.model
-        updated.minAperture = lens.minAperture
-        updated.maxAperture = lens.maxAperture
-        store.activeGear = updated
-        Haptics.success()
-        dismiss()
+    private func isEntryActive(_ entry: PrewarmedLensEntry) -> Bool {
+        let activeLensID = store.activeGear.lensId
+        guard !activeLensID.isEmpty else { return false }
+        if activeLensID == entry.lens.id { return true }
+        return entry.variants.contains { $0.spec.id == activeLensID }
     }
 }
 
@@ -615,18 +699,264 @@ private struct LensCatalogSection: Identifiable {
     let entries: [PrewarmedLensEntry]
 }
 
-private struct GearLensRow: View {
-    let lens: LensGearSpec
+// MARK: - Lens detail (version picker)
+
+/// One lens family. The catalog row is deliberately clean; the version (New FD
+/// vs FD, AI vs AI-S, …) is picked here and applied on mount.
+struct LensDetailView: View {
+    @ObservedObject var store: FilmLogStore
+    let entry: PrewarmedLensEntry
+    let hostCamera: CameraGearSpec?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedVariantID: String
+
+    init(store: FilmLogStore, entry: PrewarmedLensEntry, hostCamera: CameraGearSpec? = nil) {
+        self.store = store
+        self.entry = entry
+        self.hostCamera = hostCamera
+        _selectedVariantID = State(initialValue: entry.variants.first?.id ?? "")
+    }
+
+    private var selectedVariant: LensVariantItem? {
+        entry.variants.first { $0.id == selectedVariantID } ?? entry.variants.first
+    }
+
+    var body: some View {
+        List {
+            specSection
+            versionSection
+            mountSection
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(lensRowTitle(entry))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: Specs
+
+    private var specSection: some View {
+        Section {
+            LabeledContent("Brand") {
+                Text(entry.lens.brand)
+                    .foregroundStyle(Palette.textSub)
+            }
+            LabeledContent("Mount") {
+                Text(formatMountBadge(entry.lens.mount))
+                    .foregroundStyle(Palette.textSub)
+            }
+            LabeledContent("Focal length") {
+                Text(focalLengthDisplay)
+                    .font(Geist.monoText(.body))
+                    .foregroundStyle(Palette.textSub)
+            }
+            LabeledContent("Aperture") {
+                Text(formatApertureRange(entry.lens.minAperture, entry.lens.maxAperture))
+                    .font(Geist.monoText(.body))
+                    .foregroundStyle(Palette.textSub)
+            }
+        } header: {
+            Text("Lens")
+        }
+    }
+
+    private var focalLengthDisplay: String {
+        if let zoom = zoomFocalRange(entry.lens.model) {
+            return "\(zoom) mm"
+        }
+        if entry.focalLengthMm > 0, entry.focalLengthMm < 9999 {
+            return "\(focalLengthNumberText(entry.focalLengthMm)) mm"
+        }
+        return "Not listed"
+    }
+
+    // MARK: Version
+
+    @ViewBuilder
+    private var versionSection: some View {
+        if entry.variants.count > 1 {
+            Section {
+                if entry.variants.count <= 3 {
+                    Picker("Version", selection: $selectedVariantID) {
+                        ForEach(entry.variants) { variant in
+                            Text(variant.badge).tag(variant.id)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    if let selectedVariant {
+                        Text(selectedVariant.subtitle)
+                            .font(Geist.text(.caption))
+                            .foregroundStyle(Palette.textSub)
+                    }
+                } else {
+                    Picker("Version", selection: $selectedVariantID) {
+                        ForEach(entry.variants) { variant in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(variant.badge)
+                                Text(variant.subtitle)
+                                    .font(Geist.text(.caption))
+                                    .foregroundStyle(Palette.textSub)
+                            }
+                            .tag(variant.id)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            } header: {
+                Text("Version")
+            } footer: {
+                Text("Pick the version marked on your lens.")
+            }
+        }
+    }
+
+    // MARK: Mount
+
+    private var mountSection: some View {
+        Section {
+            Button {
+                mountSelected()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "camera.aperture")
+                    Text("Mount lens")
+                    Spacer(minLength: 0)
+                }
+                .font(Geist.text(.body, .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(minHeight: Metrics.minTap)
+                .contentShape(Rectangle())
+            }
+        } footer: {
+            Text(mountFooter)
+        }
+    }
+
+    private var mountFooter: String {
+        if let hostCamera {
+            return "Mounts this lens on the \(hostCamera.model)."
+        }
+        return "Applies this lens's aperture range to the meter."
+    }
+
+    private func mountSelected() {
+        var gear = store.activeGear
+
+        if let hostCamera {
+            gear.cameraId = hostCamera.id
+            gear.cameraName = hostCamera.model
+            gear.mount = hostCamera.mount
+            gear.isFixedLens = false
+            gear.minShutter = hostCamera.minShutter
+            gear.maxShutter = hostCamera.maxShutter
+        }
+
+        let lens = selectedVariant?.spec ?? entry.lens
+        gear.lensId = lens.id
+        gear.lensName = lens.model
+        gear.minAperture = lens.minAperture
+        gear.maxAperture = lens.maxAperture
+
+        store.activeGear = gear
+        Haptics.success()
+        dismiss()
+    }
+}
+
+// MARK: - Rows
+
+private struct CameraBrandRow: View {
+    let group: CameraBrandGroup
     let isActive: Bool
 
     var body: some View {
         HStack(spacing: 12) {
+            CameraBrandLogo(brand: group.brand, size: 40)
+
             VStack(alignment: .leading, spacing: 2) {
-                Text(lens.model)
+                Text(group.brand)
+                    .font(Geist.text(.body))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                Text(countText(group.count, singular: "camera", plural: "cameras"))
+                    .font(Geist.text(.subheadline))
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(Geist.text(.body, .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel("In use")
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct CameraModelRow: View {
+    let camera: CameraGearSpec
+    let subtitle: String
+    let isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CameraBrandLogo(brand: camera.brand, size: 40)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(camera.model)
+                    .font(Geist.text(.body))
                     .foregroundStyle(Palette.text)
                     .lineLimit(2)
-                Text("\(lens.brand) · \(formatMountBadge(lens.mount)) · \(formatApertureRange(lens.minAperture, lens.maxAperture))")
-                    .font(Geist.monoText(.subheadline))
+                Text(subtitle)
+                    .font(Geist.text(.subheadline))
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(Geist.text(.body, .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel("In use")
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct GearProfileRow: View {
+    let title: String
+    let subtitle: String
+    var systemImage: String? = nil
+    let isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(Geist.text(.body))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 24)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Geist.text(.body))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(Geist.text(.subheadline))
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
             }
@@ -640,8 +970,225 @@ private struct GearLensRow: View {
                     .accessibilityLabel("Mounted")
             }
         }
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
+}
+
+private struct GearLensRow: View {
+    let entry: PrewarmedLensEntry
+    let isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lensRowTitle(entry))
+                    .font(Geist.text(.body))
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                Text(lensRowSubtitle(entry))
+                    .font(Geist.text(.subheadline))
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(Geist.text(.body, .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel("Mounted")
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Brand index data
+
+private struct CameraBrandGroup: Identifiable {
+    let brand: String
+    let count: Int
+
+    var id: String { brand }
+}
+
+private func cameraBrandGroups(from cameras: [CameraGearSpec]) -> [CameraBrandGroup] {
+    var counts: [String: Int] = [:]
+    for camera in cameras {
+        let brand = camera.brand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !brand.isEmpty else { continue }
+        counts[brand, default: 0] += 1
+    }
+    return counts
+        .map { CameraBrandGroup(brand: $0.key, count: $0.value) }
+        .sorted { $0.brand.localizedStandardCompare($1.brand) == .orderedAscending }
+}
+
+private func popularBrandGroups(from groups: [CameraBrandGroup]) -> [CameraBrandGroup] {
+    let byBrand = Dictionary(uniqueKeysWithValues: groups.map { ($0.brand, $0) })
+    return cameraPopularBrandOrder.compactMap { byBrand[$0] }
+}
+
+/// Brands that are neither popular nor added by the user: the rare screen is
+/// about the bundled catalog, while custom gear keeps its own section.
+private func rareBrandGroups(from groups: [CameraBrandGroup]) -> [CameraBrandGroup] {
+    let bundledBrands = Set(GearCatalogCache.loadBundledCatalog().cameras.map { $0.brand })
+    return groups.filter {
+        bundledBrands.contains($0.brand) && !cameraPopularBrandOrder.contains($0.brand)
+    }
+}
+
+private func activeCameraBrand(in cameras: [CameraGearSpec], activeCameraId: String) -> String? {
+    guard !activeCameraId.isEmpty else { return nil }
+    return cameras.first { $0.id == activeCameraId }?.brand
+}
+
+private func matchingBrands(in groups: [CameraBrandGroup], query: String) -> [CameraBrandGroup] {
+    guard !query.isEmpty else { return [] }
+    return groups
+        .map { group in
+            (group: group, score: fuzzyMatchScore(query: query, target: group.brand))
+        }
+        .filter { $0.score > 0 }
+        .sorted { $0.score > $1.score }
+        .map { $0.group }
+}
+
+private func matchingCameras(in cameras: [CameraGearSpec], query: String) -> [CameraGearSpec] {
+    guard !query.isEmpty else { return [] }
+    return cameras
+        .map { camera in
+            (camera: camera, score: fuzzyMatchScore(query: query, target: "\(camera.brand) \(camera.model)"))
+        }
+        .filter { $0.score > 0 }
+        .sorted { $0.score > $1.score }
+        .map { $0.camera }
+}
+
+private func cameraRowSubtitle(_ camera: CameraGearSpec, includingBrand: Bool) -> String {
+    let detail: String
+    if camera.isFixed {
+        detail = camera.fixedLensName.isEmpty ? "Fixed lens" : camera.fixedLensName
+    } else {
+        detail = "\(formatMountBadge(camera.mount)) · \(shutterRangeText(camera.minShutter, camera.maxShutter))"
+    }
+
+    let brand = camera.brand.trimmingCharacters(in: .whitespacesAndNewlines)
+    if includingBrand, !brand.isEmpty {
+        return "\(brand) · \(detail)"
+    }
+    return detail
+}
+
+private func countText(_ count: Int, singular: String, plural: String) -> String {
+    "\(count) \(count == 1 ? singular : plural)"
+}
+
+// MARK: - Lens naming
+
+/// One lens family, one clean row title: `24mm f/2.8` for a prime, a short
+/// focal range for a zoom, and only then the cleaned model name.
+private func lensRowTitle(_ entry: PrewarmedLensEntry) -> String {
+    guard entry.lens.minAperture > 0 else {
+        return shortLensName(entry.lens)
+    }
+
+    let aperture = apertureNumberText(entry.lens.minAperture)
+    if let zoom = zoomFocalRange(entry.lens.model) {
+        return "\(zoom)mm f/\(aperture)"
+    }
+    if entry.focalLengthMm > 0, entry.focalLengthMm < 9999 {
+        return "\(focalLengthNumberText(entry.focalLengthMm))mm f/\(aperture)"
+    }
+    return shortLensName(entry.lens)
+}
+
+/// Brand plus the number of versions — never the raw model, never an aperture
+/// range. A lone version only earns a mention when its badge says something.
+private func lensRowSubtitle(_ entry: PrewarmedLensEntry) -> String {
+    let brand = entry.lens.brand.trimmingCharacters(in: .whitespacesAndNewlines)
+    let name = brand.isEmpty ? "Lens" : brand
+
+    if entry.variants.count > 1 {
+        return "\(name) · \(entry.variants.count) versions"
+    }
+    if let variant = entry.variants.first,
+       !variant.badge.isEmpty,
+       variant.badge.caseInsensitiveCompare("Standard") != .orderedSame {
+        return "\(name) · \(variant.badge)"
+    }
+    return name
+}
+
+/// `f/2.8` -> `2.8`, `f/1` -> `1`, `f/0.95` -> `0.95`.
+private func apertureNumberText(_ value: Double) -> String {
+    String(formatApertureStopLabel(value).dropFirst(2))
+}
+
+private func focalLengthNumberText(_ mm: Double) -> String {
+    if mm == mm.rounded() {
+        return String(Int(mm))
+    }
+    if (mm * 10).rounded() == mm * 10 {
+        return String(format: "%.1f", mm)
+    }
+    return String(format: "%.2f", mm)
+}
+
+/// "35-105" for a zoom model such as `New FD 35-105mm f/3.5`.
+private func zoomFocalRange(_ model: String) -> String? {
+    guard let regex = zoomRangeRegex else { return nil }
+    let full = NSRange(model.startIndex..., in: model)
+    guard let match = regex.firstMatch(in: model, options: [], range: full),
+          let lower = Range(match.range(at: 1), in: model),
+          let upper = Range(match.range(at: 2), in: model) else {
+        return nil
+    }
+    return "\(model[lower])-\(model[upper])"
+}
+
+private let zoomRangeRegex: NSRegularExpression? = try? NSRegularExpression(
+    pattern: #"(\d{2,3})\s*[-–]\s*(\d{2,3})\s*mm"#,
+    options: [.caseInsensitive]
+)
+
+/// Tokens that repeat what the row already says, so they only make the name
+/// longer. Matched case-insensitively and removed before the name is clamped.
+private let lensNameNoiseTokens: [String] = [
+    "S.S.C.", "S.C.", "New FD", "AI-S", "Pre-AI", "Non-AI", "ASPH", "FLE"
+]
+
+/// A short model name for entries without a usable focal length: brand prefix
+/// removed, whitespace collapsed, variant tokens dropped, clamped to 28 chars.
+private func shortLensName(_ lens: LensGearSpec, maxLength: Int = 28) -> String {
+    var name = lens.model.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let brand = lens.brand.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !brand.isEmpty, name.lowercased().hasPrefix(brand.lowercased()) {
+        name = String(name.dropFirst(brand.count))
+    }
+
+    for token in lensNameNoiseTokens {
+        name = name.replacingOccurrences(of: token, with: " ", options: .caseInsensitive)
+    }
+
+    name = name
+        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: "-–—/·,;:")))
+
+    if name.isEmpty {
+        name = "Lens"
+    }
+
+    if name.count > maxLength {
+        let head = String(name.prefix(maxLength - 1)).trimmingCharacters(in: .whitespaces)
+        name = "\(head)…"
+    }
+    return name
 }
 
 // MARK: - Shared helpers

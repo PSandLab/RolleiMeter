@@ -111,6 +111,7 @@ private struct RollScreen: View {
                     }
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
             } header: {
                 Text("Current roll")
@@ -569,6 +570,7 @@ private struct FilmFamilyScreen: View {
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } footer: {
                 Text("Press and hold to load the roll and go back to the log.")
             }
@@ -649,6 +651,7 @@ private struct CustomFilmScreen: View {
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } footer: {
                 Text("The stock is saved to your custom films and loaded on the meter.")
             }
@@ -940,6 +943,17 @@ private struct PhotoViewer: View {
 ///
 /// The original app did this with a cranking film canister; this keeps the
 /// idea but draws it with the same native styling as the rest of the log.
+private struct HoldPressStyle: ButtonStyle {
+    @Binding var isPressed: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, pressed in
+                isPressed = pressed
+            }
+    }
+}
+
 struct HoldActionRow: View {
     let title: String
     var workingTitle: String = "Working"
@@ -955,7 +969,34 @@ struct HoldActionRow: View {
     @State private var progress: CGFloat = 0
     @State private var task: Task<Void, Never>?
 
+    @State private var isPressed = false
+
     var body: some View {
+        Button(action: {}) {
+            bar
+        }
+        .buttonStyle(HoldPressStyle(isPressed: $isPressed))
+        .onChange(of: isPressed) { _, pressed in
+            if pressed {
+                guard phase == .idle else { return }
+                start()
+            } else if phase == .holding {
+                cancel()
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(title)
+        .accessibilityHint("Press and hold, or use the action to do it immediately.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            guard phase == .idle else { return }
+            perform()
+            onComplete()
+        }
+        .onDisappear { task?.cancel() }
+    }
+
+    private var bar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
@@ -992,27 +1033,6 @@ struct HoldActionRow: View {
         .contentShape(Capsule())
         .scaleEffect(phase == .done ? 0.98 : 1)
         .animation(.spring(response: 0.28, dampingFraction: 0.7), value: phase)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard phase == .idle else { return }
-                    start()
-                }
-                .onEnded { _ in
-                    guard phase == .holding else { return }
-                    cancel()
-                }
-        )
-        .accessibilityElement()
-        .accessibilityLabel(title)
-        .accessibilityHint("Press and hold, or use the action to do it immediately.")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            guard phase == .idle else { return }
-            perform()
-            onComplete()
-        }
-        .onDisappear { task?.cancel() }
     }
 
     private var label: String {
