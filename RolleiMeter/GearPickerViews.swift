@@ -134,7 +134,7 @@ struct CustomGearForm: View {
                         Text(camera.model)
                             .lineLimit(1)
                         Text(savedCameraSubtitle(camera))
-                            .font(.subheadline.monospacedDigit())
+                            .font(Geist.monoText(.subheadline))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -157,7 +157,7 @@ struct CustomGearForm: View {
                         Text(lens.model)
                             .lineLimit(1)
                         Text("\(lens.brand) · \(formatMountBadge(lens.mount)) · \(formatApertureRange(lens.minAperture, lens.maxAperture))")
-                            .font(.subheadline.monospacedDigit())
+                            .font(Geist.monoText(.subheadline))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }

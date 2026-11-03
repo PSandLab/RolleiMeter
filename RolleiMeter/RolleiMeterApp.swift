@@ -6,6 +6,7 @@ struct RolleiMeterApp: App {
         WindowGroup {
             ContentView()
                 .tint(Palette.accent)
+                .font(Geist.text(.body))
         }
     }
 }

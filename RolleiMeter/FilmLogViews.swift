@@ -3,6 +3,15 @@ import UIKit
 
 // MARK: - Film Logbook
 
+/// Destinations pushed from the Roll tab. Value-based so the tab can pop back
+/// to the roll after a film is loaded.
+private enum FilmRoute: Hashable {
+    case library
+    case family(FilmFamily)
+    case customFilm
+    case gear
+}
+
 /// The logbook is a three-tab sheet: the loaded roll, the logged frames and the
 /// lab-scan matcher. Every screen below is a plain `List`/`Form` so the system
 /// supplies the chrome, separators, swipe actions and Dynamic Type.
@@ -13,11 +22,12 @@ struct FilmLogbookSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTab: Int = 0
     @State private var shareSheetItem: ShareSheetItem?
+    @State private var rollPath = NavigationPath()
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack {
-                RollScreen(store: store, shareSheetItem: $shareSheetItem)
+            NavigationStack(path: $rollPath) {
+                RollScreen(store: store, shareSheetItem: $shareSheetItem, path: $rollPath)
             }
             .tabItem { Label("Roll", systemImage: "film") }
             .tag(0)
@@ -59,9 +69,9 @@ struct FilmLogbookSheet: View {
 private struct RollScreen: View {
     @ObservedObject var store: FilmLogStore
     @Binding var shareSheetItem: ShareSheetItem?
+    @Binding var path: NavigationPath
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showCompleteRoll = false
 
     private var roll: FilmRollState { store.rollState }
     private var gear: ActiveGearProfile { store.activeGear }
@@ -72,45 +82,62 @@ private struct RollScreen: View {
         }
     }
 
+    /// The active body's brand, so the log shows the real emblem instead of a
+    /// generic camera glyph.
+    private var activeCameraBrand: String? {
+        guard gear.hasCamera, !gear.cameraId.isEmpty else { return nil }
+        return GearCatalogCache.allCameras(customCameras: store.customCameras)
+            .first { $0.id == gear.cameraId }?
+            .brand
+    }
+
     var body: some View {
         List {
             Section {
-                ActiveRollRow(roll: roll)
-                    .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                NavigationLink(value: FilmRoute.library) {
+                    ActiveRollRow(roll: roll)
+                }
+                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+
+                if !roll.isUnloaded {
+                    HoldActionRow(
+                        title: "Hold to complete roll",
+                        workingTitle: "Completing roll",
+                        doneTitle: "Roll completed",
+                        systemImage: "film",
+                        holdDuration: 1.1
+                    ) {
+                        completeRoll()
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                    .listRowBackground(Color.clear)
+                }
             } header: {
                 Text("Current roll")
-            }
-
-            Section("Film") {
-                NavigationLink {
-                    FilmLibraryScreen(store: store)
-                } label: {
-                    HStack(spacing: 12) {
-                        ListGlyph(systemName: "film")
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(roll.isUnloaded ? "Choose a film stock" : "Change film")
-                            Text(roll.isUnloaded ? "Nothing loaded" : shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
+            } footer: {
+                if roll.isUnloaded {
+                    Text("Tap the card to choose a film stock.")
+                } else {
+                    Text("Tap the card to change film.")
                 }
             }
 
             Section("Camera & Lens") {
-                NavigationLink {
-                    GearPickerScreen(store: store)
-                } label: {
+                NavigationLink(value: FilmRoute.gear) {
                     HStack(spacing: 12) {
-                        ListGlyph(systemName: "camera.aperture")
+                        if let brand = activeCameraBrand {
+                            CameraBrandLogo(brand: brand, size: 30)
+                        } else {
+                            ListGlyph(systemName: "camera.aperture")
+                        }
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text(gear.hasCamera ? gear.cameraName : "No camera selected")
                                 .lineLimit(1)
                             Text(gear.hasLens
                                  ? gear.lensName
                                  : "\(formatShutterStopLabel(gear.minShutter)) – \(formatShutterStopLabel(gear.maxShutter))")
-                                .font(.subheadline)
+                                .font(Geist.text(.subheadline))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
@@ -144,20 +171,24 @@ private struct RollScreen: View {
             } footer: {
                 Text("\(rollFrames.count) of \(roll.maxFrames) frames logged on this roll.")
             }
-
-            Section {
-                Button(role: .destructive) {
-                    Haptics.press()
-                    showCompleteRoll = true
-                } label: {
-                    Label("Complete roll", systemImage: "arrow.counterclockwise")
-                }
-                .disabled(roll.isUnloaded)
-            } footer: {
-                Text("Clears the film and starts the next roll number.")
-            }
         }
         .listStyle(.insetGrouped)
+        .navigationDestination(for: FilmRoute.self) { route in
+            switch route {
+            case .library:
+                FilmLibraryScreen(store: store)
+            case .family(let family):
+                FilmFamilyScreen(store: store, family: family) {
+                    popToRoll()
+                }
+            case .customFilm:
+                CustomFilmScreen(store: store) {
+                    popToRoll()
+                }
+            case .gear:
+                GearPickerScreen(store: store)
+            }
+        }
         .navigationTitle("Film Log")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -175,14 +206,15 @@ private struct RollScreen: View {
                 Button("Done") { dismiss() }
             }
         }
-        .confirmationDialog("Complete this roll?", isPresented: $showCompleteRoll, titleVisibility: .visible) {
-            Button("Complete Roll", role: .destructive) { completeRoll() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The film is cleared and the roll number advances.")
-        }
         .onAppear {
             LocationCache.shared.refreshIfAuthorized()
+        }
+    }
+
+    /// Lets the load animation breathe, then returns to the roll.
+    private func popToRoll() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            path = NavigationPath()
         }
     }
 
@@ -209,9 +241,9 @@ private struct ActiveRollRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("No film loaded")
-                        .font(.headline)
-                    Text(String(format: "Roll %02d", roll.rollNumber))
-                        .font(.subheadline)
+                        .font(Geist.text(.headline))
+                    Text("Choose a stock to start shooting")
+                        .font(Geist.text(.subheadline))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -229,30 +261,26 @@ private struct ActiveRollRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
-                        .font(.headline)
+                        .font(Geist.text(.headline))
                         .lineLimit(1)
 
-                    HStack(spacing: 6) {
-                        Text(String(format: "Roll %02d", roll.rollNumber))
-                        Text("·")
-                        Text(roll.isBonusFrames
-                             ? "Frame +\(roll.currentFrame)"
-                             : "Frame \(roll.currentFrame) of \(roll.maxFrames)")
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    Text(roll.isBonusFrames
+                         ? "Frame +\(roll.currentFrame)"
+                         : "Frame \(roll.currentFrame) of \(roll.maxFrames)")
+                        .font(Geist.text(.subheadline))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
 
                     HStack(spacing: 6) {
                         if roll.isExpired {
                             Label("\(roll.yearsExpired) years expired", systemImage: "clock.arrow.circlepath")
                                 .labelStyle(.titleAndIcon)
-                                .font(.caption)
+                                .font(Geist.text(.caption))
                                 .foregroundStyle(Palette.slow)
                         }
                         if roll.activeExpiredCompEv > 0.05 {
                             Text(String(format: "+%.1f EV", roll.activeExpiredCompEv))
-                                .font(.caption)
+                                .font(Geist.text(.caption))
                                 .foregroundStyle(Palette.slow)
                         }
                     }
@@ -318,9 +346,7 @@ private struct FilmLibraryScreen: View {
                 ForEach(familiesByBrand, id: \.brand) { group in
                     Section(group.brand) {
                         ForEach(group.families) { family in
-                            NavigationLink {
-                                FilmFamilyScreen(store: store, family: family)
-                            } label: {
+                            NavigationLink(value: FilmRoute.family(family)) {
                                 FilmFamilyRow(family: family, isActive: isActive(family))
                             }
                         }
@@ -353,7 +379,7 @@ private struct FilmLibraryScreen: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(stock.name)
                             Text("ISO \(stock.iso) · \(stock.category)")
-                                .font(.subheadline)
+                                .font(Geist.text(.subheadline))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
@@ -376,9 +402,7 @@ private struct FilmLibraryScreen: View {
         }
 
         Section {
-            NavigationLink {
-                CustomFilmScreen(store: store)
-            } label: {
+            NavigationLink(value: FilmRoute.customFilm) {
                 Label("Create custom film", systemImage: "plus")
             }
         }
@@ -424,7 +448,7 @@ private struct FilmFamilyRow: View {
                 Text(family.familyName)
                     .lineLimit(1)
                 Text(summary)
-                    .font(.subheadline)
+                    .font(Geist.text(.subheadline))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -433,7 +457,7 @@ private struct FilmFamilyRow: View {
 
             if isActive {
                 Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                    .font(Geist.text(.body, .semibold))
                     .foregroundStyle(Palette.accent)
                     .accessibilityLabel("Loaded")
             }
@@ -451,6 +475,7 @@ private struct FilmFamilyRow: View {
 private struct FilmFamilyScreen: View {
     @ObservedObject var store: FilmLogStore
     let family: FilmFamily
+    var onLoaded: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
 
@@ -482,9 +507,9 @@ private struct FilmFamilyScreen: View {
                     )
                     VStack(alignment: .leading, spacing: 2) {
                         Text(family.familyName)
-                            .font(.headline)
+                            .font(Geist.text(.headline))
                         Text("\(family.brand) · \(family.category)")
-                            .font(.subheadline)
+                            .font(Geist.text(.subheadline))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -533,16 +558,19 @@ private struct FilmFamilyScreen: View {
             }
 
             Section {
-                Button {
+                HoldActionRow(
+                    title: "Hold to load \(shortFilmBadge(name: variant.fullName, iso: variant.iso))",
+                    workingTitle: "Loading film",
+                    doneTitle: "Loaded",
+                    systemImage: "film.stack",
+                    holdDuration: 1.2
+                ) {
                     load()
-                } label: {
-                    Text("Load \(shortFilmBadge(name: variant.fullName, iso: variant.iso))")
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(Palette.accent)
-                .foregroundStyle(Palette.onAccent)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            } footer: {
+                Text("Press and hold to load the roll and go back to the log.")
             }
         }
         .navigationTitle(family.familyName)
@@ -568,12 +596,13 @@ private struct FilmFamilyScreen: View {
         next.expiredYear = expired ? currentYear - expiredYears : currentYear
         next.autoApplyExpiredComp = true
         withAnimation(.snappy) { store.rollState = next }
-        dismiss()
+        onLoaded()
     }
 }
 
 private struct CustomFilmScreen: View {
     @ObservedObject var store: FilmLogStore
+    var onLoaded: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
 
@@ -609,16 +638,19 @@ private struct CustomFilmScreen: View {
             }
 
             Section {
-                Button {
+                HoldActionRow(
+                    title: "Hold to save and load",
+                    workingTitle: "Saving film",
+                    doneTitle: "Saved",
+                    systemImage: "film.stack",
+                    holdDuration: 1.2
+                ) {
                     create()
-                } label: {
-                    Text("Save and load")
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(Palette.accent)
-                .foregroundStyle(Palette.onAccent)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .listRowBackground(Color.clear)
+            } footer: {
+                Text("The stock is saved to your custom films and loaded on the meter.")
             }
         }
         .navigationTitle("Custom Film")
@@ -638,7 +670,7 @@ private struct CustomFilmScreen: View {
         next.maxFrames = maxFrames
         next.isExpired = false
         withAnimation(.snappy) { store.rollState = next }
-        dismiss()
+        onLoaded()
     }
 }
 
@@ -732,7 +764,7 @@ private struct FrameRow: View {
                         .scaledToFill()
                 } else {
                     Image(systemName: "photo")
-                        .font(.body)
+                        .font(Geist.text(.body))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -742,17 +774,17 @@ private struct FrameRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Frame \(frame.frameNumber)")
-                    .font(.body.weight(.medium))
+                    .font(Geist.text(.body, .medium))
                     .monospacedDigit()
 
                 Text("\(frame.shutterSpeed) · \(frame.aperture) · ISO \(frame.iso)")
-                    .font(.subheadline)
+                    .font(Geist.text(.subheadline))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
                 if !frame.note.isEmpty {
                     Text(frame.note)
-                        .font(.footnote)
+                        .font(Geist.text(.footnote))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -899,5 +931,147 @@ private struct PhotoViewer: View {
             .toolbarBackground(Color.black, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Hold to act
+
+/// Press-and-hold button used to load a film and to complete a roll.
+///
+/// The original app did this with a cranking film canister; this keeps the
+/// idea but draws it with the same native styling as the rest of the log.
+struct HoldActionRow: View {
+    let title: String
+    var workingTitle: String = "Working"
+    var doneTitle: String = "Done"
+    var systemImage: String = "film"
+    var holdDuration: Double = 1.0
+    var tint: Color = Palette.accent
+    let onComplete: () -> Void
+
+    private enum Phase { case idle, holding, done }
+
+    @State private var phase: Phase = .idle
+    @State private var progress: CGFloat = 0
+    @State private var task: Task<Void, Never>?
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(tint.opacity(0.18))
+
+                if progress > 0.001 {
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: geo.size.width * progress)
+                }
+
+                HStack(spacing: 10) {
+                    Image(systemName: phase == .done ? "checkmark" : systemImage)
+                        .font(.system(size: 15, weight: .semibold))
+                        .rotationEffect(.degrees(Double(progress) * 540))
+
+                    Text(label)
+                        .font(Geist.text(.subheadline, .semibold))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    if phase == .holding {
+                        Text("\(Int((progress * 100).rounded()))%")
+                            .font(Geist.monoText(.caption, .semibold))
+                            .contentTransition(.numericText())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .foregroundStyle(phase == .idle ? Palette.text : Palette.onAccent)
+            }
+        }
+        .frame(height: 50)
+        .contentShape(Capsule())
+        .scaleEffect(phase == .done ? 0.98 : 1)
+        .animation(.spring(response: 0.28, dampingFraction: 0.7), value: phase)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard phase == .idle else { return }
+                    start()
+                }
+                .onEnded { _ in
+                    guard phase == .holding else { return }
+                    cancel()
+                }
+        )
+        .accessibilityElement()
+        .accessibilityLabel(title)
+        .accessibilityHint("Press and hold, or use the action to do it immediately.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            guard phase == .idle else { return }
+            perform()
+            onComplete()
+        }
+        .onDisappear { task?.cancel() }
+    }
+
+    private var label: String {
+        switch phase {
+        case .idle: return title
+        case .holding: return workingTitle
+        case .done: return doneTitle
+        }
+    }
+
+    private func start() {
+        Haptics.press()
+        phase = .holding
+        task?.cancel()
+        task = Task { @MainActor in
+            let started = Date()
+            var lastTick = -1
+            while !Task.isCancelled {
+                let elapsed = Date().timeIntervalSince(started)
+                let raw = min(1, max(0, elapsed / holdDuration))
+                progress = CGFloat(raw)
+
+                let tick = Int(raw * 10)
+                if tick != lastTick {
+                    lastTick = tick
+                    if tick > 0 && tick < 10 { Haptics.rigid() }
+                }
+
+                if raw >= 1 {
+                    perform()
+                    onComplete()
+                    try? await Task.sleep(nanoseconds: 650_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.snappy) {
+                        progress = 0
+                        phase = .idle
+                    }
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+        }
+    }
+
+    private func cancel() {
+        task?.cancel()
+        task = nil
+        Haptics.tap()
+        withAnimation(.snappy(duration: 0.2)) {
+            progress = 0
+            phase = .idle
+        }
+    }
+
+    private func perform() {
+        Haptics.success()
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
+            progress = 1
+            phase = .done
+        }
     }
 }

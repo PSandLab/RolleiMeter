@@ -42,16 +42,16 @@ struct AperturePanel: View {
     var body: some View {
         ZStack(alignment: .top) {
             ApertureWheel(position: position, labels: stops.map { $0.label },
-                          tint: auto ? lampColor : Palette.accent, k: k)
-            PanelTitle(text: "Aperture", k: k)
+                          tint: auto ? lampColor : Palette.text, k: k)
+            PanelTitle(text: "APERTURE", k: k)
         }
         .overlay(alignment: .topTrailing) {
             if auto {
-                Text("AUTO")
-                    .font(.system(size: 13 * k, weight: .semibold))
+                Text("A")
+                    .font(AppTypography.next(size: 25 * k, weight: .bold))
                     .foregroundStyle(lampColor)
-                    .padding(.top, 18 * k)
-                    .padding(.trailing, 20 * k)
+                    .padding(.top, 17 * k)
+                    .padding(.trailing, 22 * k)
                     .transition(.opacity)
                     .allowsHitTesting(false)
             }
@@ -166,11 +166,11 @@ private struct ApertureWheel: View, Animatable {
                 if x < -pitch || x > size.width + pitch { continue }
                 let ad = abs(d)
                 let selected = ad < 0.5
-                let color: Color = selected ? tint : Palette.textSub
+                let color: Color = selected ? tint : Palette.text
                 let text = Text(labels[i])
-                    .font(TypeScale.readout(40 * k, weight: selected ? .semibold : .regular))
-                    .foregroundColor(color.opacity(max(0.22, 1 - 0.55 * ad)))
-                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: 110 * k), anchor: .center)
+                    .font(AppTypography.next(size: 42 * k, weight: selected ? .bold : .medium))
+                    .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
+                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: 120 * k), anchor: .center)
             }
         }
         .clipped()

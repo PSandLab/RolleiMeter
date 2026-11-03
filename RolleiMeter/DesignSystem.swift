@@ -128,19 +128,8 @@ struct PrimaryActionButton: View {
             }
             Text(title)
         }
-        .font(.body.weight(.semibold))
+        .font(Geist.text(.body, .semibold))
         .frame(maxWidth: .infinity)
-    }
-}
-
-/// Plain press feedback with no fake chrome.
-struct PressStyle: ButtonStyle {
-    var scale: CGFloat = 0.96
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1.0)
-            .animation(.spring(response: 0.24, dampingFraction: 0.75), value: configuration.isPressed)
     }
 }
 
@@ -168,7 +157,7 @@ struct MetricCaption: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: size, weight: .medium))
+            .font(Geist.sans(size, .medium))
             .foregroundStyle(Palette.textSub)
             .lineLimit(1)
     }
@@ -185,7 +174,7 @@ struct MetricValue: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: size * 0.16) {
             Text(text)
-                .font(TypeScale.readout(size, weight: .semibold))
+                .font(Geist.mono(size, .semibold))
                 .foregroundStyle(tint)
                 .contentTransition(animate ? .numericText() : .identity)
                 .lineLimit(1)
@@ -193,7 +182,7 @@ struct MetricValue: View {
 
             if let unit {
                 Text(unit)
-                    .font(TypeScale.label(size * 0.42, weight: .medium))
+                    .font(Geist.sans(size * 0.42, .medium))
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
             }
@@ -215,7 +204,7 @@ struct StatusText: View {
                     .font(.caption2.weight(.semibold))
             }
             Text(text)
-                .font(.caption.weight(.medium))
+                .font(Geist.text(.caption, .medium))
         }
         .foregroundStyle(tint)
     }
@@ -230,11 +219,11 @@ struct SectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(Geist.text(.subheadline, .semibold))
                 .foregroundStyle(Palette.text)
             if let subtitle {
                 Text(subtitle)
-                    .font(.footnote)
+                    .font(Geist.text(.footnote))
                     .foregroundStyle(Palette.textSub)
             }
         }

@@ -42,14 +42,14 @@ struct GearPickerScreen: View {
                 if gear.hasLens {
                     LabeledContent("Aperture") {
                         Text(formatApertureRange(gear.minAperture, gear.maxAperture))
-                            .font(.body.monospacedDigit())
+                            .font(Geist.monoText(.body))
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 LabeledContent("Shutter") {
                     Text(shutterRangeText(gear.minShutter, gear.maxShutter))
-                        .font(.body.monospacedDigit())
+                        .font(Geist.monoText(.body))
                         .foregroundStyle(.secondary)
                 }
 
@@ -63,7 +63,7 @@ struct GearPickerScreen: View {
                     Text(gear.hasLens
                          ? "Lens saved: \(gear.lensName)"
                          : "The meter is showing every stop.")
-                        .font(.subheadline)
+                        .font(Geist.text(.subheadline))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 2)
@@ -83,17 +83,17 @@ struct GearPickerScreen: View {
                 CameraBrandLogo(brand: brand, size: 44)
             } else {
                 Image(systemName: "camera.aperture")
-                    .font(.title3)
+                    .font(Geist.text(.title3))
                     .foregroundStyle(.secondary)
                     .frame(width: 44, height: 44)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(gear.cameraName)
-                    .font(.headline)
+                    .font(Geist.text(.headline))
                     .lineLimit(2)
                 Text(activeCameraSubtitle)
-                    .font(.subheadline)
+                    .font(Geist.text(.subheadline))
                     .foregroundStyle(.secondary)
             }
         }
@@ -125,7 +125,7 @@ struct GearPickerScreen: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(gear.hasCamera ? "Change camera" : "Choose a camera")
                         Text("Browse every body by brand")
-                            .font(.subheadline)
+                            .font(Geist.text(.subheadline))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -145,7 +145,7 @@ struct GearPickerScreen: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(gear.hasLens ? "Change lens" : "Choose a lens")
                         Text("Browse lenses by focal length")
-                            .font(.subheadline)
+                            .font(Geist.text(.subheadline))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -165,7 +165,7 @@ struct GearPickerScreen: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Add custom gear")
                         Text("Create a camera or lens that is not in the catalog")
-                            .font(.subheadline)
+                            .font(Geist.text(.subheadline))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -278,7 +278,7 @@ private struct GearCameraRow: View {
                 Text(camera.model)
                     .lineLimit(2)
                 Text(summary)
-                    .font(.subheadline.monospacedDigit())
+                    .font(Geist.monoText(.subheadline))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -287,7 +287,7 @@ private struct GearCameraRow: View {
 
             if isActive {
                 Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                    .font(Geist.text(.body, .semibold))
                     .foregroundStyle(Palette.accent)
                     .accessibilityLabel("In use")
             }
@@ -329,9 +329,9 @@ struct CameraDetailView: View {
                 CameraBrandLogo(brand: camera.brand, size: 56)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(camera.model)
-                        .font(.headline)
+                        .font(Geist.text(.headline))
                     Text(camera.brand)
-                        .font(.subheadline)
+                        .font(Geist.text(.subheadline))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -344,7 +344,7 @@ struct CameraDetailView: View {
 
             LabeledContent("Shutter") {
                 Text(shutterRangeText(camera.minShutter, camera.maxShutter))
-                    .font(.body.monospacedDigit())
+                    .font(Geist.monoText(.body))
                     .foregroundStyle(.secondary)
             }
         } header: {
@@ -489,7 +489,7 @@ private struct GearProfileRow: View {
                     .foregroundStyle(Palette.text)
                     .lineLimit(2)
                 Text(subtitle)
-                    .font(.subheadline.monospacedDigit())
+                    .font(Geist.monoText(.subheadline))
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
             }
@@ -498,7 +498,7 @@ private struct GearProfileRow: View {
 
             if isActive {
                 Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                    .font(Geist.text(.body, .semibold))
                     .foregroundStyle(Palette.accent)
                     .accessibilityLabel("Mounted")
             }
@@ -626,7 +626,7 @@ private struct GearLensRow: View {
                     .foregroundStyle(Palette.text)
                     .lineLimit(2)
                 Text("\(lens.brand) · \(formatMountBadge(lens.mount)) · \(formatApertureRange(lens.minAperture, lens.maxAperture))")
-                    .font(.subheadline.monospacedDigit())
+                    .font(Geist.monoText(.subheadline))
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
             }
@@ -635,7 +635,7 @@ private struct GearLensRow: View {
 
             if isActive {
                 Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                    .font(Geist.text(.body, .semibold))
                     .foregroundStyle(Palette.accent)
                     .accessibilityLabel("Mounted")
             }

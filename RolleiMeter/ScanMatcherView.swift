@@ -540,18 +540,18 @@ private struct FrameShiftRow: View {
         Stepper {
             LabeledContent {
                 Text(targetLabel)
-                    .font(.body)
+                    .font(Geist.text(.body))
                     .monospacedDigit()
                     .foregroundStyle(Palette.textSub)
             } label: {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Frame \(frame.frameNumber)")
-                        .font(.body)
+                        .font(Geist.text(.body))
                         .monospacedDigit()
 
                     if localShift != 0 {
                         Text(shiftDescription)
-                            .font(.caption)
+                            .font(Geist.text(.caption))
                             .monospacedDigit()
                             .foregroundStyle(Palette.slow)
                     }
@@ -589,26 +589,26 @@ private struct FrameScanRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text("Frame \(frame.frameNumber)")
-                        .font(.headline)
+                        .font(Geist.text(.headline))
                         .monospacedDigit()
 
                     statusLabel
                 }
 
                 Text(formatFilmDisplay(name: frame.filmName, iso: frame.iso))
-                    .font(.subheadline)
+                    .font(Geist.text(.subheadline))
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
 
                 Text(exposureDescription)
-                    .font(.caption)
+                    .font(Geist.text(.caption))
                     .monospacedDigit()
                     .foregroundStyle(Palette.textSub)
                     .lineLimit(1)
 
                 if let scan, let scanNumber {
                     Text("Scan \(scanNumber) · \(scan.displayName)")
-                        .font(.caption)
+                        .font(Geist.text(.caption))
                         .monospacedDigit()
                         .foregroundStyle(Palette.textDim)
                         .lineLimit(1)
@@ -645,7 +645,7 @@ private struct FrameScanRow: View {
 
     private func status(_ text: String, systemImage: String, tint: Color) -> some View {
         Label(text, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
+            .font(Geist.text(.caption, .semibold))
             .foregroundStyle(tint)
     }
 
@@ -676,7 +676,7 @@ private struct FrameScanRow: View {
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-                .font(.body)
+                .font(Geist.text(.body))
                 .foregroundStyle(Palette.textSub)
                 .frame(width: Metrics.minTap, height: Metrics.minTap)
                 .contentShape(Rectangle())
@@ -701,7 +701,7 @@ private struct ScanThumbnail: View {
                 ZStack {
                     Palette.panelRaised
                     Image(systemName: "photo")
-                        .font(.title3)
+                        .font(Geist.text(.title3))
                         .foregroundStyle(Palette.textDim)
                 }
             }

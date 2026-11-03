@@ -37,8 +37,8 @@ enum Palette {
 
     /// Metered shutter speed, EV marker and selection states.
     static let accent = Color.accentColor
-    /// Text drawn on top of the accent fill (only for high-emphasis buttons).
-    static let accentInk = Color(uiColor: .label)
+    /// Ink used inside the amber film card.
+    static let accentInk = Color.black
     /// Foreground for content sitting *on* the amber accent fill.
     static let onAccent = Color.black
 

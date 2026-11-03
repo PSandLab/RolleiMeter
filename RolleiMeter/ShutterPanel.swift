@@ -24,11 +24,11 @@ struct ShutterPanel: View {
         let currentLabels = labels
         let index = currentLabels.firstIndex(of: r.label) ?? 0
         let tint: Color = r.deviation != nil ? Palette.bad : (r.isSlow ? Palette.slow : Palette.accent)
-        let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "seconds" : "seconds")
+        let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "slow" : "sec")
 
         ZStack(alignment: .top) {
             ShutterWheel(position: position, labels: currentLabels, tint: tint, sub: sub, k: k)
-            PanelTitle(text: "Shutter", k: k)
+            PanelTitle(text: "SHUTTER", k: k)
         }
         .onAppear { position = Double(index) }
         .onChange(of: index) { _, newIndex in
@@ -63,22 +63,20 @@ private struct ShutterWheel: View, Animatable {
                 let x = cx + CGFloat(d) * pitch
                 if x < -pitch || x > size.width + pitch { continue }
                 let active = abs(d) < 0.5
-                let color: Color = active ? tint : Palette.textSub
+                let color: Color = active ? tint : Palette.text.opacity(0.8)
 
                 let ad = abs(d)
                 let rawLabel = labels[i]
                 let displayStr = rawLabel.hasSuffix("\"") ? rawLabel : ("1/" + rawLabel)
                 let number = Text(displayStr)
-                    .font(TypeScale.readout(40 * k, weight: active ? .semibold : .regular))
-                    .foregroundColor(color.opacity(max(0.22, 1 - 0.55 * ad)))
-                ctx.draw(ctx.resolve(number), at: CGPoint(x: x, y: 100 * k), anchor: .center)
+                    .font(AppTypography.next(size: 42 * k, weight: active ? .bold : .medium))
+                    .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
+                ctx.draw(ctx.resolve(number), at: CGPoint(x: x, y: 108 * k), anchor: .center)
 
-                let unit = Text(active ? sub : "")
-                    .font(.system(size: 14 * k, weight: .medium))
-                    .foregroundColor(color.opacity(max(0.22, 1 - 0.55 * ad)))
-                if active {
-                    ctx.draw(ctx.resolve(unit), at: CGPoint(x: x, y: 138 * k), anchor: .center)
-                }
+                let unit = Text(active ? sub : "sec")
+                    .font(AppTypography.next(size: 25 * k, weight: active ? .bold : .medium))
+                    .foregroundColor(color.opacity(max(0.16, 1 - 0.5 * ad)))
+                ctx.draw(ctx.resolve(unit), at: CGPoint(x: x, y: 152 * k), anchor: .center)
             }
         }
         .clipped()

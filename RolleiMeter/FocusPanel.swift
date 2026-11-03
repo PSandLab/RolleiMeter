@@ -84,7 +84,7 @@ struct FocusPanel: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            PanelTitle(text: "Focus", k: k)
+            PanelTitle(text: "FOCUS", k: k)
 
             // Static Bed Dial Track (No box, no ball, lines span end to end)
             GeometryReader { geo in
@@ -96,17 +96,17 @@ struct FocusPanel: View {
                 let touchX = lineMargin + CGFloat(min(max(activePosition, 0.0), 1.0)) * usableWidth
 
                 ZStack(alignment: .leading) {
-                    // Soft accent wash following the finger while you rack focus
+                    // Atmospheric red gradient wash following finger directly
                     let glowWidth = max(w * 0.82, 110 * k)
                     RoundedRectangle(cornerRadius: 8 * k, style: .continuous)
                         .fill(
                             LinearGradient(
                                 stops: [
-                                    .init(color: Palette.accent.opacity(0.0), location: 0.0),
-                                    .init(color: Palette.accent.opacity(0.10), location: 0.20),
-                                    .init(color: Palette.accent.opacity(0.24), location: 0.50),
-                                    .init(color: Palette.accent.opacity(0.10), location: 0.80),
-                                    .init(color: Palette.accent.opacity(0.0), location: 1.0)
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 0.0),
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.20),
+                                    .init(color: Color(hex: 0xFF1E1E).opacity(0.60), location: 0.50),
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.80),
+                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 1.0)
                                 ],
                                 startPoint: .leading,
                                 endPoint: .trailing
@@ -152,7 +152,7 @@ struct FocusPanel: View {
                                     .fill(Palette.accent)
                                     .frame(width: 1.5 * k, height: 4 * k)
                                 Text(markers.near.label)
-                                    .font(TypeScale.readout(13 * k, weight: .semibold))
+                                    .font(AppTypography.mono(size: 13 * k, weight: .bold))
                                     .foregroundStyle(Palette.accent)
                                     .lineLimit(1)
                             }
@@ -163,7 +163,7 @@ struct FocusPanel: View {
                                     .fill(Palette.accent)
                                     .frame(width: 1.5 * k, height: 4 * k)
                                 Text(markers.far.label)
-                                    .font(TypeScale.readout(13 * k, weight: .semibold))
+                                    .font(AppTypography.mono(size: 13 * k, weight: .bold))
                                     .foregroundStyle(Palette.accent)
                                     .lineLimit(1)
                             }
@@ -241,11 +241,11 @@ struct FocusPanel: View {
                     }
                 }
             } label: {
-                Text(manual ? "Manual" : "Autofocus")
-                    .font(.system(size: 15 * k, weight: .semibold))
-                    .foregroundStyle(manual ? Palette.accent : Palette.textSub)
-                    .padding(.top, 16 * k)
-                    .padding(.leading, 20 * k)
+                Text(manual ? "MF" : "AF")
+                    .font(AppTypography.next(size: 19 * k, weight: .bold))
+                    .foregroundStyle(manual ? Palette.bad : Palette.good)
+                    .padding(.top, 17 * k)
+                    .padding(.leading, 18 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -255,12 +255,12 @@ struct FocusPanel: View {
             let displayDistance = subject != nil ? Fmt.distance(subject, feet: feet) : (hasLiDAR ? "∞" : "—")
             Button(action: onUnits) {
                 Text(displayDistance)
-                    .font(.system(size: 17 * k, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(tooClose ? Palette.bad : (manual ? Palette.text : Palette.textSub))
+                    .font(AppTypography.mono(size: 19 * k, weight: .semibold))
+                    .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.good))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .padding(.top, 15 * k)
-                    .padding(.trailing, 20 * k)
+                    .padding(.top, 17 * k)
+                    .padding(.trailing, 18 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
