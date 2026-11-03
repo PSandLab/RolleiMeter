@@ -489,7 +489,7 @@ struct CameraDetailView: View {
                     NavigationLink {
                         LensDetailView(store: store, entry: entry, hostCamera: camera)
                     } label: {
-                        GearProfileRow(title: lensRowTitle(entry),
+                        GearProfileRow(title: lensTitles(mountLenses)[entry.id] ?? lensRowTitle(entry),
                                        subtitle: lensRowSubtitle(entry),
                                        isActive: isEntryActive(entry))
                     }
@@ -604,6 +604,8 @@ struct LensCatalogList: View {
 
     var body: some View {
         let sections = lensSections()
+        let entries = GearCatalogCache.allLensEntries(customLenses: store.customLenses)
+        let titles = lensTitles(entries)
 
         List {
             ForEach(sections) { section in
@@ -613,6 +615,7 @@ struct LensCatalogList: View {
                             LensDetailView(store: store, entry: entry)
                         } label: {
                             GearLensRow(entry: entry,
+                                        displayTitle: titles[entry.id],
                                         isActive: isEntryActive(entry))
                         }
                     }
@@ -980,12 +983,13 @@ private struct GearProfileRow: View {
 
 private struct GearLensRow: View {
     let entry: PrewarmedLensEntry
+    var displayTitle: String? = nil
     let isActive: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(lensRowTitle(entry))
+                Text(displayTitle ?? lensRowTitle(entry))
                     .font(Geist.text(.body))
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
@@ -1111,6 +1115,45 @@ private func lensRowTitle(_ entry: PrewarmedLensEntry) -> String {
 
 /// Brand plus the number of versions — never the raw model, never an aperture
 /// range. A lone version only earns a mention when its badge says something.
+/// Clean titles are intentionally terse, so two lenses of the same brand can
+/// collapse onto the same row ("50mm f/1.4"). Where that happens the full,
+/// brand-stripped model keeps them apart.
+private func lensTitles(_ entries: [PrewarmedLensEntry]) -> [String: String] {
+    var counts: [String: Int] = [:]
+    for entry in entries {
+        counts["\(entry.lens.brand)|\(lensRowTitle(entry))", default: 0] += 1
+    }
+
+    var titles: [String: String] = [:]
+    for entry in entries {
+        let clean = lensRowTitle(entry)
+        if (counts["\(entry.lens.brand)|\(clean)"] ?? 0) > 1 {
+            titles[entry.id] = fullModelName(entry.lens)
+        } else {
+            titles[entry.id] = clean
+        }
+    }
+    return titles
+}
+
+/// Brand removed and whitespace collapsed, otherwise the catalog's own words.
+private func fullModelName(_ lens: LensGearSpec, maxLength: Int = 34) -> String {
+    var name = lens.model.trimmingCharacters(in: .whitespacesAndNewlines)
+    let brand = lens.brand.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !brand.isEmpty, name.lowercased().hasPrefix(brand.lowercased()) {
+        name = String(name.dropFirst(brand.count))
+    }
+    name = name
+        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: "-–—/·,;:")))
+    if name.isEmpty { return "Lens" }
+    if name.count > maxLength {
+        return String(name.prefix(maxLength - 1)) + "…"
+    }
+    return name
+}
+
 private func lensRowSubtitle(_ entry: PrewarmedLensEntry) -> String {
     let brand = entry.lens.brand.trimmingCharacters(in: .whitespacesAndNewlines)
     let name = brand.isEmpty ? "Lens" : brand

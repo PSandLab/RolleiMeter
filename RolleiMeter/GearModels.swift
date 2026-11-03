@@ -332,8 +332,15 @@ func resolveLensVariants(_ lens: LensGearSpec) -> [LensVariantItem] {
     let m = lens.model
     let mount = lens.mount
 
-    if m.contains("FD / New FD") {
-        let base = m.replacingOccurrences(of: "Canon FD / New FD ", with: "").trimmingCharacters(in: .whitespaces)
+    if m.contains("New FD") {
+        // The catalog writes the two generations in one string, e.g.
+        // "FD 24mm f/2.8 S.S.C. / New FD 24mm f/2.8", so key off the New FD name.
+        var base = m.components(separatedBy: "New FD").last ?? m
+        if let dual = base.range(of: " / f/") {
+            base = String(base[base.startIndex..<dual.lowerBound])
+        }
+        base = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        base = base.trimmingCharacters(in: CharacterSet(charactersIn: "/- "))
         return [
             LensVariantItem(
                 badge: "New FD (nFD)",
