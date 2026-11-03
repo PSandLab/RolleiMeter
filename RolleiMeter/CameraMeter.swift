@@ -243,9 +243,6 @@ final class CameraMeter: NSObject, ObservableObject,
 
     // MARK: - Focus & LiDAR DoF
 
-    func setManualFocus(_ position: Float) {}
-    func setManualFocusThrottled(_ position: Float) {}
-
     func resumeAutoFocus() {
         sessionQueue.async {
             guard let dev = self.device, dev.isFocusModeSupported(.continuousAutoFocus) else { return }
@@ -870,8 +867,4 @@ final class CameraMeter: NSObject, ObservableObject,
             }
         }
     }
-}
-
-final class PeakingFeed: ObservableObject {
-    @Published var image: UIImage?
 }
