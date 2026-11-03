@@ -20,7 +20,7 @@ struct PeakingOverlay: View {
     }
 }
 
-// MARK: - Hold button (Morphs into Confirm Log + Cancel on Hold)
+// MARK: - Hold button (Smooth Sliding Metering Selector + Morphs into Confirm Log + Cancel on Hold)
 
 struct HoldControl: View {
     let frozen: Bool
@@ -35,31 +35,15 @@ struct HoldControl: View {
     var onDiscardHold: () -> Void = {}
 
     @Namespace private var morphNamespace
+    @Namespace private var meterSlideNamespace
+    @State private var isScrubbingMeter: Bool = false
 
     var body: some View {
         ZStack {
             if !frozen {
                 HStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 8 * k) {
-                        ForEach(modes.indices, id: \.self) { i in
-                            Button {
-                                guard i != meterIndex else { return }
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                onPickMeter(i)
-                            } label: {
-                                Text(modes[i].title)
-                                    .font(AppTypography.next(size: 31 * k, weight: i == meterIndex ? .semibold : .medium))
-                                    .foregroundStyle(i == meterIndex ? Palette.accent : Palette.dim)
-                                    .animation(.easeOut(duration: 0.18), value: meterIndex)
-                                    .frame(minWidth: 120 * k, minHeight: 44 * k, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(modes[i].title + " metering")
-                            .accessibilityAddTraits(i == meterIndex ? .isSelected : [])
-                        }
-                    }
-                    .padding(.leading, 17 * k)
+                    smoothMeterSelector
+                        .padding(.leading, 14 * k)
 
                     Spacer(minLength: 0)
                 }
@@ -75,6 +59,89 @@ struct HoldControl: View {
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.78), value: frozen)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isSaved)
+    }
+
+    // Smooth thumb-scrubbable & tappable iOS 26/27 sliding selector
+    private var smoothMeterSelector: some View {
+        let rowHeight: CGFloat = 50 * k
+        let totalHeight: CGFloat = rowHeight * CGFloat(max(modes.count, 1))
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(modes.indices, id: \.self) { i in
+                let selected = (i == meterIndex)
+                ZStack(alignment: .leading) {
+                    if selected {
+                        Capsule()
+                            .fill(Palette.accent.opacity(isScrubbingMeter ? 0.24 : 0.16))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Palette.accent.opacity(0.55), lineWidth: 1)
+                            )
+                            .matchedGeometryEffect(id: "meterModePill", in: meterSlideNamespace)
+                    }
+
+                    HStack(spacing: 8 * k) {
+                        Circle()
+                            .fill(selected ? Palette.accent : Color.white.opacity(0.22))
+                            .frame(width: 7 * k, height: 7 * k)
+
+                        Text(modes[i].title)
+                            .font(AppTypography.next(size: 27 * k, weight: selected ? .semibold : .medium))
+                            .foregroundStyle(selected ? Palette.accent : Palette.dim)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 14 * k)
+                }
+                .frame(width: 146 * k, height: rowHeight, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+        }
+        .padding(4 * k)
+        .background(
+            RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.75)
+                )
+        )
+        .scaleEffect(isScrubbingMeter ? 1.03 : 1.0)
+        .animation(.snappy(duration: 0.22, extraBounce: 0.0), value: meterIndex)
+        .animation(.snappy(duration: 0.18, extraBounce: 0.0), value: isScrubbingMeter)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isScrubbingMeter {
+                        isScrubbingMeter = true
+                    }
+                    let y = value.location.y - (4 * k)
+                    let rawIdx = Int((y / max(rowHeight, 1)).rounded(.down))
+                    let clamped = min(max(rawIdx, 0), modes.count - 1)
+                    if clamped != meterIndex {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        onPickMeter(clamped)
+                    }
+                }
+                .onEnded { _ in
+                    isScrubbingMeter = false
+                }
+        )
+        .frame(height: totalHeight + 8 * k)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Metering mode")
+        .accessibilityValue(modes[min(max(meterIndex, 0), modes.count - 1)].title)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                let next = min(meterIndex + 1, modes.count - 1)
+                if next != meterIndex { onPickMeter(next) }
+            case .decrement:
+                let prev = max(meterIndex - 1, 0)
+                if prev != meterIndex { onPickMeter(prev) }
+            @unknown default:
+                break
+            }
+        }
     }
 
     @ViewBuilder

@@ -7,9 +7,9 @@ private let MAJOR_CAMERA_BRAND_ORDER: [String] = [
     "Rollei", "Yashica", "Voigtländer", "Ricoh", "Konica"
 ]
 
-private let OTHER_BRANDS_GROUP_TITLE = "Other & Boutique Classics"
+private let OTHER_BRANDS_GROUP_TITLE = "More Classics"
 
-// MARK: - Gear Setup Section (Clean iOS 27 Collapsible Card)
+// MARK: - Gear Setup Section (Minimal Native iOS 27 Collapsible Card)
 
 struct GearSetupSection: View {
     @ObservedObject var store: FilmLogStore
@@ -19,10 +19,7 @@ struct GearSetupSection: View {
     @State private var gearSubTab: Int = 0 // 0 = Cameras, 1 = Lenses, 2 = Custom
     @State private var expandedBrand: String? = nil
     @State private var expandedCameraId: String? = nil
-    @State private var inlineIncludeAdapter: Bool = false
-    @State private var inlineAdapterMountFilter: String = "All"
     @State private var inlineFocalCategory: FocalLengthCategory = .all
-    @State private var inlineLensSearchQuery: String = ""
     @State private var lensFocalCategory: FocalLengthCategory = .all
 
     var body: some View {
@@ -54,19 +51,16 @@ struct GearSetupSection: View {
             }
 
             var result: [(String, [CameraGearSpec])] = []
-            // Custom brands first if any
             for brand in groups.keys.sorted() where !majorSet.contains(brand) {
                 if let list = groups[brand], !list.isEmpty {
                     result.append((brand, list))
                 }
             }
-            // Major brands in curated order
             for brand in MAJOR_CAMERA_BRAND_ORDER {
                 if let list = groups[brand], !list.isEmpty {
                     result.append((brand, list))
                 }
             }
-            // Consolidated Other & Boutique Classics at the bottom
             if !otherList.isEmpty {
                 let sortedOthers = otherList.sorted {
                     "\($0.brand) \($0.model)" < "\($1.brand) \($1.model)"
@@ -77,10 +71,9 @@ struct GearSetupSection: View {
         }()
 
         VStack(alignment: .leading, spacing: 14) {
-            // Main Card Header
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
-                withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
                     isExpanded.toggle()
                     if !isExpanded {
                         expandedCameraId = nil
@@ -88,48 +81,32 @@ struct GearSetupSection: View {
                 }
             } label: {
                 HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(activeGear.hasCamera ? Palette.accent.opacity(0.16) : Color.white.opacity(0.06))
-                            .frame(width: 42, height: 42)
+                    if activeGear.hasCamera,
+                       let camBrand = allCameras.first(where: { $0.id == activeGear.cameraId })?.brand {
+                        CameraBrandLogo(brand: camBrand, size: 36)
+                    } else {
                         Image(systemName: "camera.aperture")
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(activeGear.hasCamera ? Palette.accent : Palette.dim)
+                            .frame(width: 36, height: 36)
                     }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text("CAMERA & LENS")
-                                .font(AppTypography.next(size: 11, weight: .semibold))
-                                .tracking(1.2)
-                                .foregroundStyle(Palette.dim)
-
-                            if activeGear.hasCamera {
-                                Text(activeGear.isFixedLens ? "FIXED" : formatMountBadge(activeGear.mount))
-                                    .font(AppTypography.mono(size: 10, weight: .semibold))
-                                    .foregroundStyle(Palette.accent)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 1.5)
-                                    .background(Palette.accent.opacity(0.14), in: Capsule())
-                            }
-                        }
-
-                        Text(activeGear.hasCamera ? activeGear.cameraName : "All Shutter & Aperture Stops")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activeGear.hasCamera ? activeGear.cameraName : "Camera & Lens")
                             .font(AppTypography.next(size: 16, weight: .semibold))
                             .foregroundStyle(Palette.text)
                             .lineLimit(1)
 
                         if activeGear.hasCamera {
-                            let shutterRange = "\(formatShutterStopLabel(activeGear.maxShutter))–\(formatShutterStopLabel(activeGear.minShutter))"
-                            let lensSummary = activeGear.hasLens
-                                ? "\(activeGear.lensName) (\(formatApertureRange(activeGear.minAperture, activeGear.maxAperture)))"
-                                : "Body only"
-                            Text("\(shutterRange)  \u{00B7}  \(lensSummary)")
+                            let sub = activeGear.hasLens
+                                ? activeGear.lensName
+                                : "\(formatShutterStopLabel(activeGear.minShutter)) \u{2013} \(formatShutterStopLabel(activeGear.maxShutter))"
+                            Text(sub)
                                 .font(AppTypography.next(size: 12, weight: .medium))
                                 .foregroundStyle(Palette.dim)
                                 .lineLimit(1)
                         } else {
-                            Text("Optional: clamp meter to a specific camera & lens")
+                            Text("All stops unlocked")
                                 .font(AppTypography.next(size: 12, weight: .medium))
                                 .foregroundStyle(Palette.dim)
                                 .lineLimit(1)
@@ -138,17 +115,9 @@ struct GearSetupSection: View {
 
                     Spacer(minLength: 8)
 
-                    HStack(spacing: 5) {
-                        Text(isExpanded ? "Done" : (activeGear.hasCamera ? "Change" : "Choose"))
-                            .font(AppTypography.next(size: 13, weight: .semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 11, weight: .bold))
-                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                    }
-                    .foregroundStyle(Palette.accent)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Palette.accent.opacity(0.12), in: Capsule())
+                    Text(isExpanded ? "Done" : (activeGear.hasCamera ? "Change" : "Select"))
+                        .font(AppTypography.next(size: 14, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
                 }
                 .contentShape(Rectangle())
             }
@@ -158,40 +127,30 @@ struct GearSetupSection: View {
                 Divider().overlay(Color.white.opacity(0.08))
 
                 if activeGear.hasCamera {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(activeGear.cameraName)
-                                .font(AppTypography.next(size: 14, weight: .semibold))
-                                .foregroundStyle(Palette.text)
-                            if activeGear.hasLens {
-                                Text(activeGear.lensName)
-                                    .font(AppTypography.next(size: 12, weight: .medium))
-                                    .foregroundStyle(Palette.dim)
-                            }
-                        }
+                    HStack {
+                        Text(activeGear.hasLens ? "\(activeGear.cameraName) \u{00B7} \(activeGear.lensName)" : activeGear.cameraName)
+                            .font(AppTypography.next(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.dim)
+                            .lineLimit(1)
+
                         Spacer()
+
                         Button {
                             UISelectionFeedbackGenerator().selectionChanged()
-                            withAnimation(.snappy(duration: 0.26)) {
+                            withAnimation(.snappy(duration: 0.24)) {
                                 store.activeGear = .unloaded
                             }
                         } label: {
-                            Text("Remove Rig")
-                                .font(AppTypography.next(size: 12, weight: .semibold))
+                            Text("Clear")
+                                .font(AppTypography.next(size: 13, weight: .semibold))
                                 .foregroundStyle(Palette.bad)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 6)
-                                .background(Palette.bad.opacity(0.14), in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(12)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
-                // Native iOS Segmented Picker for Bodies / Lenses / Custom
-                Picker("Gear Category", selection: $gearSubTab.animation(.snappy(duration: 0.25))) {
-                    Text("Bodies").tag(0)
+                Picker("Gear Category", selection: $gearSubTab.animation(.snappy(duration: 0.24))) {
+                    Text("Cameras").tag(0)
                     Text("Lenses").tag(1)
                     Text("Custom").tag(2)
                 }
@@ -209,13 +168,10 @@ struct GearSetupSection: View {
                                 activeGear: activeGear,
                                 expandedCameraId: $expandedCameraId,
                                 allLensEntries: allLenses,
-                                inlineIncludeAdapter: $inlineIncludeAdapter,
-                                inlineAdapterMountFilter: $inlineAdapterMountFilter,
                                 inlineFocalCategory: $inlineFocalCategory,
-                                inlineLensSearchQuery: $inlineLensSearchQuery,
                                 onToggleBrand: {
                                     UISelectionFeedbackGenerator().selectionChanged()
-                                    withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
+                                    withAnimation(.snappy(duration: 0.26, extraBounce: 0.0)) {
                                         if expandedBrand == groupTitle {
                                             expandedBrand = nil
                                             expandedCameraId = nil
@@ -227,7 +183,7 @@ struct GearSetupSection: View {
                                 },
                                 onMountProfile: { profile in
                                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                    withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                    withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
                                         store.activeGear = profile
                                         expandedCameraId = nil
                                         expandedBrand = nil
@@ -250,7 +206,7 @@ struct GearSetupSection: View {
                             updated.lensName = lens.model
                             updated.minAperture = lens.minAperture
                             updated.maxAperture = lens.maxAperture
-                            withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                            withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
                                 store.activeGear = updated
                                 isExpanded = false
                             }
@@ -262,7 +218,7 @@ struct GearSetupSection: View {
                         onCreatedCamera: { cam, profile in
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
                             store.addCustomCamera(cam)
-                            withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                            withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
                                 store.activeGear = profile
                                 gearSubTab = 0
                                 isExpanded = false
@@ -276,7 +232,7 @@ struct GearSetupSection: View {
                             updated.lensName = lens.model
                             updated.minAperture = lens.minAperture
                             updated.maxAperture = lens.maxAperture
-                            withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                            withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
                                 store.activeGear = updated
                                 gearSubTab = 0
                                 isExpanded = false
@@ -292,13 +248,13 @@ struct GearSetupSection: View {
                 .fill(Palette.panel)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.75)
                 )
         )
     }
 }
 
-// MARK: - Camera Brand Accordion (Clean Typography, Single-Open Smooth iOS Disclosure)
+// MARK: - Camera Brand Group (Pure Geometric Brand Emblem + Clean Non-Redundant Rows)
 
 private struct CameraBrandGroupView: View {
     let groupTitle: String
@@ -307,10 +263,7 @@ private struct CameraBrandGroupView: View {
     let activeGear: ActiveGearProfile
     @Binding var expandedCameraId: String?
     let allLensEntries: [PrewarmedLensEntry]
-    @Binding var inlineIncludeAdapter: Bool
-    @Binding var inlineAdapterMountFilter: String
     @Binding var inlineFocalCategory: FocalLengthCategory
-    @Binding var inlineLensSearchQuery: String
     let onToggleBrand: () -> Void
     let onMountProfile: (ActiveGearProfile) -> Void
 
@@ -324,25 +277,12 @@ private struct CameraBrandGroupView: View {
                     if !isOtherGroup {
                         CameraBrandLogo(brand: groupTitle, size: 30)
                     } else {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.white.opacity(0.08))
-                                .frame(width: 30, height: 30)
-                            Image(systemName: "camera.on.rectangle")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Palette.dim)
-                        }
+                        CameraBrandLogo(brand: "Classic", size: 30)
                     }
 
                     Text(groupTitle)
                         .font(AppTypography.next(size: 15, weight: .semibold))
-                        .foregroundStyle(Palette.text)
-
-                    if hasActiveCam {
-                        Circle()
-                            .fill(Palette.accent)
-                            .frame(width: 6, height: 6)
-                    }
+                        .foregroundStyle(hasActiveCam ? Palette.accent : Palette.text)
 
                     Spacer()
 
@@ -376,26 +316,45 @@ private struct CameraBrandGroupView: View {
 
                         VStack(alignment: .leading, spacing: 0) {
                             Button {
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                withAnimation(.snappy(duration: 0.26, extraBounce: 0.0)) {
-                                    expandedCameraId = isCardOpen ? nil : cam.id
-                                    inlineIncludeAdapter = false
-                                    inlineAdapterMountFilter = "All"
-                                    inlineFocalCategory = .all
-                                    inlineLensSearchQuery = ""
+                                if cam.isFixed {
+                                    // Fixed-lens cameras already have their lens built in — mount immediately in 1 tap!
+                                    onMountProfile(
+                                        ActiveGearProfile(
+                                            cameraId: cam.id,
+                                            cameraName: displayTitle,
+                                            mount: "Fixed",
+                                            isFixedLens: true,
+                                            minShutter: cam.minShutter,
+                                            maxShutter: cam.maxShutter,
+                                            lensId: "\(cam.id)_fixed",
+                                            lensName: cam.fixedLensName,
+                                            minAperture: cam.fixedMinAperture,
+                                            maxAperture: cam.fixedMaxAperture
+                                        )
+                                    )
+                                } else {
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    withAnimation(.snappy(duration: 0.24, extraBounce: 0.0)) {
+                                        expandedCameraId = isCardOpen ? nil : cam.id
+                                        inlineFocalCategory = .all
+                                    }
                                 }
                             } label: {
                                 HStack(spacing: 10) {
+                                    if isOtherGroup {
+                                        CameraBrandLogo(brand: cam.brand, size: 24)
+                                    }
+
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(displayTitle)
                                             .font(AppTypography.next(size: 15, weight: .semibold))
                                             .foregroundStyle(isMounted ? Palette.accent : Palette.text)
                                             .lineLimit(1)
 
-                                        let shutterText = "\(formatShutterStopLabel(cam.maxShutter))–\(formatShutterStopLabel(cam.minShutter))"
+                                        // Subtitle shows ONLY the built-in lens (if fixed) OR the shutter speed range (never repeating the mount!)
                                         let subText = cam.isFixed
-                                            ? "\(shutterText)  \u{00B7}  \(cam.fixedLensName)"
-                                            : "\(shutterText)  \u{00B7}  \(formatMountBadge(cam.mount)) mount"
+                                            ? cam.fixedLensName
+                                            : "\(formatShutterStopLabel(cam.minShutter)) \u{2013} \(formatShutterStopLabel(cam.maxShutter))"
                                         Text(subText)
                                             .font(AppTypography.next(size: 12, weight: .medium))
                                             .foregroundStyle(Palette.dim)
@@ -405,16 +364,13 @@ private struct CameraBrandGroupView: View {
                                     Spacer(minLength: 8)
 
                                     if isMounted {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.system(size: 16, weight: .semibold))
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 13, weight: .bold))
                                             .foregroundStyle(Palette.accent)
                                     } else {
                                         Text(cam.isFixed ? "Fixed" : formatMountBadge(cam.mount))
                                             .font(AppTypography.mono(size: 11, weight: .medium))
                                             .foregroundStyle(Palette.dim)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.white.opacity(0.06), in: Capsule())
                                     }
                                 }
                                 .padding(.horizontal, 12)
@@ -423,15 +379,13 @@ private struct CameraBrandGroupView: View {
                             }
                             .buttonStyle(.plain)
 
-                            if isCardOpen {
-                                CameraInlineSetupPanel(
+                            if isCardOpen && !cam.isFixed {
+                                CameraInlineLensPicker(
                                     camera: cam,
+                                    displayCameraTitle: displayTitle,
                                     activeGear: activeGear,
                                     allLensEntries: allLensEntries,
-                                    includeAdapter: $inlineIncludeAdapter,
-                                    adapterMountFilter: $inlineAdapterMountFilter,
                                     focalCategory: $inlineFocalCategory,
-                                    lensSearchQuery: $inlineLensSearchQuery,
                                     onMountProfile: onMountProfile
                                 )
                                 .padding(.horizontal, 12)
@@ -452,253 +406,124 @@ private struct CameraBrandGroupView: View {
                 .fill(Color.white.opacity(0.035))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(hasActiveCam ? Palette.accent.opacity(0.35) : Color.white.opacity(0.06), lineWidth: 0.75)
+                        .strokeBorder(hasActiveCam ? Palette.accent.opacity(0.32) : Color.white.opacity(0.06), lineWidth: 0.75)
                 )
         )
         .clipped()
     }
 }
 
-// MARK: - Inline Camera & Lens Pairing Panel
+// MARK: - Concise 1-Tap Lens Picker for Interchangeable Bodies (No Search Bar Clutter)
 
-private struct CameraInlineSetupPanel: View {
+private struct CameraInlineLensPicker: View {
     let camera: CameraGearSpec
+    let displayCameraTitle: String
     let activeGear: ActiveGearProfile
     let allLensEntries: [PrewarmedLensEntry]
-    @Binding var includeAdapter: Bool
-    @Binding var adapterMountFilter: String
     @Binding var focalCategory: FocalLengthCategory
-    @Binding var lensSearchQuery: String
     let onMountProfile: (ActiveGearProfile) -> Void
 
-    @State private var selectedLens: LensGearSpec? = nil
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let mountLenses = allLensEntries.filter {
+            $0.lens.mount.caseInsensitiveCompare(camera.mount) == .orderedSame
+        }
+
+        let visibleLenses = mountLenses.filter {
+            matchesFocalCategory(model: $0.lens.model, category: focalCategory)
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
             Divider().overlay(Color.white.opacity(0.08))
 
-            if camera.isFixed {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(camera.fixedLensName)
-                            .font(AppTypography.next(size: 13, weight: .semibold))
-                            .foregroundStyle(Palette.text)
-                        Text("Built-in optic  \u{00B7}  \(formatApertureRange(camera.fixedMinAperture, camera.fixedMaxAperture))")
-                            .font(AppTypography.next(size: 12, weight: .medium))
-                            .foregroundStyle(Palette.dim)
-                    }
-                    Spacer()
-                    Button {
-                        onMountProfile(
-                            ActiveGearProfile(
-                                cameraId: camera.id,
-                                cameraName: camera.model,
-                                mount: "Fixed",
-                                isFixedLens: true,
-                                minShutter: camera.minShutter,
-                                maxShutter: camera.maxShutter,
-                                lensId: "\(camera.id)_fixed",
-                                lensName: camera.fixedLensName,
-                                minAperture: camera.fixedMinAperture,
-                                maxAperture: camera.fixedMaxAperture
-                            )
-                        )
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("Mount Camera")
-                                .font(AppTypography.next(size: 13, weight: .semibold))
-                        }
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Palette.accent, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.top, 4)
-            } else {
-                HStack {
-                    Text("SELECT \(camera.mount.uppercased()) LENS")
-                        .font(AppTypography.next(size: 11, weight: .semibold))
-                        .tracking(1.0)
-                        .foregroundStyle(Palette.dim)
-                    Spacer()
-                    Button {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.snappy(duration: 0.22)) {
-                            includeAdapter.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: includeAdapter ? "checkmark.circle.fill" : "link")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(includeAdapter ? "Adapted Mounts" : "Use Adapter")
-                                .font(AppTypography.next(size: 11, weight: .semibold))
-                        }
-                        .foregroundStyle(includeAdapter ? Color.black : Palette.dim)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(includeAdapter ? Palette.accent : Color.white.opacity(0.07), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
+            HStack {
+                Text("Select Lens")
+                    .font(AppTypography.next(size: 12, weight: .semibold))
+                    .foregroundStyle(Palette.dim)
 
-                if includeAdapter {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(ADAPTER_MOUNT_FILTERS, id: \.self) { mFilter in
-                                let sel = adapterMountFilter == mFilter
-                                Button {
-                                    UISelectionFeedbackGenerator().selectionChanged()
-                                    adapterMountFilter = mFilter
-                                } label: {
-                                    Text(mFilter)
-                                        .font(AppTypography.next(size: 11, weight: .semibold))
-                                        .foregroundStyle(sel ? Color.black : Palette.dim)
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 4)
-                                        .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
+                Spacer()
 
-                // Focal length filter pills
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(FocalLengthCategory.allCases) { cat in
-                            let sel = focalCategory == cat
-                            Button {
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                focalCategory = cat
-                            } label: {
-                                Text(cat.label)
-                                    .font(AppTypography.mono(size: 11, weight: .semibold))
-                                    .foregroundStyle(sel ? Color.black : Palette.dim)
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 4)
-                                    .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                // Lens filter field
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.dim)
-                    TextField("Filter lenses (e.g. 35mm, Summicron, f/1.4)\u{2026}", text: $lensSearchQuery)
-                        .font(AppTypography.next(size: 13, weight: .regular))
-                        .foregroundStyle(Palette.text)
-                    if !lensSearchQuery.isEmpty {
-                        Button {
-                            lensSearchQuery = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Palette.dim)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                let matchingLenses: [PrewarmedLensEntry] = allLensEntries.filter { entry in
-                    let mountOk: Bool = {
-                        if !includeAdapter {
-                            return entry.lens.mount.caseInsensitiveCompare(camera.mount) == .orderedSame
-                        } else {
-                            return matchesAdaptedMount(lensMount: entry.lens.mount, filter: adapterMountFilter)
-                        }
-                    }()
-                    guard mountOk else { return false }
-                    guard matchesFocalCategory(model: entry.lens.model, category: focalCategory) else { return false }
-                    let q = lensSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if q.isEmpty { return true }
-                    return fuzzyMatchScore(query: q, target: "\(entry.lens.brand) \(entry.lens.model) \(entry.lens.mount)") > 0
-                }
-
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(matchingLenses.prefix(40)) { entry in
-                            ForEach(entry.variants) { variant in
-                                let spec = variant.spec
-                                let isChosen = selectedLens?.id == spec.id
-                                    || (selectedLens == nil && activeGear.lensId == spec.id)
-
-                                Button {
-                                    UISelectionFeedbackGenerator().selectionChanged()
-                                    selectedLens = spec
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(spec.model)
-                                                .font(AppTypography.next(size: 13, weight: .semibold))
-                                                .foregroundStyle(isChosen ? Palette.accent : Palette.text)
-                                                .lineLimit(1)
-                                            Text("\(variant.badge)  \u{00B7}  \(formatApertureRange(spec.minAperture, spec.maxAperture))")
-                                                .font(AppTypography.next(size: 11, weight: .medium))
-                                                .foregroundStyle(Palette.dim)
-                                                .lineLimit(1)
-                                        }
-                                        Spacer()
-                                        if isChosen {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(Palette.accent)
-                                        }
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .fill(isChosen ? Palette.accent.opacity(0.14) : Color.white.opacity(0.04))
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-                .frame(maxHeight: 190)
-
-                let effectiveLens = selectedLens ?? matchingLenses.first?.variants.first?.spec
                 Button {
                     onMountProfile(
                         ActiveGearProfile(
                             cameraId: camera.id,
-                            cameraName: camera.model,
+                            cameraName: displayCameraTitle,
                             mount: camera.mount,
                             isFixedLens: false,
                             minShutter: camera.minShutter,
                             maxShutter: camera.maxShutter,
-                            lensId: effectiveLens?.id ?? "",
-                            lensName: effectiveLens?.model ?? "",
-                            minAperture: effectiveLens?.minAperture ?? 1.4,
-                            maxAperture: effectiveLens?.maxAperture ?? 22.0
+                            lensId: "",
+                            lensName: "",
+                            minAperture: 1.0,
+                            maxAperture: 32.0
                         )
                     )
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 14, weight: .bold))
-                        Text(effectiveLens != nil ? "Mount \(camera.model) + \(effectiveLens!.model)" : "Mount \(camera.model) (Body Only)")
-                            .font(AppTypography.next(size: 13, weight: .semibold))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(Color.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Palette.accent, in: Capsule())
+                    Text("Body Only")
+                        .font(AppTypography.next(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
                 }
                 .buttonStyle(.plain)
+            }
+
+            // Only show focal length segmented filter when this mount has > 8 lenses
+            if mountLenses.count > 8 {
+                Picker("Focal Length", selection: $focalCategory.animation(.snappy(duration: 0.20))) {
+                    ForEach(FocalLengthCategory.allCases) { cat in
+                        Text(cat.label).tag(cat)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            VStack(spacing: 4) {
+                ForEach(visibleLenses.prefix(24)) { entry in
+                    let spec = entry.lens
+                    let isChosen = activeGear.cameraId == camera.id && activeGear.lensId == spec.id
+
+                    Button {
+                        onMountProfile(
+                            ActiveGearProfile(
+                                cameraId: camera.id,
+                                cameraName: displayCameraTitle,
+                                mount: camera.mount,
+                                isFixedLens: false,
+                                minShutter: camera.minShutter,
+                                maxShutter: camera.maxShutter,
+                                lensId: spec.id,
+                                lensName: entry.baseTitle,
+                                minAperture: spec.minAperture,
+                                maxAperture: spec.maxAperture
+                            )
+                        )
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(entry.baseTitle)
+                                .font(AppTypography.next(size: 13, weight: .medium))
+                                .foregroundStyle(isChosen ? Palette.accent : Palette.text)
+                                .lineLimit(1)
+
+                            Spacer()
+
+                            Text(formatApertureRange(spec.minAperture, spec.maxAperture))
+                                .font(AppTypography.mono(size: 11, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+
+                            if isChosen {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(Palette.accent)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(isChosen ? Palette.accent.opacity(0.12) : Color.white.opacity(0.035))
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
@@ -714,78 +539,57 @@ private struct StandaloneLensBrowser: View {
     let onMountLens: (LensGearSpec) -> Void
 
     var body: some View {
+        let filtered = allLensEntries.filter { entry in
+            guard matchesFocalCategory(model: entry.lens.model, category: focalCategory) else { return false }
+            let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if q.isEmpty { return true }
+            return fuzzyMatchScore(query: q, target: "\(entry.lens.brand) \(entry.lens.model) \(entry.lens.mount)") > 0
+        }
+
         VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(FocalLengthCategory.allCases) { cat in
-                        let sel = focalCategory == cat
-                        Button {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            focalCategory = cat
-                        } label: {
-                            Text(cat.label)
-                                .font(AppTypography.mono(size: 11, weight: .semibold))
-                                .foregroundStyle(sel ? Color.black : Palette.dim)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 4)
-                                .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
+            Picker("Focal Length", selection: $focalCategory.animation(.snappy(duration: 0.20))) {
+                ForEach(FocalLengthCategory.allCases) { cat in
+                    Text(cat.label).tag(cat)
                 }
             }
+            .pickerStyle(.segmented)
 
-            let filtered = allLensEntries.filter { entry in
-                guard matchesFocalCategory(model: entry.lens.model, category: focalCategory) else { return false }
-                let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                if q.isEmpty { return true }
-                return fuzzyMatchScore(query: q, target: "\(entry.lens.brand) \(entry.lens.model) \(entry.lens.mount)") > 0
-            }
-
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(filtered.prefix(60)) { entry in
-                        let spec = entry.lens
-                        let isMounted = activeGear.lensId == spec.id
-                        Button {
-                            onMountLens(spec)
-                        } label: {
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(spec.model)
-                                        .font(AppTypography.next(size: 14, weight: .semibold))
-                                        .foregroundStyle(isMounted ? Palette.accent : Palette.text)
-                                        .lineLimit(1)
-                                    Text("\(spec.brand)  \u{00B7}  \(formatMountBadge(spec.mount))  \u{00B7}  \(formatApertureRange(spec.minAperture, spec.maxAperture))")
-                                        .font(AppTypography.next(size: 12, weight: .medium))
-                                        .foregroundStyle(Palette.dim)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                if isMounted {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(Palette.accent)
-                                } else {
-                                    Text("Mount")
-                                        .font(AppTypography.next(size: 12, weight: .semibold))
-                                        .foregroundStyle(Palette.accent)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4)
-                                        .background(Palette.accent.opacity(0.14), in: Capsule())
-                                }
+            VStack(spacing: 4) {
+                ForEach(filtered.prefix(30)) { entry in
+                    let spec = entry.lens
+                    let isMounted = activeGear.lensId == spec.id
+                    Button {
+                        onMountLens(spec)
+                    } label: {
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.baseTitle)
+                                    .font(AppTypography.next(size: 14, weight: .semibold))
+                                    .foregroundStyle(isMounted ? Palette.accent : Palette.text)
+                                    .lineLimit(1)
+                                Text("\(formatMountBadge(spec.mount)) \u{00B7} \(formatApertureRange(spec.minAperture, spec.maxAperture))")
+                                    .font(AppTypography.next(size: 12, weight: .medium))
+                                    .foregroundStyle(Palette.dim)
+                                    .lineLimit(1)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(isMounted ? Palette.accent.opacity(0.10) : Color.white.opacity(0.035))
-                            )
+                            Spacer()
+                            if isMounted {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(Palette.accent)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(isMounted ? Palette.accent.opacity(0.10) : Color.white.opacity(0.035))
+                        )
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
-            .frame(maxHeight: 260)
         }
     }
 }
@@ -797,7 +601,7 @@ private struct CustomGearBuilderView: View {
     let onCreatedCamera: (CameraGearSpec, ActiveGearProfile) -> Void
     let onCreatedLens: (LensGearSpec) -> Void
 
-    @State private var mode: Int = 0 // 0 = Fixed-Lens Camera, 1 = Interchangeable Body, 2 = Lens
+    @State private var mode: Int = 0 // 0 = Fixed Camera, 1 = Body, 2 = Lens
     @State private var brand: String = "Custom"
     @State private var modelName: String = ""
     @State private var fixedLensName: String = "40mm f/2.8"
@@ -810,20 +614,20 @@ private struct CustomGearBuilderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Custom Type", selection: $mode) {
-                Text("Fixed Camera").tag(0)
-                Text("Body Only").tag(1)
+                Text("Fixed").tag(0)
+                Text("Body").tag(1)
                 Text("Lens").tag(2)
             }
             .pickerStyle(.segmented)
 
             HStack(spacing: 8) {
-                TextField("Brand (e.g. Rollei)", text: $brand)
+                TextField("Brand", text: $brand)
                     .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
                     .padding(10)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                TextField(mode == 2 ? "Lens (e.g. 50mm f/1.4)" : "Model Name", text: $modelName)
+                TextField(mode == 2 ? "Lens Model" : "Camera Model", text: $modelName)
                     .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
                     .padding(10)
@@ -831,13 +635,13 @@ private struct CustomGearBuilderView: View {
             }
 
             if mode == 0 {
-                TextField("Built-in Lens (e.g. Sonnar 40mm f/2.8)", text: $fixedLensName)
+                TextField("Lens (e.g. 40mm f/2.8)", text: $fixedLensName)
                     .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
                     .padding(10)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
-                TextField("Mount (e.g. Leica M, Nikon F, M42)", text: $mountName)
+                TextField("Mount (e.g. Leica M)", text: $mountName)
                     .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
                     .padding(10)
@@ -848,7 +652,7 @@ private struct CustomGearBuilderView: View {
                 let fastStop = ALL_ANALOG_SHUTTER_STOPS[fastestShutterIdx.clamped(to: 0...(ALL_ANALOG_SHUTTER_STOPS.count - 1))]
                 let slowStop = ALL_ANALOG_SHUTTER_STOPS[slowestShutterIdx.clamped(to: 0...(ALL_ANALOG_SHUTTER_STOPS.count - 1))]
                 Stepper {
-                    LabeledContent("Fastest Shutter", value: formatShutterStopLabel(fastStop))
+                    LabeledContent("Fastest", value: formatShutterStopLabel(fastStop))
                         .font(AppTypography.next(size: 13, weight: .medium))
                 } onIncrement: {
                     fastestShutterIdx = min(fastestShutterIdx + 1, ALL_ANALOG_SHUTTER_STOPS.count - 1)
@@ -857,7 +661,7 @@ private struct CustomGearBuilderView: View {
                 }
 
                 Stepper {
-                    LabeledContent("Slowest Shutter", value: formatShutterStopLabel(slowStop))
+                    LabeledContent("Slowest", value: formatShutterStopLabel(slowStop))
                         .font(AppTypography.next(size: 13, weight: .medium))
                 } onIncrement: {
                     slowestShutterIdx = min(slowestShutterIdx + 1, 10)
@@ -870,7 +674,7 @@ private struct CustomGearBuilderView: View {
                 let wideF = ALL_ANALOG_APERTURE_STOPS[widestApertureIdx.clamped(to: 0...(ALL_ANALOG_APERTURE_STOPS.count - 1))]
                 let smallF = ALL_ANALOG_APERTURE_STOPS[smallestApertureIdx.clamped(to: 0...(ALL_ANALOG_APERTURE_STOPS.count - 1))]
                 Stepper {
-                    LabeledContent("Widest Aperture", value: String(format: "f/%.1f", wideF).replacingOccurrences(of: ".0", with: ""))
+                    LabeledContent("Max Aperture", value: String(format: "f/%.1f", wideF).replacingOccurrences(of: ".0", with: ""))
                         .font(AppTypography.next(size: 13, weight: .medium))
                 } onIncrement: {
                     widestApertureIdx = min(widestApertureIdx + 1, 14)
@@ -879,7 +683,7 @@ private struct CustomGearBuilderView: View {
                 }
 
                 Stepper {
-                    LabeledContent("Smallest Aperture", value: String(format: "f/%.1f", smallF).replacingOccurrences(of: ".0", with: ""))
+                    LabeledContent("Min Aperture", value: String(format: "f/%.1f", smallF).replacingOccurrences(of: ".0", with: ""))
                         .font(AppTypography.next(size: 13, weight: .medium))
                 } onIncrement: {
                     smallestApertureIdx = min(smallestApertureIdx + 1, ALL_ANALOG_APERTURE_STOPS.count - 1)
@@ -889,7 +693,7 @@ private struct CustomGearBuilderView: View {
             }
 
             let trimmedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? (initialSearchText.isEmpty ? "Custom Analog Rig" : initialSearchText)
+                ? (initialSearchText.isEmpty ? "Custom Rig" : initialSearchText)
                 : modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
             Button {
@@ -941,16 +745,12 @@ private struct CustomGearBuilderView: View {
                     onCreatedCamera(cam, profile)
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Save & Mount \(trimmedModel)")
-                        .font(AppTypography.next(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(Color.black)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Palette.accent, in: Capsule())
+                Text("Mount \(trimmedModel)")
+                    .font(AppTypography.next(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Palette.accent, in: Capsule())
             }
             .buttonStyle(.plain)
         }

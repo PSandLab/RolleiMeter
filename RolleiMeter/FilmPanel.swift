@@ -41,18 +41,19 @@ struct FilmPanel: View {
             RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
                 .fill(Palette.accent)
 
-            HStack(spacing: 8 * k) {
+            if cameraBadge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
-                if !cameraBadge.isEmpty {
-                    Spacer(minLength: 4 * k)
-                    Text(cameraBadge.uppercased())
-                        .font(AppTypography.next(size: 18 * k, weight: .semibold))
-                        .tracking(1.2 * k)
-                        .foregroundStyle(Palette.accentInk.opacity(0.72))
-                        .lineLimit(1)
-                        .padding(.top, 17 * k)
-                        .padding(.trailing, 18 * k)
-                }
+            } else {
+                Text(cameraBadge.uppercased())
+                    .font(AppTypography.next(size: 22 * k, weight: .medium))
+                    .tracking(1.6 * k)
+                    .foregroundStyle(Palette.accentInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 22 * k)
+                    .padding(.trailing, 18 * k)
+                    .padding(.top, 17 * k)
             }
 
             RoundedRectangle(cornerRadius: 14 * k, style: .continuous)

@@ -54,26 +54,57 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
     ),
     FilmFamily(
         brand: "Kodak",
-        familyName: "Gold / UltraMax / ColorPlus",
+        familyName: "Gold & Ultramax",
         category: "Color",
         variants: [
             FilmVariant(label: "Gold 200", fullName: "Kodak Gold 200", iso: 200),
-            FilmVariant(label: "UltraMax 400", fullName: "Kodak UltraMax 400", iso: 400),
-            FilmVariant(label: "ColorPlus 200", fullName: "Kodak ColorPlus 200", iso: 200),
-            FilmVariant(label: "ProImage 100", fullName: "Kodak ProImage 100", iso: 100),
-            FilmVariant(label: "Ektar 100", fullName: "Kodak Ektar 100", iso: 100)
+            FilmVariant(label: "Ultramax 400", fullName: "Kodak Ultramax 400", iso: 400)
         ]
     ),
     FilmFamily(
         brand: "Kodak",
-        familyName: "Tri-X / T-Max",
+        familyName: "Ektar",
+        category: "Color",
+        variants: [
+            FilmVariant(label: "100", fullName: "Kodak Ektar 100", iso: 100)
+        ]
+    ),
+    FilmFamily(
+        brand: "Kodak",
+        familyName: "Pro Image & ColorPlus",
+        category: "Color",
+        variants: [
+            FilmVariant(label: "Pro Image 100", fullName: "Kodak Pro Image 100", iso: 100),
+            FilmVariant(label: "ColorPlus 200", fullName: "Kodak ColorPlus 200", iso: 200)
+        ]
+    ),
+    FilmFamily(
+        brand: "Kodak",
+        familyName: "Vision3",
+        category: "Color",
+        variants: [
+            FilmVariant(label: "50D", fullName: "Kodak Vision3 50D", iso: 50),
+            FilmVariant(label: "250D", fullName: "Kodak Vision3 250D", iso: 250),
+            FilmVariant(label: "500T", fullName: "Kodak Vision3 500T", iso: 500)
+        ]
+    ),
+    FilmFamily(
+        brand: "Kodak",
+        familyName: "Tri-X",
         category: "B&W",
         variants: [
-            FilmVariant(label: "Tri-X 400", fullName: "Kodak Tri-X 400", iso: 400),
-            FilmVariant(label: "T-Max 100", fullName: "Kodak T-Max 100", iso: 100),
-            FilmVariant(label: "T-Max 400", fullName: "Kodak T-Max 400", iso: 400),
-            FilmVariant(label: "T-Max P3200", fullName: "Kodak T-Max P3200", iso: 3200),
-            FilmVariant(label: "Double-X 5222", fullName: "Kodak Double-X", iso: 250)
+            FilmVariant(label: "320", fullName: "Kodak Tri-X 320", iso: 320),
+            FilmVariant(label: "400", fullName: "Kodak Tri-X 400", iso: 400)
+        ]
+    ),
+    FilmFamily(
+        brand: "Kodak",
+        familyName: "T-Max",
+        category: "B&W",
+        variants: [
+            FilmVariant(label: "100", fullName: "Kodak T-Max 100", iso: 100),
+            FilmVariant(label: "400", fullName: "Kodak T-Max 400", iso: 400),
+            FilmVariant(label: "P3200", fullName: "Kodak T-Max P3200", iso: 3200)
         ]
     ),
     FilmFamily(
@@ -88,18 +119,16 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
     // ── FUJIFILM ──
     FilmFamily(
         brand: "Fujifilm",
-        familyName: "Superia / C200 / Pro 400H",
+        familyName: "Fujifilm Color",
         category: "Color",
         variants: [
-            FilmVariant(label: "200 / C200", fullName: "Fujifilm 200", iso: 200),
-            FilmVariant(label: "400 / X-TRA", fullName: "Fujifilm Superia 400", iso: 400),
-            FilmVariant(label: "Pro 400H", fullName: "Fujifilm Pro 400H", iso: 400),
-            FilmVariant(label: "Natura 1600", fullName: "Fujifilm Natura 1600", iso: 1600)
+            FilmVariant(label: "Fuji 200", fullName: "Fujifilm 200", iso: 200),
+            FilmVariant(label: "Fuji 400", fullName: "Fujifilm 400", iso: 400)
         ]
     ),
     FilmFamily(
         brand: "Fujifilm",
-        familyName: "Velvia / Provia",
+        familyName: "Velvia & Provia",
         category: "Slide",
         variants: [
             FilmVariant(label: "Velvia 50", fullName: "Fujifilm Velvia 50", iso: 50),
@@ -109,10 +138,10 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
     ),
     FilmFamily(
         brand: "Fujifilm",
-        familyName: "Neopan Acros",
+        familyName: "Neopan Acros II",
         category: "B&W",
         variants: [
-            FilmVariant(label: "Acros II 100", fullName: "Fujifilm Acros II", iso: 100)
+            FilmVariant(label: "100", fullName: "Fujifilm Acros 100 II", iso: 100)
         ]
     ),
 
@@ -122,11 +151,9 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
         familyName: "HP5 / FP4 / Pan F",
         category: "B&W",
         variants: [
-            FilmVariant(label: "HP5 Plus 400", fullName: "Ilford HP5 Plus", iso: 400),
-            FilmVariant(label: "FP4 Plus 125", fullName: "Ilford FP4 Plus", iso: 125),
-            FilmVariant(label: "Pan F Plus 50", fullName: "Ilford Pan F Plus", iso: 50),
-            FilmVariant(label: "XP2 Super 400", fullName: "Ilford XP2 Super", iso: 400),
-            FilmVariant(label: "SFX 200", fullName: "Ilford SFX 200", iso: 200)
+            FilmVariant(label: "Pan F 50", fullName: "Ilford Pan F Plus 50", iso: 50),
+            FilmVariant(label: "FP4 125", fullName: "Ilford FP4 Plus 125", iso: 125),
+            FilmVariant(label: "HP5 400", fullName: "Ilford HP5 Plus 400", iso: 400)
         ]
     ),
     FilmFamily(
@@ -134,59 +161,86 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
         familyName: "Delta Professional",
         category: "B&W",
         variants: [
-            FilmVariant(label: "Delta 100", fullName: "Ilford Delta 100", iso: 100),
-            FilmVariant(label: "Delta 400", fullName: "Ilford Delta 400", iso: 400),
-            FilmVariant(label: "Delta 3200", fullName: "Ilford Delta 3200", iso: 3200)
+            FilmVariant(label: "100", fullName: "Ilford Delta 100", iso: 100),
+            FilmVariant(label: "400", fullName: "Ilford Delta 400", iso: 400),
+            FilmVariant(label: "3200", fullName: "Ilford Delta 3200", iso: 3200)
+        ]
+    ),
+    FilmFamily(
+        brand: "Ilford",
+        familyName: "XP2 Super",
+        category: "B&W",
+        variants: [
+            FilmVariant(label: "400", fullName: "Ilford XP2 Super 400", iso: 400)
         ]
     ),
 
     // ── CINESTILL ──
     FilmFamily(
         brand: "CineStill",
-        familyName: "CineStill Color & B&W",
+        familyName: "CineStill Color",
         category: "Color",
         variants: [
-            FilmVariant(label: "800T", fullName: "CineStill 800T", iso: 800),
-            FilmVariant(label: "400D", fullName: "CineStill 400D", iso: 400),
             FilmVariant(label: "50D", fullName: "CineStill 50D", iso: 50),
-            FilmVariant(label: "BwXX 250", fullName: "CineStill BwXX", iso: 250)
+            FilmVariant(label: "400D", fullName: "CineStill 400D", iso: 400),
+            FilmVariant(label: "800T", fullName: "CineStill 800T", iso: 800)
+        ]
+    ),
+    FilmFamily(
+        brand: "CineStill",
+        familyName: "BwXX Double-X",
+        category: "B&W",
+        variants: [
+            FilmVariant(label: "250", fullName: "CineStill BwXX 250", iso: 250)
         ]
     ),
 
     // ── FOMAPAN / KENTMERE / ROLLEI / LOMO ──
     FilmFamily(
-        brand: "Foma · Kentmere · Rollei · Lomo",
-        familyName: "Fomapan Classic",
+        brand: "Foma \u{00B7} Kentmere",
+        familyName: "Fomapan",
         category: "B&W",
         variants: [
-            FilmVariant(label: "Foma 100", fullName: "Fomapan 100", iso: 100),
-            FilmVariant(label: "Foma 200", fullName: "Fomapan 200", iso: 200),
-            FilmVariant(label: "Foma 400", fullName: "Fomapan 400", iso: 400)
+            FilmVariant(label: "100", fullName: "Fomapan 100 Classic", iso: 100),
+            FilmVariant(label: "200", fullName: "Fomapan 200 Creative", iso: 200),
+            FilmVariant(label: "400", fullName: "Fomapan 400 Action", iso: 400)
         ]
     ),
     FilmFamily(
-        brand: "Foma · Kentmere · Rollei · Lomo",
-        familyName: "Kentmere / Agfa / Rollei",
+        brand: "Foma \u{00B7} Kentmere",
+        familyName: "Kentmere Pan",
         category: "B&W",
         variants: [
-            FilmVariant(label: "Kentmere 100", fullName: "Kentmere Pan 100", iso: 100),
-            FilmVariant(label: "Kentmere 400", fullName: "Kentmere Pan 400", iso: 400),
-            FilmVariant(label: "Agfa APX 100", fullName: "AgfaPhoto APX 100", iso: 100),
-            FilmVariant(label: "Agfa APX 400", fullName: "AgfaPhoto APX 400", iso: 400),
-            FilmVariant(label: "Rollei RPX 25", fullName: "Rollei RPX 25", iso: 25),
-            FilmVariant(label: "Rollei Retro 80S", fullName: "Rollei Retro 80S", iso: 80),
-            FilmVariant(label: "Rollei IR 400", fullName: "Rollei Infrared 400", iso: 400)
+            FilmVariant(label: "100", fullName: "Kentmere Pan 100", iso: 100),
+            FilmVariant(label: "400", fullName: "Kentmere Pan 400", iso: 400)
         ]
     ),
     FilmFamily(
-        brand: "Foma · Kentmere · Rollei · Lomo",
-        familyName: "Lomography / Harman Phoenix",
+        brand: "Foma \u{00B7} Kentmere",
+        familyName: "Rollei B&W",
+        category: "B&W",
+        variants: [
+            FilmVariant(label: "Ortho 25", fullName: "Rollei Ortho 25 Plus", iso: 25),
+            FilmVariant(label: "Retro 80S", fullName: "Rollei Retro 80S", iso: 80),
+            FilmVariant(label: "RPX 400", fullName: "Rollei RPX 400", iso: 400)
+        ]
+    ),
+    FilmFamily(
+        brand: "Foma \u{00B7} Kentmere",
+        familyName: "Lomography Color",
         category: "Color",
         variants: [
-            FilmVariant(label: "Phoenix 200", fullName: "Harman Phoenix 200", iso: 200),
-            FilmVariant(label: "Lomo 100", fullName: "Lomography 100", iso: 100),
-            FilmVariant(label: "Lomo 400", fullName: "Lomography 400", iso: 400),
-            FilmVariant(label: "Lomo 800", fullName: "Lomography 800", iso: 800)
+            FilmVariant(label: "100", fullName: "Lomography Color 100", iso: 100),
+            FilmVariant(label: "400", fullName: "Lomography Color 400", iso: 400),
+            FilmVariant(label: "800", fullName: "Lomography Color 800", iso: 800)
+        ]
+    ),
+    FilmFamily(
+        brand: "Foma \u{00B7} Kentmere",
+        familyName: "Harman Phoenix",
+        category: "Color",
+        variants: [
+            FilmVariant(label: "200", fullName: "Harman Phoenix 200", iso: 200)
         ]
     )
 ]
@@ -212,7 +266,7 @@ struct FilmRollState: Codable, Equatable {
     var currentFrame: Int = 1
     var maxFrames: Int = 36
     var isExpired: Bool = false
-    var expiredYear: Int = 2005
+    var expiredYear: Int = 2016
     var autoApplyExpiredComp: Bool = true
 
     var isUnloaded: Bool { filmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -220,21 +274,29 @@ struct FilmRollState: Codable, Equatable {
     var isRollComplete: Bool { !isUnloaded && currentFrame >= maxFrames }
     var isSlideFilm: Bool { !isUnloaded && category.caseInsensitiveCompare("Slide") == .orderedSame }
 
+    var yearsExpired: Int {
+        get {
+            let currentYear = Calendar.current.component(.year, from: Date())
+            return max(1, currentYear - expiredYear)
+        }
+        set {
+            let currentYear = Calendar.current.component(.year, from: Date())
+            expiredYear = currentYear - max(1, newValue)
+        }
+    }
+
     var decadesExpired: Double {
         guard !isUnloaded && isExpired else { return 0.0 }
-        let currentYear = Calendar.current.component(.year, from: Date())
-        let years = max(0, currentYear - expiredYear)
-        return Double(years) / 10.0
+        return Double(yearsExpired) / 10.0
     }
 
     var recommendedExpiredCompEv: Double {
         guard !isUnloaded && isExpired && !isSlideFilm else { return 0.0 }
-        let rawStops = decadesExpired
-        return (rawStops * 3.0).rounded() / 3.0
+        return (decadesExpired * 3.0).rounded() / 3.0
     }
 
     var activeExpiredCompEv: Double {
-        (!isUnloaded && isExpired && autoApplyExpiredComp && !isSlideFilm) ? recommendedExpiredCompEv : 0.0
+        (!isUnloaded && isExpired && !isSlideFilm) ? recommendedExpiredCompEv : 0.0
     }
 }
 
@@ -368,7 +430,7 @@ func formatIsoTimestampForDisplay(_ isoString: String) -> String {
     }
     let out = DateFormatter()
     out.locale = Locale(identifier: "en_US_POSIX")
-    out.dateFormat = "MMM d · HH:mm"
+    out.dateFormat = "MMM d \u{00B7} HH:mm"
     return out.string(from: date)
 }
 
