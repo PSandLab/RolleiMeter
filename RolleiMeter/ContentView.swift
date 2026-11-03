@@ -15,6 +15,19 @@ private struct GlassCircle: ViewModifier {
     }
 }
 
+private struct GlassCapsule: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background(Capsule().fill(Palette.panel))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
+        }
+    }
+}
+
 /// Portrait only: a gentle card with a hairline edge (and optionally a rule under the title)
 /// so neighbouring readouts never run into each other.
 private struct SoftCard: ViewModifier {
@@ -148,6 +161,7 @@ struct ContentView: View {
 
     private var baseMode: MeterMode { mode == .spot ? .matrix : mode }
     private var engineMode: MeterMode { spotActive ? .spot : baseMode }
+    private var isModalOpen: Bool { showSettings || showFilmLogbook }
 
     private var tooClose: Bool {
         guard let d = shownDistance else { return false }
@@ -166,7 +180,6 @@ struct ContentView: View {
             let p = grid.portrait
             let roll = logStore.rollState
             let gear = logStore.activeGear
-            let gearShort = [gear.cameraName, gear.lensName].filter { !$0.isEmpty }.joined(separator: " · ")
 
             ZStack {
                 Palette.background
@@ -182,8 +195,7 @@ struct ContentView: View {
                         filmName: shortFilmBadge(name: roll.filmName, iso: roll.boxIso),
                         boxISO: roll.boxIso,
                         isUnloaded: roll.isUnloaded,
-                        evComp: logStore.totalEvComp,
-                        gearBadge: gearShort,
+                        cameraBadge: gear.cameraName,
                         k: k,
                         onTap: {
                             logbookInitialTab = 0
@@ -243,11 +255,20 @@ struct ContentView: View {
                     .modifier(SoftCard(k: k, on: p))
                     .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
 
-                    HoldControl(frozen: (frozenEV != nil && !isResuming), k: k,
-                                modes: meterModes, meterIndex: meterIndex,
-                                onPickMeter: pickMeterMode, action: toggleFreeze)
+                    HoldControl(
+                        frozen: (frozenEV != nil && !isResuming),
+                        frameNumber: capturedMoment?.frameNumber ?? roll.currentFrame,
+                        isSaved: momentSaved,
+                        k: k,
+                        modes: meterModes,
+                        meterIndex: meterIndex,
+                        onPickMeter: pickMeterMode,
+                        onHold: toggleFreeze,
+                        onConfirmLog: confirmAndLogHeldFrame,
+                        onDiscardHold: unfreeze
+                    )
                     .modifier(SoftCard(k: k, on: p))
-                        .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
+                    .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
 
                     // Last in the stack so the camera view (which overflows its cell) can't block taps.
                     topBar(k: k)
@@ -290,12 +311,19 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 UIApplication.shared.isIdleTimerDisabled = true
-                if frozenEV == nil {
+                if frozenEV == nil && !isModalOpen {
                     meter.start()
                 }
             } else {
                 UIApplication.shared.isIdleTimerDisabled = false
                 meter.stop()
+            }
+        }
+        .onChange(of: isModalOpen) { _, open in
+            if open {
+                meter.pause()
+            } else if frozenEV == nil && scenePhase == .active {
+                meter.resume()
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -304,7 +332,14 @@ struct ContentView: View {
                 useFeet: $useFeet,
                 calibration: $calibration,
                 armOffset: $armOffset,
-                rawDistance: { meter.distance }
+                rawDistance: { meter.distance },
+                onNeedSensor: { needed in
+                    if needed {
+                        meter.resume()
+                    } else if isModalOpen || frozenEV != nil {
+                        meter.pause()
+                    }
+                }
             )
         }
         .sheet(isPresented: $showFilmLogbook) {
@@ -332,9 +367,11 @@ struct ContentView: View {
             if manualFocus { updateDoFOverlay() }
         }
         .onChange(of: tooClose) {
+            guard !isModalOpen, frozenEV == nil else { return }
             if tooClose { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         }
         .onChange(of: advice?.label) {
+            guard !isModalOpen, frozenEV == nil else { return }
             if advice != nil { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.45) }
         }
     }
@@ -350,7 +387,7 @@ struct ContentView: View {
     }
 
     private func toggleFreeze() {
-        guard !isResuming else { return }
+        guard !isResuming, !isModalOpen else { return }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         if frozenEV == nil {
             shutterBlink()
@@ -393,6 +430,21 @@ struct ContentView: View {
             }
         } else {
             unfreeze()
+        }
+    }
+
+    private func confirmAndLogHeldFrame() {
+        guard !momentSaved else { return }
+        if let moment = capturedMoment {
+            _ = logStore.recordMoment(moment)
+        }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            momentSaved = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+            if self.frozenEV != nil && !self.isResuming {
+                self.unfreeze()
+            }
         }
     }
 
@@ -721,29 +773,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(10)
                     .allowsHitTesting(false)
-
-                // Floating iOS 27 Liquid Glass "Log Frame" Pill when HOLD is active
-                if held, let moment = capturedMoment {
-                    MinimalLogFrameButton(
-                        moment: moment,
-                        isSaved: momentSaved,
-                        onLogFrame: {
-                            _ = logStore.recordMoment(moment)
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                                momentSaved = true
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-                                if self.frozenEV != nil && !self.isResuming {
-                                    self.unfreeze()
-                                }
-                            }
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -781,55 +810,12 @@ struct ContentView: View {
                     .foregroundStyle(abs(logStore.totalEvComp) >= 0.05 ? Palette.accent : Palette.text)
                     .padding(.horizontal, 14 * k)
                     .frame(height: 62 * k)
-                    .background(Palette.panel, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
+                    .modifier(GlassCapsule())
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showEvPopover) {
-                VStack(spacing: 12) {
-                    HStack {
-                        Text("EXPOSURE COMPENSATION")
-                            .font(AppTypography.label(11, weight: .bold))
-                            .foregroundStyle(Palette.accent)
-                        Spacer()
-                        Button("Reset 0 EV") {
-                            MechanicalHaptics.tick()
-                            logStore.manualEvCompIndex = EV_COMP_STOPS.firstIndex(of: 0.0) ?? 9
-                        }
-                        .font(AppTypography.label(11, weight: .bold))
-                        .foregroundStyle(Palette.textSub)
-                    }
-
-                    if logStore.rollState.isSlideFilm {
-                        Text("Slide film is locked to 0.0 EV for highlight protection.")
-                            .font(AppTypography.label(12, weight: .medium))
-                            .foregroundStyle(Palette.slow)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(Array(EV_COMP_STOPS.enumerated()), id: \.offset) { idx, stop in
-                                    let sel = logStore.manualEvCompIndex == idx
-                                    Button {
-                                        MechanicalHaptics.tick()
-                                        logStore.manualEvCompIndex = idx
-                                    } label: {
-                                        Text(formatEvComp(stop))
-                                            .font(AppTypography.mono(11, weight: .bold))
-                                            .foregroundStyle(sel ? .black : Palette.text)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 7)
-                                            .background(sel ? Palette.accent : Color.white.opacity(0.08), in: Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(16)
-                .frame(minWidth: 280)
-                .background(Palette.panelRaised)
-                .presentationCompactAdaptation(.popover)
+                ExposureCompDialPopover(store: logStore)
+                    .presentationCompactAdaptation(.popover)
             }
 
             // Lab Scan Matcher & Gear Quick Button
@@ -893,5 +879,167 @@ struct ContentView: View {
         let reading = Exposure.result(for: t, speeds: activeShutterSpeeds)
         if reading.deviation != nil { return .bad }
         return reading.isSlow ? .slow : .good
+    }
+}
+
+// MARK: - Native iOS Exposure Compensation Dial & Stepper Popover
+
+private struct ExposureCompDialPopover: View {
+    @ObservedObject var store: FilmLogStore
+
+    private let zeroIdx = EV_COMP_STOPS.firstIndex(of: 0.0) ?? 9
+
+    var body: some View {
+        let idx = store.manualEvCompIndex.clamped(to: 0...(EV_COMP_STOPS.count - 1))
+        let manualEv = EV_COMP_STOPS[idx]
+        let totalEv = store.totalEvComp
+        let isNonZero = idx != zeroIdx
+
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("EXPOSURE BIAS")
+                    .font(AppTypography.next(size: 11, weight: .semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(Palette.dim)
+
+                Spacer()
+
+                if isNonZero {
+                    Button {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.22)) {
+                            store.manualEvCompIndex = zeroIdx
+                        }
+                    } label: {
+                        Text("Reset")
+                            .font(AppTypography.next(size: 12, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if store.rollState.isSlideFilm {
+                HStack(spacing: 10) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                    Text("Slide film locks exposure bias to 0.0 EV to protect highlights.")
+                        .font(AppTypography.next(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.textSub)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+            } else {
+                // Tactile Stepper Row (-1/3 / Readout / +1/3)
+                HStack(spacing: 16) {
+                    Button {
+                        guard idx > 0 else { return }
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.18)) {
+                            store.manualEvCompIndex = idx - 1
+                        }
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(idx > 0 ? Palette.text : Palette.faint)
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(idx <= 0)
+
+                    VStack(spacing: 2) {
+                        Text(formatEvComp(totalEv))
+                            .font(AppTypography.next(size: 28, weight: .bold).monospacedDigit())
+                            .foregroundStyle(abs(totalEv) >= 0.05 ? Palette.accent : Palette.text)
+                            .contentTransition(.numericText())
+
+                        if store.rollState.activeExpiredCompEv > 0.05 {
+                            Text("Includes +\(String(format: "%.1f", store.rollState.activeExpiredCompEv)) EV expired film comp")
+                                .font(AppTypography.next(size: 10, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+                        } else {
+                            Text("1/3-stop steps")
+                                .font(AppTypography.next(size: 11, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        guard idx < EV_COMP_STOPS.count - 1 else { return }
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.18)) {
+                            store.manualEvCompIndex = idx + 1
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(idx < EV_COMP_STOPS.count - 1 ? Palette.text : Palette.faint)
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(idx >= EV_COMP_STOPS.count - 1)
+                }
+
+                // Interactive Machined Exposure Scale (-3 .. 0 .. +3)
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    let count = EV_COMP_STOPS.count
+                    let stepW = w / CGFloat(max(count - 1, 1))
+
+                    ZStack(alignment: .topLeading) {
+                        // Tick marks
+                        HStack(spacing: 0) {
+                            ForEach(0..<count, id: \.self) { i in
+                                let isWhole = i % 3 == 0
+                                let isSelected = i == idx
+                                let isZero = i == zeroIdx
+                                VStack(spacing: 5) {
+                                    RoundedRectangle(cornerRadius: 1)
+                                        .fill(isSelected ? Palette.accent : (isZero ? Palette.text : (isWhole ? Color.white.opacity(0.55) : Color.white.opacity(0.22))))
+                                        .frame(width: isSelected ? 2.5 : (isWhole ? 1.5 : 1.0),
+                                               height: isSelected ? 18 : (isWhole ? 13 : 8))
+                                        .frame(height: 18, alignment: .bottom)
+
+                                    if isWhole {
+                                        let wholeVal = Int(EV_COMP_STOPS[i].rounded())
+                                        Text(wholeVal > 0 ? "+\(wholeVal)" : "\(wholeVal)")
+                                            .font(AppTypography.mono(size: 10, weight: isSelected ? .bold : .medium))
+                                            .foregroundStyle(isSelected ? Palette.accent : Palette.dim)
+                                    } else {
+                                        Text(" ")
+                                            .font(AppTypography.mono(size: 10, weight: .medium))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let ratio = (value.location.x / max(w, 1)).clamped(to: 0...1)
+                                let target = Int((ratio * CGFloat(count - 1)).rounded()).clamped(to: 0...(count - 1))
+                                if target != store.manualEvCompIndex {
+                                    if target == zeroIdx || target % 3 == 0 {
+                                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
+                                    } else {
+                                        UISelectionFeedbackGenerator().selectionChanged()
+                                    }
+                                    store.manualEvCompIndex = target
+                                }
+                            }
+                    )
+                }
+                .frame(height: 38)
+            }
+        }
+        .padding(16)
+        .frame(width: 286)
+        .background(Palette.panel)
     }
 }

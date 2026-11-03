@@ -20,57 +20,196 @@ struct PeakingOverlay: View {
     }
 }
 
-// MARK: - Hold button
+// MARK: - Hold button (Morphs into Confirm Log + Cancel on Hold)
 
 struct HoldControl: View {
     let frozen: Bool
+    var frameNumber: Int = 1
+    var isSaved: Bool = false
     let k: CGFloat
     let modes: [MeterMode]
     let meterIndex: Int
     let onPickMeter: (Int) -> Void
-    let action: () -> Void
+    let onHold: () -> Void
+    var onConfirmLog: () -> Void = {}
+    var onDiscardHold: () -> Void = {}
+
+    @Namespace private var morphNamespace
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            VStack(alignment: .leading, spacing: 8 * k) {
-                ForEach(modes.indices, id: \.self) { i in
-                    Button {
-                        guard i != meterIndex else { return }
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        onPickMeter(i)
-                    } label: {
-                        Text(modes[i].title)
-                            .font(AppTypography.next(size: 31 * k, weight: i == meterIndex ? .semibold : .medium))
-                            .foregroundStyle(i == meterIndex ? Palette.accent : Palette.dim)
-                            .animation(.easeOut(duration: 0.18), value: meterIndex)
-                            .frame(minWidth: 120 * k, minHeight: 44 * k, alignment: .leading)
-                            .contentShape(Rectangle())
+        ZStack {
+            if !frozen {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 8 * k) {
+                        ForEach(modes.indices, id: \.self) { i in
+                            Button {
+                                guard i != meterIndex else { return }
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                onPickMeter(i)
+                            } label: {
+                                Text(modes[i].title)
+                                    .font(AppTypography.next(size: 31 * k, weight: i == meterIndex ? .semibold : .medium))
+                                    .foregroundStyle(i == meterIndex ? Palette.accent : Palette.dim)
+                                    .animation(.easeOut(duration: 0.18), value: meterIndex)
+                                    .frame(minWidth: 120 * k, minHeight: 44 * k, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(modes[i].title + " metering")
+                            .accessibilityAddTraits(i == meterIndex ? .isSelected : [])
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(modes[i].title + " metering")
-                    .accessibilityAddTraits(i == meterIndex ? .isSelected : [])
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 17 * k)
+                    .padding(.leading, 17 * k)
 
-            Button(action: action) {
+                    Spacer(minLength: 0)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+                shutterOrMorphedActions
+            }
+            .padding(.trailing, 7 * k)
+            .padding(.leading, frozen ? 12 * k : 0)
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: frozen)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isSaved)
+    }
+
+    @ViewBuilder
+    private var shutterOrMorphedActions: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 14 * k) {
+                morphedButtonsContent(useLiquidGlass: true)
+            }
+        } else {
+            morphedButtonsContent(useLiquidGlass: false)
+        }
+    }
+
+    @ViewBuilder
+    private func morphedButtonsContent(useLiquidGlass: Bool) -> some View {
+        if frozen {
+            HStack(spacing: 14 * k) {
+                // Cancel / Discard Hold Button (Red X)
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onDiscardHold()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Palette.bad.opacity(useLiquidGlass ? 0.24 : 0.20))
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Palette.bad.opacity(0.65), lineWidth: 1.5)
+                            )
+
+                        Image(systemName: "xmark")
+                            .font(.system(size: 38 * k, weight: .bold))
+                            .foregroundStyle(Palette.bad)
+                    }
+                    .frame(width: 118 * k, height: 118 * k)
+                    .contentShape(Circle())
+                    .modifier(LiquidHoldGlassModifier(
+                        enabled: useLiquidGlass,
+                        tint: Palette.bad.opacity(0.28),
+                        id: "holdDiscard",
+                        namespace: morphNamespace
+                    ))
+                }
+                .buttonStyle(PressStyle(scale: 0.94))
+                .accessibilityLabel("Discard reading")
+
+                // Confirm & Log Frame Button (Green Plus + Checkmark)
+                Button {
+                    guard !isSaved else { return }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onConfirmLog()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: 0x070707))
+                            .overlay(Circle().strokeBorder(Palette.good.opacity(0.45), lineWidth: 1.5))
+
+                        Circle()
+                            .fill(Palette.good)
+                            .frame(width: 126 * k, height: 126 * k)
+
+                        VStack(spacing: 2 * k) {
+                            HStack(spacing: 2 * k) {
+                                if !isSaved {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 22 * k, weight: .black))
+                                }
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 34 * k, weight: .black))
+                            }
+                            .foregroundStyle(Color.black)
+
+                            Text(String(format: "#%02d", frameNumber))
+                                .font(AppTypography.mono(size: 16 * k, weight: .bold))
+                                .foregroundStyle(Color.black.opacity(0.82))
+                        }
+                    }
+                    .frame(width: 162 * k, height: 162 * k)
+                    .contentShape(Circle())
+                    .modifier(LiquidHoldGlassModifier(
+                        enabled: useLiquidGlass,
+                        tint: Palette.good.opacity(0.35),
+                        id: "holdPrimary",
+                        namespace: morphNamespace
+                    ))
+                }
+                .buttonStyle(PressStyle(scale: 0.95))
+                .accessibilityLabel("Log frame \(frameNumber)")
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else {
+            Button(action: onHold) {
                 ZStack {
                     Circle()
                         .fill(Color(hex: 0x070707))
                         .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
                     Circle()
-                        .fill(frozen ? Palette.accent : Color.white)
+                        .fill(Color.white)
                         .frame(width: 126 * k, height: 126 * k)
-                        .scaleEffect(frozen ? 0.9 : 1.0)
                 }
                 .frame(width: 175 * k, height: 175 * k)
                 .contentShape(Circle())
-                .animation(.spring(response: 0.3, dampingFraction: 0.72), value: frozen)
+                .modifier(LiquidHoldGlassModifier(
+                    enabled: useLiquidGlass,
+                    tint: nil,
+                    id: "holdPrimary",
+                    namespace: morphNamespace
+                ))
             }
             .buttonStyle(PressStyle(scale: 0.97))
-            .padding(.trailing, 7 * k)
-            .accessibilityLabel(frozen ? "Release hold" : "Hold reading")
+            .accessibilityLabel("Hold reading")
+        }
+    }
+}
+
+private struct LiquidHoldGlassModifier: ViewModifier {
+    let enabled: Bool
+    let tint: Color?
+    let id: String
+    let namespace: Namespace.ID
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), enabled {
+            if let tint {
+                content
+                    .glassEffect(.regular.tint(tint).interactive(), in: Circle())
+                    .glassEffectID(id, in: namespace)
+            } else {
+                content
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .glassEffectID(id, in: namespace)
+            }
+        } else {
+            content
         }
     }
 }

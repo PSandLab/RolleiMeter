@@ -322,13 +322,13 @@ struct ScanMatcherTabView: View {
                         .background(Palette.good.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
-                .padding(14)
+                .padding(16)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Palette.panelRaised)
+                        .fill(Palette.panel)
                         .overlay(
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .strokeBorder(Palette.border, lineWidth: 0.75)
+                                .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
                         )
                 )
 
@@ -342,22 +342,22 @@ struct ScanMatcherTabView: View {
                             .background(Palette.accent.opacity(0.14), in: Circle())
 
                         Text("No Logged Frames Yet")
-                            .font(AppTypography.label(15, weight: .bold))
+                            .font(AppTypography.next(size: 16, weight: .semibold))
                             .foregroundStyle(Palette.text)
 
-                        Text("Hold a meter reading on the main viewfinder and tap 'Log Frame' to build your roll reference strip.")
-                            .font(AppTypography.label(12, weight: .medium))
-                            .foregroundStyle(Palette.textSub)
+                        Text("Press the Hold shutter button on the main viewfinder, then tap the green checkmark to log your exposure and build your roll reference strip.")
+                            .font(AppTypography.next(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.dim)
                             .multilineTextAlignment(.center)
                     }
                     .padding(24)
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Palette.panelRaised)
+                            .fill(Palette.panel)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .strokeBorder(Palette.border, lineWidth: 0.75)
+                                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
                             )
                     )
                 } else {
@@ -668,13 +668,13 @@ private struct ScanMatcherRowCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
-        .padding(12)
+        .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Palette.panelRaised)
+                .fill(Palette.panel)
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(isMatched ? Palette.good.opacity(0.45) : Palette.border, lineWidth: 0.75)
+                        .strokeBorder(isMatched ? Palette.good.opacity(0.45) : Color.white.opacity(0.09), lineWidth: 0.75)
                 )
         )
     }

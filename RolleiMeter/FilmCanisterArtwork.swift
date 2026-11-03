@@ -1,145 +1,5 @@
 import SwiftUI
 
-struct FilmBrandTheme {
-    let primary: Color
-    let secondary: Color
-    let badgeText: Color
-    let tag: String
-    let subtitle: String
-}
-
-func brandThemeFor(_ brand: String) -> FilmBrandTheme {
-    let b = brand.lowercased()
-    if b.contains("kodak") {
-        return FilmBrandTheme(
-            primary: Color(hex: 0xFFB800),
-            secondary: Color(hex: 0xE31B23),
-            badgeText: Color(hex: 0x1A1100),
-            tag: "KODAK",
-            subtitle: "ROCHESTER · PROFESSIONAL & CONSUMER"
-        )
-    } else if b.contains("fuji") {
-        return FilmBrandTheme(
-            primary: Color(hex: 0x009B62),
-            secondary: Color(hex: 0xE60039),
-            badgeText: .white,
-            tag: "FUJIFILM",
-            subtitle: "TOKYO · SUPERIA · VELVIA · ACROS"
-        )
-    } else if b.contains("ilford") {
-        return FilmBrandTheme(
-            primary: Color(hex: 0xE2E8F0),
-            secondary: Color(hex: 0xF97316),
-            badgeText: Color(hex: 0x0F172A),
-            tag: "ILFORD",
-            subtitle: "MOBBERLEY · BLACK & WHITE"
-        )
-    } else if b.contains("cinestill") {
-        return FilmBrandTheme(
-            primary: Color(hex: 0xEF4444),
-            secondary: Color(hex: 0x06B6D4),
-            badgeText: .white,
-            tag: "CINESTILL",
-            subtitle: "MOTION PICTURE · TUNGSTEN & DAYLIGHT"
-        )
-    } else {
-        return FilmBrandTheme(
-            primary: Color(hex: 0xA855F7),
-            secondary: Color(hex: 0xF59E0B),
-            badgeText: .white,
-            tag: "BOUTIQUE & CLASSIC",
-            subtitle: "FOMA · KENTMERE · ROLLEI · LOMO · HARMAN"
-        )
-    }
-}
-
-// MARK: - Brand Header Banner
-
-struct BrandHeaderBanner: View {
-    let brand: String
-    let stockCount: Int
-
-    var body: some View {
-        let theme = brandThemeFor(brand)
-        ZStack {
-            Canvas { ctx, size in
-                let w = size.width
-                let h = size.height
-                ctx.fill(
-                    Path(CGRect(origin: .zero, size: size)),
-                    with: .linearGradient(
-                        Gradient(colors: [
-                            theme.primary.opacity(0.28),
-                            theme.secondary.opacity(0.16),
-                            Color(hex: 0x161618)
-                        ]),
-                        startPoint: .zero,
-                        endPoint: CGPoint(x: w, y: h)
-                    )
-                )
-
-                var stripe1 = Path()
-                stripe1.move(to: CGPoint(x: w * 0.66, y: 0))
-                stripe1.addLine(to: CGPoint(x: w * 0.76, y: 0))
-                stripe1.addLine(to: CGPoint(x: w * 0.64, y: h))
-                stripe1.addLine(to: CGPoint(x: w * 0.54, y: h))
-                stripe1.closeSubpath()
-                ctx.fill(stripe1, with: .color(theme.primary.opacity(0.20)))
-
-                var stripe2 = Path()
-                stripe2.move(to: CGPoint(x: w * 0.78, y: 0))
-                stripe2.addLine(to: CGPoint(x: w * 0.85, y: 0))
-                stripe2.addLine(to: CGPoint(x: w * 0.73, y: h))
-                stripe2.addLine(to: CGPoint(x: w * 0.66, y: h))
-                stripe2.closeSubpath()
-                ctx.fill(stripe2, with: .color(theme.secondary.opacity(0.22)))
-
-                // 35mm sprocket holes along top edge
-                let holeW: CGFloat = 6
-                let holeH: CGFloat = 3.5
-                let step: CGFloat = 13
-                var x: CGFloat = 12
-                while x < w - 12 {
-                    let r = CGRect(x: x, y: 3.5, width: holeW, height: holeH)
-                    ctx.fill(Path(roundedRect: r, cornerRadius: 1), with: .color(.white.opacity(0.12)))
-                    x += step
-                }
-            }
-
-            HStack(spacing: 10) {
-                Text(theme.tag)
-                    .font(AppTypography.mono(11, weight: .black))
-                    .foregroundStyle(theme.badgeText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(theme.primary, in: Capsule())
-
-                Text(theme.subtitle)
-                    .font(AppTypography.label(10, weight: .semibold))
-                    .foregroundStyle(Palette.textSub)
-                    .lineLimit(1)
-
-                Spacer(minLength: 4)
-
-                Text("\(stockCount)")
-                    .font(AppTypography.mono(11, weight: .bold))
-                    .foregroundStyle(Palette.text)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.10), in: Capsule())
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 5)
-        }
-        .frame(height: 44)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.75)
-        )
-    }
-}
-
 // MARK: - 35mm Film Canister Procedural Artwork
 
 struct FilmCanisterArtwork: View {
@@ -148,6 +8,7 @@ struct FilmCanisterArtwork: View {
     let category: String
     let iso: Int
     var showLeader: Bool = false
+    var leaderExtension: CGFloat = 1.0
     var width: CGFloat = 46
     var height: CGFloat = 58
 
@@ -218,14 +79,16 @@ struct FilmCanisterArtwork: View {
                 let bodyHeight = bodyBottom - bodyTop
 
                 // 1. Protruding 35mm film leader strip + sprockets
-                if showLeader {
+                if showLeader && leaderExtension > 0.02 {
+                    let ext = min(max(leaderExtension, 0), 1)
+                    let leaderMaxTip = canRight + (w * 0.99 - canRight) * ext
                     let leaderTop = bodyTop + bodyHeight * 0.16
                     let leaderH = bodyHeight * 0.68
                     var leader = Path()
                     leader.move(to: CGPoint(x: canRight - 2, y: leaderTop))
-                    leader.addLine(to: CGPoint(x: w * 0.96, y: leaderTop + leaderH * 0.08))
-                    leader.addLine(to: CGPoint(x: w * 0.99, y: leaderTop + leaderH * 0.42))
-                    leader.addLine(to: CGPoint(x: w * 0.91, y: leaderTop + leaderH * 0.92))
+                    leader.addLine(to: CGPoint(x: canRight + (w * 0.96 - canRight) * ext, y: leaderTop + leaderH * 0.08))
+                    leader.addLine(to: CGPoint(x: leaderMaxTip, y: leaderTop + leaderH * 0.42))
+                    leader.addLine(to: CGPoint(x: canRight + (w * 0.91 - canRight) * ext, y: leaderTop + leaderH * 0.92))
                     leader.addLine(to: CGPoint(x: canRight - 2, y: leaderTop + leaderH))
                     leader.closeSubpath()
                     ctx.fill(
@@ -236,8 +99,10 @@ struct FilmCanisterArtwork: View {
                             endPoint: CGPoint(x: w, y: 0)
                         )
                     )
-                    for i in 0..<3 {
+                    let sprocketCount = Int((3.0 * ext).rounded(.up))
+                    for i in 0..<sprocketCount {
                         let hx = canRight + 3 + CGFloat(i) * (w * 0.068)
+                        guard hx + w * 0.042 < leaderMaxTip else { continue }
                         let topHole = CGRect(x: hx, y: leaderTop + 2.5, width: w * 0.042, height: h * 0.04)
                         let botHole = CGRect(x: hx, y: leaderTop + leaderH - h * 0.04 - 2.5, width: w * 0.042, height: h * 0.04)
                         ctx.fill(Path(roundedRect: topHole, cornerRadius: 0.8), with: .color(Color(hex: 0xD4D4D8)))

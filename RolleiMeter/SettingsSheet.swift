@@ -9,6 +9,7 @@ struct SettingsSheet: View {
     @Binding var calibration: Double
     @Binding var armOffset: Double
     let rawDistance: () -> Double?
+    var onNeedSensor: ((Bool) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var armStage = 0
@@ -76,6 +77,7 @@ struct SettingsSheet: View {
         .presentationDragIndicator(.visible)
         .onDisappear {
             armTask?.cancel()
+            if armStage != 0 { onNeedSensor?(false) }
             armStage = 0
             armCountdown = 4
         }
@@ -94,19 +96,25 @@ struct SettingsSheet: View {
     }
 
     private func startArmCalibration() {
-        guard let first = rawDistance() else {
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-            return
-        }
+        onNeedSensor?(true)
         armStage = 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         armTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard let first = rawDistance() else {
+                onNeedSensor?(false)
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                armStage = 0
+                armCountdown = 4
+                return
+            }
             for remaining in stride(from: 4, through: 1, by: -1) {
                 if Task.isCancelled { return }
                 armCountdown = remaining
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
             defer {
+                onNeedSensor?(false)
                 armStage = 0
                 armCountdown = 4
             }

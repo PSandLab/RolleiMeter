@@ -1,153 +1,23 @@
 import SwiftUI
+import UIKit
 
-// MARK: - Hold to Mount Gear Button (Liquid Wave + Bayonet & 6-Blade Iris)
+private let MAJOR_CAMERA_BRAND_ORDER: [String] = [
+    "Leica", "Nikon", "Canon", "Pentax", "Olympus",
+    "Minolta", "Contax", "Fujifilm", "Hasselblad", "Mamiya",
+    "Rollei", "Yashica", "Voigtländer", "Ricoh", "Konica"
+]
 
-struct HoldToMountGearButton: View {
-    let label: String
-    var holdDuration: Double = 0.72
-    let onMounted: () -> Void
+private let OTHER_BRANDS_GROUP_TITLE = "Other & Boutique Classics"
 
-    @State private var isPressing = false
-    @State private var progress: CGFloat = 0
-    @State private var wavePhase: CGFloat = 0
-    @State private var holdTask: Task<Void, Never>?
-
-    var body: some View {
-        let scale: CGFloat = isPressing ? (0.97 + 0.05 * progress) : 1.0
-
-        ZStack {
-            Canvas { ctx, size in
-                let w = size.width
-                let h = size.height
-                let rect = CGRect(origin: .zero, size: size)
-                let clipPath = Path(roundedRect: rect, cornerRadius: h / 2)
-                ctx.fill(clipPath, with: .color(Palette.accent.opacity(0.20)))
-
-                if progress > 0.001 {
-                    let fillX = w * progress
-                    let amp: CGFloat = (progress < 0.98) ? (4.5 * sin(progress * .pi) + 2.0) : 0.0
-                    var wave = Path()
-                    wave.move(to: .zero)
-                    wave.addLine(to: CGPoint(x: fillX, y: 0))
-                    let steps = 16
-                    for s in 1...steps {
-                        let frac = CGFloat(s) / CGFloat(steps)
-                        let y = h * frac
-                        let waveOffset = sin(frac * .pi * 2.2 + wavePhase) * amp
-                        wave.addLine(to: CGPoint(x: fillX + waveOffset, y: y))
-                    }
-                    wave.addLine(to: CGPoint(x: 0, y: h))
-                    wave.closeSubpath()
-
-                    var clipped = ctx
-                    clipped.clip(to: clipPath)
-                    clipped.fill(wave, with: .color(Palette.accent))
-                }
-
-                ctx.stroke(clipPath, with: .color(Palette.accent.opacity(0.55)), lineWidth: 1)
-            }
-
-            HStack(spacing: 10) {
-                // Rotating Bayonet + 6-Blade Iris
-                Canvas { ctx, s in
-                    let r = min(s.width, s.height) / 2
-                    let c = CGPoint(x: s.width / 2, y: s.height / 2)
-                    let fg = progress > 0.45 ? Color.black : Palette.accent
-                    ctx.stroke(
-                        Path(ellipseIn: CGRect(x: c.x - r * 0.85, y: c.y - r * 0.85, width: r * 1.7, height: r * 1.7)),
-                        with: .color(fg),
-                        lineWidth: 1.6
-                    )
-                    let rot = Double(progress) * 90.0
-                    for lug in 0..<3 {
-                        let startDeg = Double(lug) * 120.0 + rot
-                        var arc = Path()
-                        arc.addArc(center: c, radius: r * 0.64, startAngle: .degrees(startDeg), endAngle: .degrees(startDeg + 42), clockwise: false)
-                        ctx.stroke(arc, with: .color(fg), style: StrokeStyle(lineWidth: 2.0, lineCap: .round))
-                    }
-                    let irisR = max(2.0, r * (0.42 - 0.22 * progress))
-                    var hex = Path()
-                    for b in 0..<6 {
-                        let rad = (Double(b) * 60.0 + rot * 0.5) * .pi / 180.0
-                        let pt = CGPoint(x: c.x + CGFloat(cos(rad)) * irisR, y: c.y + CGFloat(sin(rad)) * irisR)
-                        if b == 0 { hex.move(to: pt) } else { hex.addLine(to: pt) }
-                    }
-                    hex.closeSubpath()
-                    ctx.stroke(hex, with: .color(fg.opacity(0.85)), lineWidth: 1.2)
-                }
-                .frame(width: 20, height: 20)
-
-                Text(isPressing ? "MOUNTING BAYONET… \(Int((progress * 100).rounded()))%" : label)
-                    .font(AppTypography.label(13, weight: .bold))
-                    .foregroundStyle(progress > 0.5 ? Color.black : Palette.text)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 16)
-        }
-        .frame(height: 46)
-        .scaleEffect(scale)
-        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isPressing)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !isPressing else { return }
-                    startHold()
-                }
-                .onEnded { _ in
-                    cancelHold()
-                }
-        )
-    }
-
-    private func startHold() {
-        isPressing = true
-        MechanicalHaptics.click()
-        holdTask?.cancel()
-        holdTask = Task { @MainActor in
-            let start = Date()
-            var lastBucket = -1
-            while !Task.isCancelled {
-                let elapsed = Date().timeIntervalSince(start)
-                let p = min(1.0, max(0.0, elapsed / holdDuration))
-                progress = CGFloat(p)
-                wavePhase += 0.28
-                let bucket = Int(p * 5)
-                if bucket > lastBucket && bucket < 5 {
-                    lastBucket = bucket
-                    MechanicalHaptics.tick()
-                }
-                if p >= 1.0 {
-                    MechanicalHaptics.heavy()
-                    MechanicalHaptics.confirm()
-                    isPressing = false
-                    progress = 0
-                    onMounted()
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 16_000_000)
-            }
-        }
-    }
-
-    private func cancelHold() {
-        holdTask?.cancel()
-        holdTask = nil
-        isPressing = false
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-            progress = 0
-        }
-    }
-}
-
-// MARK: - Gear Setup Section (Collapsible Card inside Roll & Gear Tab)
+// MARK: - Gear Setup Section (Clean iOS 27 Collapsible Card)
 
 struct GearSetupSection: View {
     @ObservedObject var store: FilmLogStore
     let searchQuery: String
 
     @State private var isExpanded: Bool = false
-    @State private var gearSubTab: Int = 0 // 0 = Bodies, 1 = Lenses, 2 = + Custom
-    @State private var expandedCameraBrands: Set<String> = []
+    @State private var gearSubTab: Int = 0 // 0 = Cameras, 1 = Lenses, 2 = Custom
+    @State private var expandedBrand: String? = nil
     @State private var expandedCameraId: String? = nil
     @State private var inlineIncludeAdapter: Bool = false
     @State private var inlineAdapterMountFilter: String = "All"
@@ -170,63 +40,82 @@ struct GearSetupSection: View {
                 .map(\.0)
         }()
 
-        let camerasByBrand: [(String, [CameraGearSpec])] = {
-            let grouped = Dictionary(grouping: filteredCameras, by: \.brand)
-            return grouped.keys.sorted().map { brand in
-                (brand, grouped[brand] ?? [])
+        let camerasByGroup: [(String, [CameraGearSpec])] = {
+            let majorSet = Set(MAJOR_CAMERA_BRAND_ORDER)
+            var groups: [String: [CameraGearSpec]] = [:]
+            var otherList: [CameraGearSpec] = []
+
+            for cam in filteredCameras {
+                if majorSet.contains(cam.brand) || cam.isCustom {
+                    groups[cam.brand, default: []].append(cam)
+                } else {
+                    otherList.append(cam)
+                }
             }
+
+            var result: [(String, [CameraGearSpec])] = []
+            // Custom brands first if any
+            for brand in groups.keys.sorted() where !majorSet.contains(brand) {
+                if let list = groups[brand], !list.isEmpty {
+                    result.append((brand, list))
+                }
+            }
+            // Major brands in curated order
+            for brand in MAJOR_CAMERA_BRAND_ORDER {
+                if let list = groups[brand], !list.isEmpty {
+                    result.append((brand, list))
+                }
+            }
+            // Consolidated Other & Boutique Classics at the bottom
+            if !otherList.isEmpty {
+                let sortedOthers = otherList.sorted {
+                    "\($0.brand) \($0.model)" < "\($1.brand) \($1.model)"
+                }
+                result.append((OTHER_BRANDS_GROUP_TITLE, sortedOthers))
+            }
+            return result
         }()
 
-        VStack(alignment: .leading, spacing: 12) {
-            // Header Row
+        VStack(alignment: .leading, spacing: 14) {
+            // Main Card Header
             Button {
-                MechanicalHaptics.tick()
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                UISelectionFeedbackGenerator().selectionChanged()
+                withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
                     isExpanded.toggle()
+                    if !isExpanded {
+                        expandedCameraId = nil
+                    }
                 }
             } label: {
                 HStack(spacing: 12) {
-                    if activeGear.hasCamera {
-                        let activeBrand = allCameras.first(where: { $0.id == activeGear.cameraId })?.brand
-                            ?? activeGear.cameraName.components(separatedBy: " ").first
-                            ?? ""
-                        CameraSilhouetteArtwork(
-                            model: activeGear.cameraName,
-                            mount: activeGear.mount,
-                            isFixed: activeGear.isFixedLens,
-                            brand: activeBrand,
-                            size: 42
-                        )
-                    } else {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Palette.panelRaised)
-                                .frame(width: 42, height: 42)
-                            Image(systemName: "camera.aperture")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(Palette.accent)
-                        }
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(activeGear.hasCamera ? Palette.accent.opacity(0.16) : Color.white.opacity(0.06))
+                            .frame(width: 42, height: 42)
+                        Image(systemName: "camera.aperture")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(activeGear.hasCamera ? Palette.accent : Palette.dim)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text("CAMERA & LENS RIG")
-                                .font(AppTypography.label(10, weight: .bold))
-                                .tracking(0.8)
-                                .foregroundStyle(Palette.accent)
+                            Text("CAMERA & LENS")
+                                .font(AppTypography.next(size: 11, weight: .semibold))
+                                .tracking(1.2)
+                                .foregroundStyle(Palette.dim)
 
                             if activeGear.hasCamera {
                                 Text(activeGear.isFixedLens ? "FIXED" : formatMountBadge(activeGear.mount))
-                                    .font(AppTypography.mono(9.5, weight: .bold))
-                                    .foregroundStyle(.black)
+                                    .font(AppTypography.mono(size: 10, weight: .semibold))
+                                    .foregroundStyle(Palette.accent)
                                     .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Palette.accent, in: Capsule())
+                                    .padding(.vertical, 1.5)
+                                    .background(Palette.accent.opacity(0.14), in: Capsule())
                             }
                         }
 
-                        Text(activeGear.hasCamera ? activeGear.cameraName : "All Stops Unlocked (Tap to select gear)")
-                            .font(AppTypography.label(14, weight: .bold))
+                        Text(activeGear.hasCamera ? activeGear.cameraName : "All Shutter & Aperture Stops")
+                            .font(AppTypography.next(size: 16, weight: .semibold))
                             .foregroundStyle(Palette.text)
                             .lineLimit(1)
 
@@ -234,102 +123,89 @@ struct GearSetupSection: View {
                             let shutterRange = "\(formatShutterStopLabel(activeGear.maxShutter))–\(formatShutterStopLabel(activeGear.minShutter))"
                             let lensSummary = activeGear.hasLens
                                 ? "\(activeGear.lensName) (\(formatApertureRange(activeGear.minAperture, activeGear.maxAperture)))"
-                                : "No lens mounted"
-                            Text("\(shutterRange) · \(lensSummary)")
-                                .font(AppTypography.label(11, weight: .medium))
-                                .foregroundStyle(Palette.textSub)
+                                : "Body only"
+                            Text("\(shutterRange)  \u{00B7}  \(lensSummary)")
+                                .font(AppTypography.next(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+                                .lineLimit(1)
+                        } else {
+                            Text("Optional: clamp meter to a specific camera & lens")
+                                .font(AppTypography.next(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.dim)
                                 .lineLimit(1)
                         }
                     }
 
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 8)
 
-                    HStack(spacing: 4) {
-                        Text(isExpanded ? "Hide" : (activeGear.hasCamera ? "Change" : "Select"))
-                            .font(AppTypography.label(11, weight: .bold))
+                    HStack(spacing: 5) {
+                        Text(isExpanded ? "Done" : (activeGear.hasCamera ? "Change" : "Choose"))
+                            .font(AppTypography.next(size: 13, weight: .semibold))
                         Image(systemName: "chevron.down")
                             .font(.system(size: 11, weight: .bold))
                             .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     }
                     .foregroundStyle(Palette.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Palette.accent.opacity(0.14), in: Capsule())
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Palette.accent.opacity(0.12), in: Capsule())
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if isExpanded {
-                Divider().overlay(Palette.border)
+                Divider().overlay(Color.white.opacity(0.08))
 
-                // Active Gear Summary + Unmount button if mounted
                 if activeGear.hasCamera {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Mounted: \(activeGear.cameraName)")
-                                .font(AppTypography.label(12, weight: .bold))
+                            Text(activeGear.cameraName)
+                                .font(AppTypography.next(size: 14, weight: .semibold))
                                 .foregroundStyle(Palette.text)
                             if activeGear.hasLens {
-                                Text("Lens: \(activeGear.lensName)")
-                                    .font(AppTypography.label(11, weight: .medium))
-                                    .foregroundStyle(Palette.textSub)
+                                Text(activeGear.lensName)
+                                    .font(AppTypography.next(size: 12, weight: .medium))
+                                    .foregroundStyle(Palette.dim)
                             }
                         }
                         Spacer()
                         Button {
-                            MechanicalHaptics.click()
-                            store.activeGear = .unloaded
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(.snappy(duration: 0.26)) {
+                                store.activeGear = .unloaded
+                            }
                         } label: {
-                            Label("Clear Rig", systemImage: "xmark.circle.fill")
-                                .font(AppTypography.label(11, weight: .bold))
+                            Text("Remove Rig")
+                                .font(AppTypography.next(size: 12, weight: .semibold))
                                 .foregroundStyle(Palette.bad)
-                                .padding(.horizontal, 10)
+                                .padding(.horizontal, 11)
                                 .padding(.vertical, 6)
                                 .background(Palette.bad.opacity(0.14), in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(10)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(12)
+                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
-                // Sub-tabs: Bodies / Lenses / + Custom
-                HStack(spacing: 6) {
-                    ForEach([(0, "Bodies (\(filteredCameras.count))"), (1, "Lenses (\(allLenses.count))"), (2, "+ Custom")], id: \.0) { idx, title in
-                        let selected = gearSubTab == idx
-                        Button {
-                            MechanicalHaptics.tick()
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                                gearSubTab = idx
-                            }
-                        } label: {
-                            Text(title)
-                                .font(AppTypography.label(12, weight: .bold))
-                                .foregroundStyle(selected ? .black : Palette.textSub)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(
-                                    selected ? Palette.accent : Color.white.opacity(0.06),
-                                    in: Capsule()
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
+                // Native iOS Segmented Picker for Bodies / Lenses / Custom
+                Picker("Gear Category", selection: $gearSubTab.animation(.snappy(duration: 0.25))) {
+                    Text("Bodies").tag(0)
+                    Text("Lenses").tag(1)
+                    Text("Custom").tag(2)
                 }
+                .pickerStyle(.segmented)
 
                 if gearSubTab == 0 {
-                    // Camera Brand Groups
                     VStack(spacing: 8) {
-                        ForEach(camerasByBrand, id: \.0) { brand, brandCameras in
-                            let isBrandExpanded = !searchQuery.isEmpty
-                                || expandedCameraBrands.contains(brand)
-                                || brandCameras.contains(where: { $0.id == activeGear.cameraId })
+                        ForEach(camerasByGroup, id: \.0) { groupTitle, groupCameras in
+                            let isGroupOpen = !searchQuery.isEmpty || expandedBrand == groupTitle
 
-                            CameraBrandAccordion(
-                                brand: brand,
-                                cameras: brandCameras,
-                                isExpanded: isBrandExpanded,
+                            CameraBrandGroupView(
+                                groupTitle: groupTitle,
+                                cameras: groupCameras,
+                                isExpanded: isGroupOpen,
                                 activeGear: activeGear,
                                 expandedCameraId: $expandedCameraId,
                                 allLensEntries: allLenses,
@@ -338,17 +214,23 @@ struct GearSetupSection: View {
                                 inlineFocalCategory: $inlineFocalCategory,
                                 inlineLensSearchQuery: $inlineLensSearchQuery,
                                 onToggleBrand: {
-                                    MechanicalHaptics.tick()
-                                    if expandedCameraBrands.contains(brand) {
-                                        expandedCameraBrands.remove(brand)
-                                    } else {
-                                        expandedCameraBrands.insert(brand)
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
+                                        if expandedBrand == groupTitle {
+                                            expandedBrand = nil
+                                            expandedCameraId = nil
+                                        } else {
+                                            expandedBrand = groupTitle
+                                            expandedCameraId = nil
+                                        }
                                     }
                                 },
                                 onMountProfile: { profile in
-                                    store.activeGear = profile
-                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                    withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                        store.activeGear = profile
                                         expandedCameraId = nil
+                                        expandedBrand = nil
                                         isExpanded = false
                                     }
                                 }
@@ -356,45 +238,46 @@ struct GearSetupSection: View {
                         }
                     }
                 } else if gearSubTab == 1 {
-                    // Lenses Tab
                     StandaloneLensBrowser(
                         activeGear: activeGear,
                         allLensEntries: allLenses,
                         searchQuery: searchQuery,
                         focalCategory: $lensFocalCategory,
                         onMountLens: { lens in
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
                             var updated = activeGear
                             updated.lensId = lens.id
                             updated.lensName = lens.model
                             updated.minAperture = lens.minAperture
                             updated.maxAperture = lens.maxAperture
-                            store.activeGear = updated
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                            withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                store.activeGear = updated
                                 isExpanded = false
                             }
                         }
                     )
                 } else {
-                    // Custom Gear Builder
                     CustomGearBuilderView(
                         initialSearchText: searchQuery,
                         onCreatedCamera: { cam, profile in
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
                             store.addCustomCamera(cam)
-                            store.activeGear = profile
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                            withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                store.activeGear = profile
                                 gearSubTab = 0
                                 isExpanded = false
                             }
                         },
                         onCreatedLens: { lens in
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
                             store.addCustomLens(lens)
                             var updated = store.activeGear
                             updated.lensId = lens.id
                             updated.lensName = lens.model
                             updated.minAperture = lens.minAperture
                             updated.maxAperture = lens.maxAperture
-                            store.activeGear = updated
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                            withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                store.activeGear = updated
                                 gearSubTab = 0
                                 isExpanded = false
                             }
@@ -403,22 +286,22 @@ struct GearSetupSection: View {
                 }
             }
         }
-        .padding(14)
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Palette.panelRaised)
+                .fill(Palette.panel)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.75)
+                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
                 )
         )
     }
 }
 
-// MARK: - Camera Brand Accordion & Inline Setup
+// MARK: - Camera Brand Accordion (Clean Typography, Single-Open Smooth iOS Disclosure)
 
-private struct CameraBrandAccordion: View {
-    let brand: String
+private struct CameraBrandGroupView: View {
+    let groupTitle: String
     let cameras: [CameraGearSpec]
     let isExpanded: Bool
     let activeGear: ActiveGearProfile
@@ -433,56 +316,68 @@ private struct CameraBrandAccordion: View {
 
     var body: some View {
         let hasActiveCam = cameras.contains(where: { $0.id == activeGear.cameraId })
-        VStack(spacing: 6) {
-            Button(action: onToggleBrand) {
-                HStack(spacing: 10) {
-                    CameraBrandLogo(brand: brand, size: 32)
+        let isOtherGroup = groupTitle == OTHER_BRANDS_GROUP_TITLE
 
-                    Text(brand)
-                        .font(AppTypography.label(14, weight: .bold))
+        VStack(spacing: 0) {
+            Button(action: onToggleBrand) {
+                HStack(spacing: 12) {
+                    if !isOtherGroup {
+                        CameraBrandLogo(brand: groupTitle, size: 30)
+                    } else {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.white.opacity(0.08))
+                                .frame(width: 30, height: 30)
+                            Image(systemName: "camera.on.rectangle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Palette.dim)
+                        }
+                    }
+
+                    Text(groupTitle)
+                        .font(AppTypography.next(size: 15, weight: .semibold))
                         .foregroundStyle(Palette.text)
 
                     if hasActiveCam {
-                        Text("MOUNTED")
-                            .font(AppTypography.mono(9, weight: .bold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Palette.accent, in: Capsule())
+                        Circle()
+                            .fill(Palette.accent)
+                            .frame(width: 6, height: 6)
                     }
 
                     Spacer()
 
                     Text("\(cameras.count)")
-                        .font(AppTypography.mono(11, weight: .bold))
-                        .foregroundStyle(Palette.textSub)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.06), in: Capsule())
+                        .font(AppTypography.mono(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.dim)
 
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Palette.textSub)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.dim)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(hasActiveCam ? Palette.accent.opacity(0.12) : Color.white.opacity(0.04))
-                )
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if isExpanded {
-                VStack(spacing: 6) {
+                Divider()
+                    .overlay(Color.white.opacity(0.07))
+                    .padding(.horizontal, 12)
+
+                VStack(spacing: 4) {
                     ForEach(cameras) { cam in
                         let isMounted = cam.id == activeGear.cameraId
                         let isCardOpen = expandedCameraId == cam.id
+                        let displayTitle = isOtherGroup && !cam.model.lowercased().hasPrefix(cam.brand.lowercased())
+                            ? "\(cam.brand) \(cam.model)"
+                            : cam.model
 
-                        VStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
                             Button {
-                                MechanicalHaptics.tick()
-                                withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                withAnimation(.snappy(duration: 0.26, extraBounce: 0.0)) {
                                     expandedCameraId = isCardOpen ? nil : cam.id
                                     inlineIncludeAdapter = false
                                     inlineAdapterMountFilter = "All"
@@ -491,45 +386,39 @@ private struct CameraBrandAccordion: View {
                                 }
                             } label: {
                                 HStack(spacing: 10) {
-                                    CameraSilhouetteArtwork(
-                                        model: cam.model,
-                                        mount: cam.mount,
-                                        isFixed: cam.isFixed,
-                                        brand: cam.brand,
-                                        size: 34
-                                    )
-
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(cam.model)
-                                            .font(AppTypography.label(13, weight: .bold))
+                                        Text(displayTitle)
+                                            .font(AppTypography.next(size: 15, weight: .semibold))
                                             .foregroundStyle(isMounted ? Palette.accent : Palette.text)
                                             .lineLimit(1)
 
                                         let shutterText = "\(formatShutterStopLabel(cam.maxShutter))–\(formatShutterStopLabel(cam.minShutter))"
                                         let subText = cam.isFixed
-                                            ? "\(shutterText) · \(cam.fixedLensName)"
-                                            : "\(shutterText) · \(formatMountBadge(cam.mount))"
+                                            ? "\(shutterText)  \u{00B7}  \(cam.fixedLensName)"
+                                            : "\(shutterText)  \u{00B7}  \(formatMountBadge(cam.mount)) mount"
                                         Text(subText)
-                                            .font(AppTypography.label(11, weight: .medium))
-                                            .foregroundStyle(Palette.textSub)
+                                            .font(AppTypography.next(size: 12, weight: .medium))
+                                            .foregroundStyle(Palette.dim)
                                             .lineLimit(1)
                                     }
 
-                                    Spacer()
+                                    Spacer(minLength: 8)
 
                                     if isMounted {
                                         Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 16, weight: .semibold))
                                             .foregroundStyle(Palette.accent)
                                     } else {
                                         Text(cam.isFixed ? "Fixed" : formatMountBadge(cam.mount))
-                                            .font(AppTypography.mono(10, weight: .bold))
-                                            .foregroundStyle(Palette.textSub)
-                                            .padding(.horizontal, 7)
+                                            .font(AppTypography.mono(size: 11, weight: .medium))
+                                            .foregroundStyle(Palette.dim)
+                                            .padding(.horizontal, 8)
                                             .padding(.vertical, 3)
                                             .background(Color.white.opacity(0.06), in: Capsule())
                                     }
                                 }
-                                .padding(10)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -545,25 +434,32 @@ private struct CameraBrandAccordion: View {
                                     lensSearchQuery: $inlineLensSearchQuery,
                                     onMountProfile: onMountProfile
                                 )
-                                .padding(.horizontal, 10)
-                                .padding(.bottom, 10)
+                                .padding(.horizontal, 12)
+                                .padding(.bottom, 12)
                             }
                         }
                         .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(isMounted ? Palette.accent.opacity(0.10) : Color.black.opacity(0.28))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .strokeBorder(isMounted || isCardOpen ? Palette.accent.opacity(0.55) : Color.white.opacity(0.06), lineWidth: 1)
-                                )
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(isCardOpen ? Color.white.opacity(0.05) : (isMounted ? Palette.accent.opacity(0.08) : Color.clear))
                         )
                     }
                 }
-                .padding(.leading, 8)
+                .padding(8)
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.035))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(hasActiveCam ? Palette.accent.opacity(0.35) : Color.white.opacity(0.06), lineWidth: 0.75)
+                )
+        )
+        .clipped()
     }
 }
+
+// MARK: - Inline Camera & Lens Pairing Panel
 
 private struct CameraInlineSetupPanel: View {
     let camera: CameraGearSpec
@@ -579,66 +475,72 @@ private struct CameraInlineSetupPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Divider().overlay(Palette.border)
+            Divider().overlay(Color.white.opacity(0.08))
 
             if camera.isFixed {
-                HStack(spacing: 10) {
-                    OpticalLensApertureIcon(
-                        minAperture: camera.fixedMinAperture,
-                        brand: camera.brand,
-                        isSelected: true,
-                        size: 36
-                    )
+                HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(camera.fixedLensName)
-                            .font(AppTypography.label(13, weight: .bold))
+                            .font(AppTypography.next(size: 13, weight: .semibold))
                             .foregroundStyle(Palette.text)
-                        Text("Built-in Optic · \(formatApertureRange(camera.fixedMinAperture, camera.fixedMaxAperture))")
-                            .font(AppTypography.label(11, weight: .medium))
-                            .foregroundStyle(Palette.textSub)
+                        Text("Built-in optic  \u{00B7}  \(formatApertureRange(camera.fixedMinAperture, camera.fixedMaxAperture))")
+                            .font(AppTypography.next(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.dim)
                     }
                     Spacer()
-                }
-                .padding(8)
-                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                HoldToMountGearButton(label: "Hold to Mount \(camera.model)") {
-                    onMountProfile(
-                        ActiveGearProfile(
-                            cameraId: camera.id,
-                            cameraName: camera.model,
-                            mount: "Fixed",
-                            isFixedLens: true,
-                            minShutter: camera.minShutter,
-                            maxShutter: camera.maxShutter,
-                            lensId: "\(camera.id)_fixed",
-                            lensName: camera.fixedLensName,
-                            minAperture: camera.fixedMinAperture,
-                            maxAperture: camera.fixedMaxAperture
+                    Button {
+                        onMountProfile(
+                            ActiveGearProfile(
+                                cameraId: camera.id,
+                                cameraName: camera.model,
+                                mount: "Fixed",
+                                isFixedLens: true,
+                                minShutter: camera.minShutter,
+                                maxShutter: camera.maxShutter,
+                                lensId: "\(camera.id)_fixed",
+                                lensName: camera.fixedLensName,
+                                minAperture: camera.fixedMinAperture,
+                                maxAperture: camera.fixedMaxAperture
+                            )
                         )
-                    )
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13, weight: .bold))
+                            Text("Mount Camera")
+                                .font(AppTypography.next(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Palette.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
+                .padding(.top, 4)
             } else {
-                // Interchangeable-lens camera setup
                 HStack {
-                    Text("PAIR \(camera.mount.uppercased()) LENS")
-                        .font(AppTypography.label(10, weight: .bold))
-                        .foregroundStyle(Palette.accent)
+                    Text("SELECT \(camera.mount.uppercased()) LENS")
+                        .font(AppTypography.next(size: 11, weight: .semibold))
+                        .tracking(1.0)
+                        .foregroundStyle(Palette.dim)
                     Spacer()
                     Button {
-                        MechanicalHaptics.tick()
-                        includeAdapter.toggle()
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.22)) {
+                            includeAdapter.toggle()
+                        }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: includeAdapter ? "checkmark.circle.fill" : "link")
-                                .font(.system(size: 10, weight: .bold))
-                            Text(includeAdapter ? "Adapter On" : "Mount Adapter")
-                                .font(AppTypography.label(10, weight: .bold))
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(includeAdapter ? "Adapted Mounts" : "Use Adapter")
+                                .font(AppTypography.next(size: 11, weight: .semibold))
                         }
-                        .foregroundStyle(includeAdapter ? .black : Palette.textSub)
-                        .padding(.horizontal, 8)
+                        .foregroundStyle(includeAdapter ? Color.black : Palette.dim)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(includeAdapter ? Palette.accent : Color.white.opacity(0.08), in: Capsule())
+                        .background(includeAdapter ? Palette.accent : Color.white.opacity(0.07), in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
@@ -649,13 +551,13 @@ private struct CameraInlineSetupPanel: View {
                             ForEach(ADAPTER_MOUNT_FILTERS, id: \.self) { mFilter in
                                 let sel = adapterMountFilter == mFilter
                                 Button {
-                                    MechanicalHaptics.tick()
+                                    UISelectionFeedbackGenerator().selectionChanged()
                                     adapterMountFilter = mFilter
                                 } label: {
                                     Text(mFilter)
-                                        .font(AppTypography.label(10, weight: .bold))
-                                        .foregroundStyle(sel ? .black : Palette.textSub)
-                                        .padding(.horizontal, 8)
+                                        .font(AppTypography.next(size: 11, weight: .semibold))
+                                        .foregroundStyle(sel ? Color.black : Palette.dim)
+                                        .padding(.horizontal, 9)
                                         .padding(.vertical, 4)
                                         .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
                                 }
@@ -665,19 +567,19 @@ private struct CameraInlineSetupPanel: View {
                     }
                 }
 
-                // Focal length category bar
+                // Focal length filter pills
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 6) {
                         ForEach(FocalLengthCategory.allCases) { cat in
                             let sel = focalCategory == cat
                             Button {
-                                MechanicalHaptics.tick()
+                                UISelectionFeedbackGenerator().selectionChanged()
                                 focalCategory = cat
                             } label: {
                                 Text(cat.label)
-                                    .font(AppTypography.mono(10, weight: .bold))
-                                    .foregroundStyle(sel ? .black : Palette.textSub)
-                                    .padding(.horizontal, 8)
+                                    .font(AppTypography.mono(size: 11, weight: .semibold))
+                                    .foregroundStyle(sel ? Color.black : Palette.dim)
+                                    .padding(.horizontal, 9)
                                     .padding(.vertical, 4)
                                     .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
                             }
@@ -686,27 +588,27 @@ private struct CameraInlineSetupPanel: View {
                     }
                 }
 
-                // Search field for lens
+                // Lens filter field
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
-                        .foregroundStyle(Palette.textDim)
-                    TextField("Filter lenses (e.g. 35mm, Summicron, f/1.4)…", text: $lensSearchQuery)
-                        .font(AppTypography.label(12))
+                        .foregroundStyle(Palette.dim)
+                    TextField("Filter lenses (e.g. 35mm, Summicron, f/1.4)\u{2026}", text: $lensSearchQuery)
+                        .font(AppTypography.next(size: 13, weight: .regular))
                         .foregroundStyle(Palette.text)
                     if !lensSearchQuery.isEmpty {
                         Button {
                             lensSearchQuery = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Palette.textDim)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Palette.dim)
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 7)
+                .padding(.vertical, 8)
                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 let matchingLenses: [PrewarmedLensEntry] = allLensEntries.filter { entry in
@@ -725,7 +627,7 @@ private struct CameraInlineSetupPanel: View {
                 }
 
                 ScrollView {
-                    LazyVStack(spacing: 6) {
+                    LazyVStack(spacing: 4) {
                         ForEach(matchingLenses.prefix(40)) { entry in
                             ForEach(entry.variants) { variant in
                                 let spec = variant.spec
@@ -733,24 +635,18 @@ private struct CameraInlineSetupPanel: View {
                                     || (selectedLens == nil && activeGear.lensId == spec.id)
 
                                 Button {
-                                    MechanicalHaptics.tick()
+                                    UISelectionFeedbackGenerator().selectionChanged()
                                     selectedLens = spec
                                 } label: {
-                                    HStack(spacing: 8) {
-                                        OpticalLensApertureIcon(
-                                            minAperture: spec.minAperture,
-                                            brand: spec.brand,
-                                            isSelected: isChosen,
-                                            size: 30
-                                        )
-                                        VStack(alignment: .leading, spacing: 1) {
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 2) {
                                             Text(spec.model)
-                                                .font(AppTypography.label(12, weight: .bold))
+                                                .font(AppTypography.next(size: 13, weight: .semibold))
                                                 .foregroundStyle(isChosen ? Palette.accent : Palette.text)
                                                 .lineLimit(1)
-                                            Text("\(variant.badge) · \(formatApertureRange(spec.minAperture, spec.maxAperture))")
-                                                .font(AppTypography.label(10, weight: .medium))
-                                                .foregroundStyle(Palette.textSub)
+                                            Text("\(variant.badge)  \u{00B7}  \(formatApertureRange(spec.minAperture, spec.maxAperture))")
+                                                .font(AppTypography.next(size: 11, weight: .medium))
+                                                .foregroundStyle(Palette.dim)
                                                 .lineLimit(1)
                                         }
                                         Spacer()
@@ -759,7 +655,8 @@ private struct CameraInlineSetupPanel: View {
                                                 .foregroundStyle(Palette.accent)
                                         }
                                     }
-                                    .padding(8)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
                                     .background(
                                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                                             .fill(isChosen ? Palette.accent.opacity(0.14) : Color.white.opacity(0.04))
@@ -770,14 +667,10 @@ private struct CameraInlineSetupPanel: View {
                         }
                     }
                 }
-                .frame(maxHeight: 200)
+                .frame(maxHeight: 190)
 
                 let effectiveLens = selectedLens ?? matchingLenses.first?.variants.first?.spec
-                HoldToMountGearButton(
-                    label: effectiveLens != nil
-                        ? "Hold to Mount \(camera.model) + Lens"
-                        : "Hold to Mount \(camera.model) (Body Only)"
-                ) {
+                Button {
                     onMountProfile(
                         ActiveGearProfile(
                             cameraId: camera.id,
@@ -792,7 +685,20 @@ private struct CameraInlineSetupPanel: View {
                             maxAperture: effectiveLens?.maxAperture ?? 22.0
                         )
                     )
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Text(effectiveLens != nil ? "Mount \(camera.model) + \(effectiveLens!.model)" : "Mount \(camera.model) (Body Only)")
+                            .font(AppTypography.next(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Color.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Palette.accent, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -807,23 +713,20 @@ private struct StandaloneLensBrowser: View {
     @Binding var focalCategory: FocalLengthCategory
     let onMountLens: (LensGearSpec) -> Void
 
-    @State private var mountFilter: String = "All"
-    @State private var stagedLens: LensGearSpec? = nil
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     ForEach(FocalLengthCategory.allCases) { cat in
                         let sel = focalCategory == cat
                         Button {
-                            MechanicalHaptics.tick()
+                            UISelectionFeedbackGenerator().selectionChanged()
                             focalCategory = cat
                         } label: {
                             Text(cat.label)
-                                .font(AppTypography.mono(10, weight: .bold))
-                                .foregroundStyle(sel ? .black : Palette.textSub)
-                                .padding(.horizontal, 8)
+                                .font(AppTypography.mono(size: 11, weight: .semibold))
+                                .foregroundStyle(sel ? Color.black : Palette.dim)
+                                .padding(.horizontal, 9)
                                 .padding(.vertical, 4)
                                 .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
                         }
@@ -833,11 +736,6 @@ private struct StandaloneLensBrowser: View {
             }
 
             let filtered = allLensEntries.filter { entry in
-                if !activeGear.isFixedLens && !activeGear.mount.isEmpty && mountFilter == "Camera Mount" {
-                    if entry.lens.mount.caseInsensitiveCompare(activeGear.mount) != .orderedSame {
-                        return false
-                    }
-                }
                 guard matchesFocalCategory(model: entry.lens.model, category: focalCategory) else { return false }
                 let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
                 if q.isEmpty { return true }
@@ -845,53 +743,49 @@ private struct StandaloneLensBrowser: View {
             }
 
             ScrollView {
-                LazyVStack(spacing: 6) {
+                LazyVStack(spacing: 4) {
                     ForEach(filtered.prefix(60)) { entry in
                         let spec = entry.lens
-                        let isStaged = stagedLens?.id == spec.id || activeGear.lensId == spec.id
+                        let isMounted = activeGear.lensId == spec.id
                         Button {
-                            MechanicalHaptics.tick()
-                            stagedLens = spec
+                            onMountLens(spec)
                         } label: {
                             HStack(spacing: 10) {
-                                OpticalLensApertureIcon(
-                                    minAperture: spec.minAperture,
-                                    brand: spec.brand,
-                                    isSelected: isStaged,
-                                    size: 34
-                                )
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(spec.model)
-                                        .font(AppTypography.label(13, weight: .bold))
-                                        .foregroundStyle(isStaged ? Palette.accent : Palette.text)
+                                        .font(AppTypography.next(size: 14, weight: .semibold))
+                                        .foregroundStyle(isMounted ? Palette.accent : Palette.text)
                                         .lineLimit(1)
-                                    Text("\(formatMountBadge(spec.mount)) · \(formatApertureRange(spec.minAperture, spec.maxAperture))")
-                                        .font(AppTypography.label(11, weight: .medium))
-                                        .foregroundStyle(Palette.textSub)
+                                    Text("\(spec.brand)  \u{00B7}  \(formatMountBadge(spec.mount))  \u{00B7}  \(formatApertureRange(spec.minAperture, spec.maxAperture))")
+                                        .font(AppTypography.next(size: 12, weight: .medium))
+                                        .foregroundStyle(Palette.dim)
+                                        .lineLimit(1)
                                 }
                                 Spacer()
-                                if isStaged {
+                                if isMounted {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundStyle(Palette.accent)
+                                } else {
+                                    Text("Mount")
+                                        .font(AppTypography.next(size: 12, weight: .semibold))
+                                        .foregroundStyle(Palette.accent)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(Palette.accent.opacity(0.14), in: Capsule())
                                 }
                             }
-                            .padding(8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(isStaged ? Palette.accent.opacity(0.14) : Color.white.opacity(0.04))
+                                    .fill(isMounted ? Palette.accent.opacity(0.10) : Color.white.opacity(0.035))
                             )
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
-            .frame(maxHeight: 240)
-
-            if let staged = stagedLens {
-                HoldToMountGearButton(label: "Hold to Mount \(staged.model)") {
-                    onMountLens(staged)
-                }
-            }
+            .frame(maxHeight: 260)
         }
     }
 }
@@ -915,99 +809,90 @@ private struct CustomGearBuilderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                ForEach([(0, "Fixed Camera"), (1, "Camera Body"), (2, "Custom Lens")], id: \.0) { idx, label in
-                    let sel = mode == idx
-                    Button {
-                        MechanicalHaptics.tick()
-                        mode = idx
-                    } label: {
-                        Text(label)
-                            .font(AppTypography.label(11, weight: .bold))
-                            .foregroundStyle(sel ? .black : Palette.textSub)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
+            Picker("Custom Type", selection: $mode) {
+                Text("Fixed Camera").tag(0)
+                Text("Body Only").tag(1)
+                Text("Lens").tag(2)
             }
+            .pickerStyle(.segmented)
 
             HStack(spacing: 8) {
                 TextField("Brand (e.g. Rollei)", text: $brand)
-                    .font(AppTypography.label(12))
+                    .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
-                    .padding(9)
+                    .padding(10)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                TextField(mode == 2 ? "Lens Model (e.g. 50mm f/1.4)" : "Camera Model", text: $modelName)
-                    .font(AppTypography.label(12))
+                TextField(mode == 2 ? "Lens (e.g. 50mm f/1.4)" : "Model Name", text: $modelName)
+                    .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
-                    .padding(9)
+                    .padding(10)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             if mode == 0 {
                 TextField("Built-in Lens (e.g. Sonnar 40mm f/2.8)", text: $fixedLensName)
-                    .font(AppTypography.label(12))
+                    .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
-                    .padding(9)
+                    .padding(10)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
                 TextField("Mount (e.g. Leica M, Nikon F, M42)", text: $mountName)
-                    .font(AppTypography.label(12))
+                    .font(AppTypography.next(size: 13, weight: .regular))
                     .foregroundStyle(Palette.text)
-                    .padding(9)
+                    .padding(10)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             if mode != 2 {
                 let fastStop = ALL_ANALOG_SHUTTER_STOPS[fastestShutterIdx.clamped(to: 0...(ALL_ANALOG_SHUTTER_STOPS.count - 1))]
                 let slowStop = ALL_ANALOG_SHUTTER_STOPS[slowestShutterIdx.clamped(to: 0...(ALL_ANALOG_SHUTTER_STOPS.count - 1))]
-                HStack {
-                    Text("Shutter Range:")
-                        .font(AppTypography.label(11, weight: .medium))
-                        .foregroundStyle(Palette.textSub)
-                    Spacer()
-                    Text("\(formatShutterStopLabel(fastStop)) – \(formatShutterStopLabel(slowStop))")
-                        .font(AppTypography.mono(11, weight: .bold))
-                        .foregroundStyle(Palette.accent)
+                Stepper {
+                    LabeledContent("Fastest Shutter", value: formatShutterStopLabel(fastStop))
+                        .font(AppTypography.next(size: 13, weight: .medium))
+                } onIncrement: {
+                    fastestShutterIdx = min(fastestShutterIdx + 1, ALL_ANALOG_SHUTTER_STOPS.count - 1)
+                } onDecrement: {
+                    fastestShutterIdx = max(fastestShutterIdx - 1, 6)
                 }
-                HStack(spacing: 10) {
-                    Stepper("Fast", value: $fastestShutterIdx, in: 6...(ALL_ANALOG_SHUTTER_STOPS.count - 1))
-                        .font(AppTypography.label(11))
-                    Stepper("Slow", value: $slowestShutterIdx, in: 0...10)
-                        .font(AppTypography.label(11))
+
+                Stepper {
+                    LabeledContent("Slowest Shutter", value: formatShutterStopLabel(slowStop))
+                        .font(AppTypography.next(size: 13, weight: .medium))
+                } onIncrement: {
+                    slowestShutterIdx = min(slowestShutterIdx + 1, 10)
+                } onDecrement: {
+                    slowestShutterIdx = max(slowestShutterIdx - 1, 0)
                 }
-                .foregroundStyle(Palette.textSub)
             }
 
             if mode != 1 {
                 let wideF = ALL_ANALOG_APERTURE_STOPS[widestApertureIdx.clamped(to: 0...(ALL_ANALOG_APERTURE_STOPS.count - 1))]
                 let smallF = ALL_ANALOG_APERTURE_STOPS[smallestApertureIdx.clamped(to: 0...(ALL_ANALOG_APERTURE_STOPS.count - 1))]
-                HStack {
-                    Text("Aperture Range:")
-                        .font(AppTypography.label(11, weight: .medium))
-                        .foregroundStyle(Palette.textSub)
-                    Spacer()
-                    Text("\(formatApertureRange(wideF, smallF))")
-                        .font(AppTypography.mono(11, weight: .bold))
-                        .foregroundStyle(Palette.accent)
+                Stepper {
+                    LabeledContent("Widest Aperture", value: String(format: "f/%.1f", wideF).replacingOccurrences(of: ".0", with: ""))
+                        .font(AppTypography.next(size: 13, weight: .medium))
+                } onIncrement: {
+                    widestApertureIdx = min(widestApertureIdx + 1, 14)
+                } onDecrement: {
+                    widestApertureIdx = max(widestApertureIdx - 1, 0)
                 }
-                HStack(spacing: 10) {
-                    Stepper("Wide", value: $widestApertureIdx, in: 0...14)
-                        .font(AppTypography.label(11))
-                    Stepper("Min", value: $smallestApertureIdx, in: 12...(ALL_ANALOG_APERTURE_STOPS.count - 1))
-                        .font(AppTypography.label(11))
+
+                Stepper {
+                    LabeledContent("Smallest Aperture", value: String(format: "f/%.1f", smallF).replacingOccurrences(of: ".0", with: ""))
+                        .font(AppTypography.next(size: 13, weight: .medium))
+                } onIncrement: {
+                    smallestApertureIdx = min(smallestApertureIdx + 1, ALL_ANALOG_APERTURE_STOPS.count - 1)
+                } onDecrement: {
+                    smallestApertureIdx = max(smallestApertureIdx - 1, 12)
                 }
-                .foregroundStyle(Palette.textSub)
             }
 
             let trimmedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? (initialSearchText.isEmpty ? "Custom Analog Rig" : initialSearchText)
                 : modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            HoldToMountGearButton(label: "Hold to Save & Mount \(trimmedModel)") {
+            Button {
                 let cleanBrand = brand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom" : brand.trimmingCharacters(in: .whitespacesAndNewlines)
                 let fastStop = ALL_ANALOG_SHUTTER_STOPS[fastestShutterIdx.clamped(to: 0...(ALL_ANALOG_SHUTTER_STOPS.count - 1))]
                 let slowStop = ALL_ANALOG_SHUTTER_STOPS[slowestShutterIdx.clamped(to: 0...(ALL_ANALOG_SHUTTER_STOPS.count - 1))]
@@ -1055,9 +940,21 @@ private struct CustomGearBuilderView: View {
                     )
                     onCreatedCamera(cam, profile)
                 }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Save & Mount \(trimmedModel)")
+                        .font(AppTypography.next(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(Color.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Palette.accent, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
-        .padding(10)
-        .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(12)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

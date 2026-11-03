@@ -1,244 +1,147 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Hold to Load 35mm Canister Button (Liquid Wave + Unspooling Perforated Leader)
-
-struct LoadFilmHoldButton: View {
-    let label: String
-    var holdDuration: Double = 0.78
-    let onLoaded: () -> Void
-
-    @State private var isPressing = false
-    @State private var progress: CGFloat = 0
-    @State private var wavePhase: CGFloat = 0
-    @State private var holdTask: Task<Void, Never>?
-
-    var body: some View {
-        let scale: CGFloat = isPressing ? (0.97 + 0.05 * progress) : 1.0
-
-        ZStack {
-            Canvas { ctx, size in
-                let w = size.width
-                let h = size.height
-                let rect = CGRect(origin: .zero, size: size)
-                let clipPath = Path(roundedRect: rect, cornerRadius: h / 2)
-                ctx.fill(clipPath, with: .color(Palette.accent.opacity(0.20)))
-
-                if progress > 0.001 {
-                    let fillX = w * progress
-                    let amp: CGFloat = (progress < 0.98) ? (4.5 * sin(progress * .pi) + 2.0) : 0.0
-                    var wave = Path()
-                    wave.move(to: .zero)
-                    wave.addLine(to: CGPoint(x: fillX, y: 0))
-                    let steps = 16
-                    for s in 1...steps {
-                        let frac = CGFloat(s) / CGFloat(steps)
-                        let y = h * frac
-                        let waveOffset = sin(frac * .pi * 2.2 + wavePhase) * amp
-                        wave.addLine(to: CGPoint(x: fillX + waveOffset, y: y))
-                    }
-                    wave.addLine(to: CGPoint(x: 0, y: h))
-                    wave.closeSubpath()
-
-                    var clipped = ctx
-                    clipped.clip(to: clipPath)
-                    clipped.fill(wave, with: .color(Palette.accent))
-                }
-
-                ctx.stroke(clipPath, with: .color(Palette.accent.opacity(0.55)), lineWidth: 1)
-            }
-
-            HStack(spacing: 10) {
-                // Animated 35mm Canister + Unspooling Perforated Leader
-                Canvas { ctx, s in
-                    let w = s.width
-                    let h = s.height
-                    let fg = progress > 0.45 ? Color.black : Palette.accent
-                    let canW = w * 0.44
-                    let canTop = h * 0.18
-                    let canH = h * 0.68
-
-                    let spindle = CGRect(x: canW * 0.26, y: h * 0.05, width: canW * 0.48, height: h * 0.14)
-                    ctx.fill(Path(roundedRect: spindle, cornerRadius: 1.5), with: .color(fg))
-
-                    let bodyRect = CGRect(x: 0, y: canTop, width: canW, height: canH)
-                    ctx.stroke(Path(roundedRect: bodyRect, cornerRadius: 2.5), with: .color(fg), lineWidth: 1.6)
-
-                    let leaderMaxW = w - canW - 2
-                    let leaderW = leaderMaxW * (0.28 + 0.72 * progress)
-                    let leaderTop = canTop + canH * 0.16
-                    let leaderH = canH * 0.68
-                    let leaderRect = CGRect(x: canW, y: leaderTop, width: leaderW, height: leaderH)
-                    ctx.fill(Path(roundedRect: leaderRect, cornerRadius: 2), with: .color(fg.opacity(0.32)))
-
-                    let holeStep: CGFloat = 4.5
-                    var hx: CGFloat = canW + 2
-                    while hx < canW + leaderW - 3 {
-                        ctx.fill(Path(CGRect(x: hx, y: leaderTop + 1.5, width: 2.2, height: 1.8)), with: .color(fg))
-                        ctx.fill(Path(CGRect(x: hx, y: leaderTop + leaderH - 3.3, width: 2.2, height: 1.8)), with: .color(fg))
-                        hx += holeStep
-                    }
-                }
-                .frame(width: 26, height: 20)
-
-                Text(isPressing ? "LOADING SPOOL… \(Int((progress * 100).rounded()))%" : label)
-                    .font(AppTypography.label(13, weight: .bold))
-                    .foregroundStyle(progress > 0.5 ? Color.black : Palette.text)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 16)
-        }
-        .frame(height: 46)
-        .scaleEffect(scale)
-        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isPressing)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !isPressing else { return }
-                    startHold()
-                }
-                .onEnded { _ in
-                    cancelHold()
-                }
-        )
-    }
-
-    private func startHold() {
-        isPressing = true
-        MechanicalHaptics.click()
-        holdTask?.cancel()
-        holdTask = Task { @MainActor in
-            let start = Date()
-            var lastBucket = -1
-            while !Task.isCancelled {
-                let elapsed = Date().timeIntervalSince(start)
-                let p = min(1.0, max(0.0, elapsed / holdDuration))
-                progress = CGFloat(p)
-                wavePhase += 0.28
-                let bucket = Int(p * 5)
-                if bucket > lastBucket && bucket < 5 {
-                    lastBucket = bucket
-                    MechanicalHaptics.tick()
-                }
-                if p >= 1.0 {
-                    MechanicalHaptics.heavy()
-                    MechanicalHaptics.confirm()
-                    isPressing = false
-                    progress = 0
-                    onLoaded()
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 16_000_000)
-            }
-        }
-    }
-
-    private func cancelHold() {
-        holdTask?.cancel()
-        holdTask = nil
-        isPressing = false
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-            progress = 0
-        }
-    }
-}
-
-// MARK: - Hold to Complete & Rewind Roll Button
+// MARK: - Upgraded iOS 27 Liquid Glass Rewind & Complete Roll Control
 
 struct CompleteRollHoldButton: View {
-    var holdDuration: Double = 0.85
+    let currentFrame: Int
+    @Binding var rewindProgress: CGFloat
+    var holdDuration: Double = 1.05
     let onCompleted: () -> Void
 
     @State private var isPressing = false
-    @State private var progress: CGFloat = 0
-    @State private var wavePhase: CGFloat = 0
+    @State private var crankAngle: Double = 0
     @State private var holdTask: Task<Void, Never>?
 
     var body: some View {
-        let scale: CGFloat = isPressing ? (0.97 + 0.05 * progress) : 1.0
+        let p = rewindProgress
+        let displayFrame = max(0, Int((CGFloat(max(currentFrame, 1)) * (1.0 - p)).rounded()))
 
         ZStack {
-            Canvas { ctx, size in
-                let w = size.width
-                let h = size.height
-                let rect = CGRect(origin: .zero, size: size)
-                let clipPath = Path(roundedRect: rect, cornerRadius: h / 2)
-                ctx.fill(clipPath, with: .color(Color.white.opacity(0.08)))
+            // Base capsule track + progressive glass fill
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.05))
 
-                if progress > 0.001 {
-                    let fillX = w * progress
-                    let amp: CGFloat = (progress < 0.98) ? (4.0 * sin(progress * .pi) + 1.8) : 0.0
-                    var wave = Path()
-                    wave.move(to: .zero)
-                    wave.addLine(to: CGPoint(x: fillX, y: 0))
-                    let steps = 16
-                    for s in 1...steps {
-                        let frac = CGFloat(s) / CGFloat(steps)
-                        let y = h * frac
-                        let waveOffset = sin(frac * .pi * 2.2 + wavePhase) * amp
-                        wave.addLine(to: CGPoint(x: fillX + waveOffset, y: y))
+                    if p > 0.001 {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Palette.accent.opacity(0.28),
+                                        Palette.accent.opacity(0.48)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: max(48, w * p))
                     }
-                    wave.addLine(to: CGPoint(x: 0, y: h))
-                    wave.closeSubpath()
+                }
+            }
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        isPressing ? Palette.accent.opacity(0.75) : Color.white.opacity(0.12),
+                        lineWidth: isPressing ? 1.2 : 0.75
+                    )
+            )
 
-                    var clipped = ctx
-                    clipped.clip(to: clipPath)
-                    clipped.fill(wave, with: .color(Palette.accent))
+            HStack(spacing: 12) {
+                // Circular Progress Ring + Spinning Mechanical Rewind Crank
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 2.2)
+                        .frame(width: 28, height: 28)
+
+                    Circle()
+                        .trim(from: 0, to: p)
+                        .stroke(
+                            Palette.accent,
+                            style: StrokeStyle(lineWidth: 2.4, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 28, height: 28)
+
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Palette.accent)
+                        .rotationEffect(.degrees(crankAngle))
                 }
 
-                ctx.stroke(clipPath, with: .color(Color.white.opacity(0.16)), lineWidth: 0.8)
-            }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(isPressing ? "Rewinding into Cartridge\u{2026}" : "Hold to Rewind & Complete Roll")
+                        .font(AppTypography.next(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
 
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(progress > 0.5 ? Color.black : Palette.accent)
-                    .rotationEffect(.degrees(Double(progress) * -540))
-
-                Text(isPressing ? "REWINDING SPOOL… \(Int((progress * 100).rounded()))%" : "Hold to Complete & Rewind Roll")
-                    .font(AppTypography.label(12, weight: .bold))
-                    .foregroundStyle(progress > 0.5 ? Color.black : Palette.text)
+                    Text(
+                        isPressing
+                            ? String(format: "Retracting leader \u{00B7} Frame %02d \u{2192} 00", displayFrame)
+                            : "Archives roll to logbook and resets counter"
+                    )
+                    .font(AppTypography.next(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(isPressing ? Palette.accent : Palette.dim)
                     .lineLimit(1)
+                }
+
+                Spacer()
+
+                if isPressing {
+                    Text("\(Int((p * 100).rounded()))%")
+                        .font(AppTypography.mono(size: 13, weight: .bold))
+                        .foregroundStyle(Palette.accent)
+                        .contentTransition(.numericText())
+                }
             }
             .padding(.horizontal, 14)
         }
-        .frame(height: 40)
-        .scaleEffect(scale)
-        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isPressing)
+        .frame(height: 50)
+        .scaleEffect(isPressing ? 0.985 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.78), value: isPressing)
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
                     guard !isPressing else { return }
-                    startHold()
+                    startRewind()
                 }
                 .onEnded { _ in
-                    cancelHold()
+                    cancelRewind()
                 }
         )
     }
 
-    private func startHold() {
+    private func startRewind() {
         isPressing = true
-        MechanicalHaptics.click()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         holdTask?.cancel()
         holdTask = Task { @MainActor in
             let start = Date()
-            var lastBucket = -1
+            var lastRatchetStep = -1
             while !Task.isCancelled {
                 let elapsed = Date().timeIntervalSince(start)
-                let p = min(1.0, max(0.0, elapsed / holdDuration))
-                progress = CGFloat(p)
-                wavePhase += 0.28
-                let bucket = Int(p * 5)
-                if bucket > lastBucket && bucket < 5 {
-                    lastBucket = bucket
-                    MechanicalHaptics.tick()
+                let raw = min(1.0, max(0.0, elapsed / holdDuration))
+                // Ease-in-out curve for mechanical spool inertia
+                let eased = raw < 0.5 ? 2 * raw * raw : 1 - pow(-2 * raw + 2, 2) / 2
+                rewindProgress = CGFloat(eased)
+                crankAngle -= (8.0 + 18.0 * raw)
+
+                // Accelerating mechanical ratchet haptics (10 detents across the rewind)
+                let step = Int(eased * 10)
+                if step > lastRatchetStep && step < 10 {
+                    lastRatchetStep = step
+                    UIImpactFeedbackGenerator(style: .rigid)
+                        .impactOccurred(intensity: CGFloat(0.45 + 0.5 * eased))
                 }
-                if p >= 1.0 {
-                    MechanicalHaptics.heavy()
-                    MechanicalHaptics.confirm()
+
+                if raw >= 1.0 {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                     isPressing = false
-                    progress = 0
+                    rewindProgress = 0
+                    crankAngle = 0
                     onCompleted()
                     return
                 }
@@ -247,81 +150,14 @@ struct CompleteRollHoldButton: View {
         }
     }
 
-    private func cancelHold() {
+    private func cancelRewind() {
         holdTask?.cancel()
         holdTask = nil
         isPressing = false
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-            progress = 0
+        withAnimation(.snappy(duration: 0.28)) {
+            rewindProgress = 0
+            crankAngle = 0
         }
-    }
-}
-
-// MARK: - Minimal Log Frame Pill (Shown on Viewfinder when HOLD is active)
-
-struct MinimalLogFrameButton: View {
-    let moment: CapturedMoment
-    let isSaved: Bool
-    let onLogFrame: () -> Void
-
-    var body: some View {
-        Button {
-            guard !isSaved else { return }
-            MechanicalHaptics.confirm()
-            onLogFrame()
-        } label: {
-            HStack(spacing: 9) {
-                if let snap = moment.snapshotImage {
-                    Image(uiImage: snap)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 26, height: 26)
-                        .clipShape(Circle())
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
-                } else {
-                    ZStack {
-                        Circle()
-                            .fill(Color.black.opacity(0.28))
-                            .frame(width: 26, height: 26)
-                        Image(systemName: isSaved ? "checkmark" : "film")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(isSaved ? "Logged Frame #\(String(format: "%02d", moment.frameNumber))" : "Log Frame #\(String(format: "%02d", moment.frameNumber))")
-                        .font(AppTypography.label(12, weight: .bold))
-                        .foregroundStyle(isSaved ? .black : .white)
-
-                    Text("\(moment.shutterSpeed) · \(moment.aperture) · ISO \(moment.iso)")
-                        .font(AppTypography.mono(9.5, weight: .semibold))
-                        .foregroundStyle(isSaved ? .black.opacity(0.75) : .white.opacity(0.85))
-                }
-
-                Image(systemName: isSaved ? "checkmark.circle.fill" : "plus.circle.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(isSaved ? .black : Palette.accent)
-            }
-            .padding(.leading, 7)
-            .padding(.trailing, 12)
-            .padding(.vertical, 6)
-            .background {
-                if isSaved {
-                    Capsule().fill(Palette.good)
-                } else if #available(iOS 26.0, *) {
-                    Capsule()
-                        .fill(Color(hex: 0x15803D).opacity(0.55))
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                } else {
-                    Capsule()
-                        .fill(Color(hex: 0x14532D).opacity(0.92))
-                        .overlay(Capsule().strokeBorder(Palette.good.opacity(0.55), lineWidth: 1))
-                }
-            }
-            .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -346,7 +182,7 @@ struct LoggedFrameCard: View {
                 // Frame Snapshot Thumbnail
                 Button {
                     if snapshot != nil {
-                        MechanicalHaptics.click()
+                        UISelectionFeedbackGenerator().selectionChanged()
                         showFullPhoto = true
                     }
                 } label: {
@@ -355,19 +191,19 @@ struct LoggedFrameCard: View {
                             Image(uiImage: snap)
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: 68, height: 68)
+                                .frame(width: 64, height: 64)
                                 .clipped()
                         } else {
                             VStack(spacing: 2) {
                                 Text(String(format: "#%02d", frame.frameNumber))
-                                    .font(AppTypography.mono(15, weight: .black))
+                                    .font(AppTypography.mono(size: 14, weight: .bold))
                                     .foregroundStyle(Palette.accent)
                                 Text("Z\(Roman.zone(frame.zone))")
-                                    .font(AppTypography.mono(10, weight: .bold))
-                                    .foregroundStyle(Palette.textSub)
+                                    .font(AppTypography.mono(size: 10, weight: .medium))
+                                    .foregroundStyle(Palette.dim)
                             }
-                            .frame(width: 68, height: 68)
-                            .background(Color.black.opacity(0.35))
+                            .frame(width: 64, height: 64)
+                            .background(Color.white.opacity(0.04))
                         }
 
                         if snapshot != nil {
@@ -379,40 +215,40 @@ struct LoggedFrameCard: View {
                                 .padding(4)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.75)
                     )
                 }
                 .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 5) {
                     // Top Row: Frame Badge + Timestamp + Delete
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         let isBonus = frame.frameNumber > frame.rollMaxFrames
                         Text(isBonus ? String(format: "+%02d", frame.frameNumber) : String(format: "#%02d", frame.frameNumber))
-                            .font(AppTypography.mono(11, weight: .black))
-                            .foregroundStyle(.black)
+                            .font(AppTypography.mono(size: 11, weight: .bold))
+                            .foregroundStyle(Color.black)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
                             .background(isBonus ? Palette.good : Palette.accent, in: Capsule())
 
                         Text(formatIsoTimestampForDisplay(frame.timestampIso))
-                            .font(AppTypography.label(11, weight: .medium))
-                            .foregroundStyle(Palette.textSub)
+                            .font(AppTypography.next(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.dim)
                             .lineLimit(1)
 
                         Spacer()
 
                         Button {
-                            MechanicalHaptics.warning()
+                            UINotificationFeedbackGenerator().notificationOccurred(.warning)
                             onDelete()
                         } label: {
                             Image(systemName: "trash")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Palette.textDim)
-                                .padding(5)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+                                .padding(6)
                                 .background(Color.white.opacity(0.05), in: Circle())
                         }
                         .buttonStyle(.plain)
@@ -421,79 +257,65 @@ struct LoggedFrameCard: View {
                     // Exposure Specs Row
                     HStack(spacing: 6) {
                         Text(frame.shutterSpeed)
-                            .font(AppTypography.mono(14, weight: .black))
+                            .font(AppTypography.mono(size: 15, weight: .bold))
                             .foregroundStyle(Palette.text)
 
-                        Text("·")
-                            .foregroundStyle(Palette.textDim)
+                        Text("\u{00B7}")
+                            .foregroundStyle(Palette.dim)
 
                         Text(cleanAperture)
-                            .font(AppTypography.mono(14, weight: .black))
+                            .font(AppTypography.mono(size: 15, weight: .bold))
                             .foregroundStyle(Palette.accent)
 
-                        Text("·")
-                            .foregroundStyle(Palette.textDim)
+                        Text("\u{00B7}")
+                            .foregroundStyle(Palette.dim)
 
                         Text("ISO \(frame.iso)")
-                            .font(AppTypography.mono(12, weight: .bold))
-                            .foregroundStyle(Palette.textSub)
+                            .font(AppTypography.mono(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.dim)
 
                         Spacer()
 
-                        Text(String(format: "Z%@ · %.1f EV", Roman.zone(frame.zone), frame.compensatedEv))
-                            .font(AppTypography.mono(10, weight: .bold))
-                            .foregroundStyle(Palette.textSub)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.06), in: Capsule())
+                        Text(String(format: "Z%@ \u{00B7} %.1f EV", Roman.zone(frame.zone), frame.compensatedEv))
+                            .font(AppTypography.mono(size: 11, weight: .medium))
+                            .foregroundStyle(Palette.dim)
                     }
 
-                    // Camera + Lens + EV Comp + GPS Chips
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 5) {
-                            if !frame.cameraName.isEmpty || !frame.lensName.isEmpty {
-                                let gearLabel = [frame.cameraName, frame.lensName].filter { !$0.isEmpty }.joined(separator: " · ")
-                                HStack(spacing: 4) {
-                                    Image(systemName: "camera.fill")
+                    // Camera / Lens / GPS Metadata Line
+                    HStack(spacing: 8) {
+                        if !frame.cameraName.isEmpty || !frame.lensName.isEmpty {
+                            let gearLabel = [frame.cameraName, frame.lensName].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+                            Text(gearLabel)
+                                .font(AppTypography.next(size: 12, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+                                .lineLimit(1)
+                        }
+
+                        if abs(frame.totalEvComp) >= 0.05 {
+                            Text(formatEvComp(frame.totalEvComp))
+                                .font(AppTypography.mono(size: 10, weight: .semibold))
+                                .foregroundStyle(Palette.accent)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Palette.accent.opacity(0.14), in: Capsule())
+                        }
+
+                        if let gps = gpsLabel, let lat = frame.latitude, let lon = frame.longitude {
+                            Spacer(minLength: 0)
+                            Button {
+                                if let url = URL(string: "http://maps.apple.com/?ll=\(lat),\(lon)&q=Roll+\(frame.rollNumber)+Frame+\(frame.frameNumber)") {
+                                    UIApplication.shared.open(url)
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "location.fill")
                                         .font(.system(size: 9))
-                                    Text(gearLabel)
-                                        .font(AppTypography.label(10, weight: .semibold))
-                                        .lineLimit(1)
+                                    Text(gps)
+                                        .font(AppTypography.mono(size: 10, weight: .medium))
                                 }
-                                .foregroundStyle(Palette.textSub)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.06), in: Capsule())
+                                .foregroundStyle(Palette.good)
                             }
-
-                            if abs(frame.totalEvComp) >= 0.05 {
-                                Text(formatEvComp(frame.totalEvComp))
-                                    .font(AppTypography.mono(10, weight: .bold))
-                                    .foregroundStyle(Palette.slow)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(Palette.slow.opacity(0.15), in: Capsule())
-                            }
-
-                            if let gps = gpsLabel, let lat = frame.latitude, let lon = frame.longitude {
-                                Button {
-                                    if let url = URL(string: "http://maps.apple.com/?ll=\(lat),\(lon)&q=Roll+\(frame.rollNumber)+Frame+\(frame.frameNumber)") {
-                                        UIApplication.shared.open(url)
-                                    }
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "location.fill")
-                                            .font(.system(size: 9))
-                                        Text(gps)
-                                            .font(AppTypography.mono(9.5, weight: .semibold))
-                                    }
-                                    .foregroundStyle(Palette.good)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(Palette.good.opacity(0.14), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -502,54 +324,54 @@ struct LoggedFrameCard: View {
             // Note Section
             if editingNote {
                 HStack(spacing: 8) {
-                    TextField("Add frame note (lighting, filter, subject)…", text: $noteDraft)
-                        .font(AppTypography.label(12))
+                    TextField("Add frame note (lighting, filter, subject)\u{2026}", text: $noteDraft)
+                        .font(AppTypography.next(size: 13, weight: .regular))
                         .foregroundStyle(Palette.text)
-                        .padding(8)
+                        .padding(9)
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     Button("Save") {
-                        MechanicalHaptics.confirm()
+                        UISelectionFeedbackGenerator().selectionChanged()
                         onUpdateNote(noteDraft.trimmingCharacters(in: .whitespacesAndNewlines))
                         editingNote = false
                     }
-                    .font(AppTypography.label(12, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 12)
+                    .font(AppTypography.next(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(Palette.accent, in: Capsule())
                     .buttonStyle(.plain)
                 }
             } else {
                 Button {
-                    MechanicalHaptics.tick()
+                    UISelectionFeedbackGenerator().selectionChanged()
                     noteDraft = frame.note
                     editingNote = true
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 11))
-                            .foregroundStyle(frame.note.isEmpty ? Palette.textDim : Palette.accent)
-                        Text(frame.note.isEmpty ? "Add photographer's note…" : frame.note)
-                            .font(AppTypography.label(11, weight: frame.note.isEmpty ? .regular : .medium))
-                            .foregroundStyle(frame.note.isEmpty ? Palette.textDim : Palette.text)
+                            .foregroundStyle(frame.note.isEmpty ? Palette.dim : Palette.accent)
+                        Text(frame.note.isEmpty ? "Add note\u{2026}" : frame.note)
+                            .font(AppTypography.next(size: 12, weight: .medium))
+                            .foregroundStyle(frame.note.isEmpty ? Palette.dim : Palette.text)
                             .lineLimit(2)
                         Spacer()
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(12)
+        .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Palette.panelRaised)
+                .fill(Palette.panel)
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.75)
+                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
                 )
         )
         .sheet(isPresented: $showFullPhoto) {
@@ -565,11 +387,11 @@ struct LoggedFrameCard: View {
                                 .padding()
 
                             VStack(spacing: 4) {
-                                Text(String(format: "Roll #%02d · Frame #%02d — %@", frame.rollNumber, frame.frameNumber, frame.filmName))
-                                    .font(AppTypography.label(15, weight: .bold))
+                                Text(String(format: "Roll #%02d \u{00B7} Frame #%02d — %@", frame.rollNumber, frame.frameNumber, frame.filmName))
+                                    .font(AppTypography.next(size: 16, weight: .semibold))
                                     .foregroundStyle(.white)
-                                Text("\(frame.shutterSpeed) · \(cleanAperture) · ISO \(frame.iso) · Zone \(Roman.zone(frame.zone))")
-                                    .font(AppTypography.mono(13, weight: .semibold))
+                                Text("\(frame.shutterSpeed)  \u{00B7}  \(cleanAperture)  \u{00B7}  ISO \(frame.iso)  \u{00B7}  Zone \(Roman.zone(frame.zone))")
+                                    .font(AppTypography.mono(size: 13, weight: .medium))
                                     .foregroundStyle(Palette.accent)
                             }
                         }
@@ -596,13 +418,14 @@ struct FilmLogbookSheet: View {
 
     @State private var selectedTab: Int = 0
     @State private var searchQuery: String = ""
+    @State private var isBrowsingFilmCatalog: Bool = false
+    @State private var selectedFilmCategory: String = "Color" // "Color", "B&W", "Slide", "Custom"
     @State private var expandedFamilyKey: String? = nil
     @State private var stagedVariant: FilmVariant? = nil
     @State private var stagedMaxFrames: Int = 36
     @State private var stagedExpired: Bool = false
     @State private var stagedExpiredYear: Int = 2005
     @State private var stagedAutoComp: Bool = true
-    @State private var showCustomFilmCreator: Bool = false
     @State private var customFilmName: String = ""
     @State private var customFilmIso: Int = 400
     @State private var customFilmCategory: String = "Color"
@@ -611,66 +434,48 @@ struct FilmLogbookSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 10) {
-                // Top Search & 3-Tab Switcher
+            VStack(spacing: 12) {
+                // Top Segmented Navigation + Search
                 VStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Palette.textDim)
-
-                        TextField(
-                            selectedTab == 0
-                                ? "Search film stock, camera, lens, ISO…"
-                                : (selectedTab == 1 ? "Search logged frames, notes, camera…" : "Search roll or frame…"),
-                            text: $searchQuery
-                        )
-                        .font(AppTypography.label(13))
-                        .foregroundStyle(Palette.text)
-
-                        if !searchQuery.isEmpty {
-                            Button {
-                                searchQuery = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(Palette.textDim)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                    Picker("Section", selection: $selectedTab.animation(.snappy(duration: 0.25))) {
+                        Text("Roll & Gear").tag(0)
+                        Text("Frames (\(store.loggedFrames.count))").tag(1)
+                        Text("Scans").tag(2)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(Palette.panelRaised, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Palette.border, lineWidth: 0.75))
+                    .pickerStyle(.segmented)
 
-                    // iOS 27 Glass Segmented Tab Bar
-                    HStack(spacing: 6) {
-                        ForEach([
-                            (0, "Roll & Gear", "film.stack"),
-                            (1, "Frames (\(store.loggedFrames.count))", "list.bullet.rectangle.portrait"),
-                            (2, "Scans", "photo.stack")
-                        ], id: \.0) { idx, title, icon in
-                            let selected = selectedTab == idx
-                            Button {
-                                MechanicalHaptics.tick()
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                                    selectedTab = idx
+                    if selectedTab != 2 {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Palette.dim)
+
+                            TextField(
+                                selectedTab == 0
+                                    ? "Search film stocks, cameras, or lenses\u{2026}"
+                                    : "Search logged frames, notes, or gear\u{2026}",
+                                text: $searchQuery
+                            )
+                            .font(AppTypography.next(size: 14, weight: .regular))
+                            .foregroundStyle(Palette.text)
+
+                            if !searchQuery.isEmpty {
+                                Button {
+                                    searchQuery = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(Palette.dim)
                                 }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: icon)
-                                        .font(.system(size: 12, weight: .bold))
-                                    Text(title)
-                                        .font(AppTypography.label(12, weight: .bold))
-                                        .lineLimit(1)
-                                }
-                                .foregroundStyle(selected ? .black : Palette.textSub)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 9)
-                                .background(selected ? Palette.accent : Palette.panelRaised, in: Capsule())
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
+                        )
                     }
                 }
                 .padding(.horizontal, 16)
@@ -688,22 +493,22 @@ struct FilmLogbookSheet: View {
                     .padding(.horizontal, 16)
                 }
             }
-            .background(Palette.bg.ignoresSafeArea())
-            .navigationTitle("Film Logbook & Gear")
+            .background(Palette.background.ignoresSafeArea())
+            .navigationTitle(selectedTab == 0 ? "Roll & Gear" : (selectedTab == 1 ? "Frame Logbook" : "Lab Scan Matcher"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         LocationCache.shared.requestPermissionAndRefresh()
-                        MechanicalHaptics.tick()
+                        UISelectionFeedbackGenerator().selectionChanged()
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: LocationCache.shared.lastKnownCoordinate != nil ? "location.fill" : "location")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 12, weight: .semibold))
                             Text("GPS")
-                                .font(AppTypography.mono(11, weight: .bold))
+                                .font(AppTypography.mono(size: 11, weight: .semibold))
                         }
-                        .foregroundStyle(LocationCache.shared.lastKnownCoordinate != nil ? Palette.good : Palette.textSub)
+                        .foregroundStyle(LocationCache.shared.lastKnownCoordinate != nil ? Palette.good : Palette.dim)
                     }
                 }
 
@@ -711,14 +516,17 @@ struct FilmLogbookSheet: View {
                     Button("Done") {
                         dismiss()
                     }
-                    .font(AppTypography.label(14, weight: .bold))
+                    .font(AppTypography.next(size: 15, weight: .semibold))
                     .foregroundStyle(Palette.accent)
                 }
             }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
         .onAppear {
             selectedTab = initialTab
+            isBrowsingFilmCatalog = store.rollState.isUnloaded
             LocationCache.shared.refreshIfAuthorized()
         }
         .sheet(item: $shareSheetItem) { item in
@@ -730,17 +538,66 @@ struct FilmLogbookSheet: View {
 
     private var rollAndGearTab: some View {
         let roll = store.rollState
-        let filteredFamilies: [FilmFamily] = {
-            let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !q.isEmpty else { return BUILTIN_FILM_FAMILIES }
-            return BUILTIN_FILM_FAMILIES.filter { fam in
-                if fuzzyMatchScore(query: q, target: "\(fam.brand) \(fam.familyName) \(fam.category)") > 0 {
-                    return true
+        let queryTrimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shouldShowCatalog = roll.isUnloaded || isBrowsingFilmCatalog || !queryTrimmed.isEmpty
+
+        return ScrollView {
+            VStack(spacing: 14) {
+                // 1. Active Roll Card
+                ActiveRollHeroCard(
+                    roll: roll,
+                    isBrowsingCatalog: isBrowsingFilmCatalog,
+                    onToggleCatalog: {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                            isBrowsingFilmCatalog.toggle()
+                            if !isBrowsingFilmCatalog {
+                                expandedFamilyKey = nil
+                            }
+                        }
+                    },
+                    onCompleteRoll: {
+                        var unloaded = roll
+                        unloaded.rollNumber = roll.rollNumber + 1
+                        unloaded.filmName = ""
+                        unloaded.currentFrame = 1
+                        unloaded.isExpired = false
+                        withAnimation(.snappy(duration: 0.32, extraBounce: 0.0)) {
+                            store.rollState = unloaded
+                            isBrowsingFilmCatalog = true
+                        }
+                    }
+                )
+
+                // 2. Film Stock Catalog (Only open when unloaded, switching film, or searching)
+                if shouldShowCatalog {
+                    filmCatalogContainer(roll: roll, query: queryTrimmed)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                return fam.variants.contains { v in
-                    fuzzyMatchScore(query: q, target: "\(v.fullName) \(v.iso)") > 0
+
+                // 3. Camera & Lens Gear Rig Section
+                GearSetupSection(store: store, searchQuery: searchQuery)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 30)
+        }
+    }
+
+    // MARK: - Categorized Film Stock Catalog (Color · B&W · Slide · Custom)
+
+    private func filmCatalogContainer(roll: FilmRollState, query: String) -> some View {
+        let filteredFamilies: [FilmFamily] = {
+            if !query.isEmpty {
+                return BUILTIN_FILM_FAMILIES.filter { fam in
+                    if fuzzyMatchScore(query: query, target: "\(fam.brand) \(fam.familyName) \(fam.category)") > 0 {
+                        return true
+                    }
+                    return fam.variants.contains { v in
+                        fuzzyMatchScore(query: query, target: "\(v.fullName) \(v.iso)") > 0
+                    }
                 }
             }
+            return BUILTIN_FILM_FAMILIES.filter { $0.category == selectedFilmCategory }
         }()
 
         let familiesByBrand: [(String, [FilmFamily])] = {
@@ -756,176 +613,242 @@ struct FilmLogbookSheet: View {
             return order.map { ($0, dict[$0] ?? []) }
         }()
 
-        return ScrollView {
-            VStack(spacing: 14) {
-                // 1. Active Roll Card
-                ActiveRollHeroCard(roll: roll) {
-                    // Complete & rewind roll
-                    var unloaded = roll
-                    unloaded.rollNumber = roll.rollNumber + 1
-                    unloaded.filmName = ""
-                    unloaded.currentFrame = 1
-                    unloaded.isExpired = false
-                    store.rollState = unloaded
-                } onAdjustFrame: { delta in
-                    MechanicalHaptics.tick()
-                    var next = roll
-                    next.currentFrame = (roll.currentFrame + delta).clamped(to: 1...99)
-                    store.rollState = next
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("FILM STOCK CATALOG")
+                    .font(AppTypography.next(size: 11, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(Palette.dim)
+
+                Spacer()
+
+                if !roll.isUnloaded {
+                    Button {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
+                            isBrowsingFilmCatalog = false
+                            expandedFamilyKey = nil
+                        }
+                    } label: {
+                        Text("Close Catalog")
+                            .font(AppTypography.next(size: 12, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
+            }
 
-                // 2. Camera & Lens Gear Rig Section
-                GearSetupSection(store: store, searchQuery: searchQuery)
+            // Native iOS Segmented Picker by Film Type (Color / B&W / Slide / Custom)
+            if query.isEmpty {
+                Picker("Film Category", selection: $selectedFilmCategory.animation(.snappy(duration: 0.24))) {
+                    Text("Color").tag("Color")
+                    Text("B&W").tag("B&W")
+                    Text("Slide").tag("Slide")
+                    Text("Custom").tag("Custom")
+                }
+                .pickerStyle(.segmented)
+            }
 
-                // 3. Custom Film Stocks Section
-                customFilmSection
-
-                // 4. Built-in Brand-Grouped Film Catalog
+            if selectedFilmCategory == "Custom" && query.isEmpty {
+                customFilmBrowserSection
+            } else {
                 ForEach(familiesByBrand, id: \.0) { brand, families in
-                    let totalVariants = families.reduce(0) { $0 + $1.variants.count }
-                    VStack(spacing: 8) {
-                        BrandHeaderBanner(brand: brand, stockCount: totalVariants)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(brand.uppercased())
+                            .font(AppTypography.next(size: 11, weight: .semibold))
+                            .tracking(1.2)
+                            .foregroundStyle(Palette.dim)
+                            .padding(.leading, 4)
+                            .padding(.top, 2)
 
-                        ForEach(families) { family in
-                            let isExpanded = expandedFamilyKey == family.id
-                            let isActiveFamily = !roll.isUnloaded && family.variants.contains {
-                                $0.fullName.caseInsensitiveCompare(roll.filmName) == .orderedSame && $0.iso == roll.boxIso
-                            }
+                        VStack(spacing: 6) {
+                            ForEach(families) { family in
+                                let isExpanded = expandedFamilyKey == family.id
+                                let isActiveFamily = !roll.isUnloaded && family.variants.contains {
+                                    $0.fullName.caseInsensitiveCompare(roll.filmName) == .orderedSame && $0.iso == roll.boxIso
+                                }
 
-                            FilmFamilyExpandableCard(
-                                family: family,
-                                isExpanded: isExpanded,
-                                isActiveFamily: isActiveFamily,
-                                activeRoll: roll,
-                                stagedVariant: $stagedVariant,
-                                stagedMaxFrames: $stagedMaxFrames,
-                                stagedExpired: $stagedExpired,
-                                stagedExpiredYear: $stagedExpiredYear,
-                                stagedAutoComp: $stagedAutoComp,
-                                onToggleExpand: {
-                                    MechanicalHaptics.tick()
-                                    withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
-                                        if isExpanded {
+                                FilmFamilyExpandableCard(
+                                    family: family,
+                                    isExpanded: isExpanded,
+                                    isActiveFamily: isActiveFamily,
+                                    activeRoll: roll,
+                                    stagedVariant: $stagedVariant,
+                                    stagedMaxFrames: $stagedMaxFrames,
+                                    stagedExpired: $stagedExpired,
+                                    stagedExpiredYear: $stagedExpiredYear,
+                                    stagedAutoComp: $stagedAutoComp,
+                                    onToggleExpand: {
+                                        UISelectionFeedbackGenerator().selectionChanged()
+                                        withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
+                                            if isExpanded {
+                                                expandedFamilyKey = nil
+                                            } else {
+                                                expandedFamilyKey = family.id
+                                                stagedVariant = family.variants.first(where: { $0.fullName == roll.filmName }) ?? family.variants.first
+                                                stagedMaxFrames = roll.maxFrames
+                                                stagedExpired = roll.isExpired
+                                                stagedExpiredYear = roll.expiredYear
+                                                stagedAutoComp = roll.autoApplyExpiredComp
+                                            }
+                                        }
+                                    },
+                                    onLoadRoll: { variant in
+                                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                        let nextRollNum = roll.isUnloaded ? roll.rollNumber : (roll.currentFrame > 1 ? roll.rollNumber + 1 : roll.rollNumber)
+                                        withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                            store.rollState = FilmRollState(
+                                                rollNumber: nextRollNum,
+                                                filmName: variant.fullName,
+                                                boxIso: variant.iso,
+                                                category: family.category,
+                                                currentFrame: 1,
+                                                maxFrames: stagedMaxFrames,
+                                                isExpired: stagedExpired,
+                                                expiredYear: stagedExpiredYear,
+                                                autoApplyExpiredComp: stagedAutoComp
+                                            )
                                             expandedFamilyKey = nil
-                                        } else {
-                                            expandedFamilyKey = family.id
-                                            stagedVariant = family.variants.first(where: { $0.fullName == roll.filmName }) ?? family.variants.first
-                                            stagedMaxFrames = roll.maxFrames
-                                            stagedExpired = roll.isExpired
-                                            stagedExpiredYear = roll.expiredYear
-                                            stagedAutoComp = roll.autoApplyExpiredComp
+                                            isBrowsingFilmCatalog = false
                                         }
                                     }
-                                },
-                                onLoadRoll: { variant in
-                                    let nextRollNum = roll.isUnloaded ? roll.rollNumber : (roll.currentFrame > 1 ? roll.rollNumber + 1 : roll.rollNumber)
-                                    store.rollState = FilmRollState(
-                                        rollNumber: nextRollNum,
-                                        filmName: variant.fullName,
-                                        boxIso: variant.iso,
-                                        category: family.category,
-                                        currentFrame: 1,
-                                        maxFrames: stagedMaxFrames,
-                                        isExpired: stagedExpired,
-                                        expiredYear: stagedExpiredYear,
-                                        autoApplyExpiredComp: stagedAutoComp
-                                    )
-                                    withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
-                                        expandedFamilyKey = nil
-                                    }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 30)
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Palette.panel)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
+                )
+        )
     }
 
-    private var customFilmSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("CUSTOM FILM STOCKS")
-                    .font(AppTypography.label(10, weight: .bold))
-                    .tracking(0.8)
-                    .foregroundStyle(Palette.accent)
-                Spacer()
-                Button {
-                    MechanicalHaptics.tick()
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                        showCustomFilmCreator.toggle()
+    private var customFilmBrowserSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !store.customFilms.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(store.customFilms) { stock in
+                        HStack(spacing: 12) {
+                            FilmCanisterArtwork(
+                                brand: stock.name,
+                                familyName: stock.name,
+                                category: stock.category,
+                                iso: stock.iso,
+                                width: 34,
+                                height: 42
+                            )
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(stock.name)
+                                    .font(AppTypography.next(size: 14, weight: .semibold))
+                                    .foregroundStyle(Palette.text)
+                                Text("ISO \(stock.iso)  \u{00B7}  \(stock.category)")
+                                    .font(AppTypography.mono(size: 11, weight: .medium))
+                                    .foregroundStyle(Palette.dim)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
+                                    store.rollState = FilmRollState(
+                                        rollNumber: store.rollState.isUnloaded ? store.rollState.rollNumber : store.rollState.rollNumber + 1,
+                                        filmName: stock.name,
+                                        boxIso: stock.iso,
+                                        category: stock.category,
+                                        currentFrame: 1,
+                                        maxFrames: store.rollState.maxFrames
+                                    )
+                                    isBrowsingFilmCatalog = false
+                                }
+                            } label: {
+                                Text("Load")
+                                    .font(AppTypography.next(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.black)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Palette.accent, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                store.deleteCustomFilm(stock)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Palette.dim)
+                                    .padding(6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(10)
+                        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: showCustomFilmCreator ? "minus.circle.fill" : "plus.circle.fill")
-                        Text(showCustomFilmCreator ? "Close" : "New Stock")
-                    }
-                    .font(AppTypography.label(11, weight: .bold))
-                    .foregroundStyle(Palette.accent)
                 }
-                .buttonStyle(.plain)
             }
 
-            if showCustomFilmCreator {
-                VStack(alignment: .leading, spacing: 10) {
-                    TextField("Custom Film Name (e.g. Eastman 5219 / Vision3 500T)", text: $customFilmName)
-                        .font(AppTypography.label(13))
-                        .foregroundStyle(Palette.text)
-                        .padding(10)
-                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 10) {
+                Text("CREATE CUSTOM FILM STOCK")
+                    .font(AppTypography.next(size: 11, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(Palette.dim)
 
+                TextField("Film Name (e.g. Vision3 500T, Bulk Tri-X)", text: $customFilmName)
+                    .font(AppTypography.next(size: 14, weight: .regular))
+                    .foregroundStyle(Palette.text)
+                    .padding(10)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                Picker("Process", selection: $customFilmCategory) {
+                    Text("Color").tag("Color")
+                    Text("B&W").tag("B&W")
+                    Text("Slide").tag("Slide")
+                }
+                .pickerStyle(.segmented)
+
+                ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(["Color", "B&W", "Slide"], id: \.self) { cat in
-                            let sel = customFilmCategory == cat
+                        ForEach(FILM_ISO_STOPS, id: \.self) { isoStop in
+                            let sel = customFilmIso == isoStop
                             Button {
-                                MechanicalHaptics.tick()
-                                customFilmCategory = cat
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                customFilmIso = isoStop
                             } label: {
-                                Text(cat)
-                                    .font(AppTypography.label(11, weight: .bold))
-                                    .foregroundStyle(sel ? .black : Palette.textSub)
-                                    .frame(maxWidth: .infinity)
+                                Text("ISO \(isoStop)")
+                                    .font(AppTypography.mono(size: 11, weight: .semibold))
+                                    .foregroundStyle(sel ? Color.black : Palette.dim)
+                                    .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
                                     .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
                             }
                             .buttonStyle(.plain)
                         }
                     }
+                }
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(FILM_ISO_STOPS, id: \.self) { isoStop in
-                                let sel = customFilmIso == isoStop
-                                Button {
-                                    MechanicalHaptics.tick()
-                                    customFilmIso = isoStop
-                                } label: {
-                                    Text("ISO \(isoStop)")
-                                        .font(AppTypography.mono(11, weight: .bold))
-                                        .foregroundStyle(sel ? .black : Palette.textSub)
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 5)
-                                        .background(sel ? Palette.accent : Color.white.opacity(0.06), in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                let cleanName = customFilmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Custom Film"
+                    : customFilmName.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    let cleanName = customFilmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "Custom Film"
-                        : customFilmName.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                    LoadFilmHoldButton(label: "Hold to Save & Load \(cleanName) \(customFilmIso)") {
-                        let preset = FilmStockPreset(
-                            name: cleanName,
-                            iso: customFilmIso,
-                            category: customFilmCategory,
-                            isCustom: true
-                        )
-                        store.addCustomFilm(preset)
+                Button {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    let preset = FilmStockPreset(
+                        name: cleanName,
+                        iso: customFilmIso,
+                        category: customFilmCategory,
+                        isCustom: true
+                    )
+                    store.addCustomFilm(preset)
+                    withAnimation(.snappy(duration: 0.30, extraBounce: 0.0)) {
                         store.rollState = FilmRollState(
                             rollNumber: store.rollState.isUnloaded ? store.rollState.rollNumber : store.rollState.rollNumber + 1,
                             filmName: cleanName,
@@ -935,75 +858,24 @@ struct FilmLogbookSheet: View {
                             maxFrames: 36
                         )
                         customFilmName = ""
-                        showCustomFilmCreator = false
+                        isBrowsingFilmCatalog = false
                     }
-                }
-                .padding(10)
-                .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-
-            if !store.customFilms.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(store.customFilms) { stock in
-                            HStack(spacing: 8) {
-                                Button {
-                                    MechanicalHaptics.confirm()
-                                    store.rollState = FilmRollState(
-                                        rollNumber: store.rollState.isUnloaded ? store.rollState.rollNumber : store.rollState.rollNumber + 1,
-                                        filmName: stock.name,
-                                        boxIso: stock.iso,
-                                        category: stock.category,
-                                        currentFrame: 1,
-                                        maxFrames: store.rollState.maxFrames
-                                    )
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        FilmCanisterArtwork(
-                                            brand: stock.name,
-                                            familyName: stock.name,
-                                            category: stock.category,
-                                            iso: stock.iso,
-                                            width: 28,
-                                            height: 36
-                                        )
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(stock.name)
-                                                .font(AppTypography.label(12, weight: .bold))
-                                                .foregroundStyle(Palette.text)
-                                            Text("ISO \(stock.iso) · \(stock.category)")
-                                                .font(AppTypography.mono(10, weight: .medium))
-                                                .foregroundStyle(Palette.textSub)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    MechanicalHaptics.warning()
-                                    store.deleteCustomFilm(stock)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(Palette.textDim)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(8)
-                            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Save & Load \(cleanName) \(customFilmIso)")
+                            .font(AppTypography.next(size: 13, weight: .semibold))
                     }
+                    .foregroundStyle(Color.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Palette.accent, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
+            .padding(12)
+            .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Palette.panelRaised)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: 0.75)
-                )
-        )
     }
 
     // MARK: - Tab 1: Logged Frames Roll Archive
@@ -1034,44 +906,46 @@ struct FilmLogbookSheet: View {
                 if rollGroups.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "film")
-                            .font(.system(size: 30, weight: .semibold))
+                            .font(.system(size: 28, weight: .semibold))
                             .foregroundStyle(Palette.accent)
                             .padding(14)
                             .background(Palette.accent.opacity(0.14), in: Circle())
 
                         Text("No Logged Frames")
-                            .font(AppTypography.label(16, weight: .bold))
+                            .font(AppTypography.next(size: 16, weight: .semibold))
                             .foregroundStyle(Palette.text)
 
-                        Text("Tap HOLD on the viewfinder to freeze a reading, then tap 'Log Frame' to record your exposure, snapshot, and GPS.")
-                            .font(AppTypography.label(12, weight: .medium))
-                            .foregroundStyle(Palette.textSub)
+                        Text("Press the Hold shutter button on the main meter, then tap the green checkmark to log your exposure, reference photo, and GPS.")
+                            .font(AppTypography.next(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.dim)
                             .multilineTextAlignment(.center)
                     }
                     .padding(28)
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Palette.panelRaised)
+                            .fill(Palette.panel)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .strokeBorder(Palette.border, lineWidth: 0.75)
+                                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
                             )
                     )
                 } else {
                     ForEach(Array(rollGroups.enumerated()), id: \.element.key) { idx, group in
                         let isExpanded = idx == 0 || expandedRollKeys.contains(group.key) || !searchQuery.isEmpty
                         VStack(spacing: 10) {
-                            HStack(spacing: 10) {
+                            HStack(spacing: 12) {
                                 Button {
-                                    MechanicalHaptics.tick()
-                                    if expandedRollKeys.contains(group.key) {
-                                        expandedRollKeys.remove(group.key)
-                                    } else {
-                                        expandedRollKeys.insert(group.key)
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    withAnimation(.snappy(duration: 0.28, extraBounce: 0.0)) {
+                                        if expandedRollKeys.contains(group.key) {
+                                            expandedRollKeys.remove(group.key)
+                                        } else {
+                                            expandedRollKeys.insert(group.key)
+                                        }
                                     }
                                 } label: {
-                                    HStack(spacing: 10) {
+                                    HStack(spacing: 12) {
                                         FilmCanisterArtwork(
                                             brand: group.header.filmName,
                                             familyName: group.header.filmName,
@@ -1081,22 +955,22 @@ struct FilmLogbookSheet: View {
                                             height: 44
                                         )
 
-                                        VStack(alignment: .leading, spacing: 2) {
+                                        VStack(alignment: .leading, spacing: 3) {
                                             HStack(spacing: 6) {
                                                 Text(String(format: "ROLL #%02d", group.header.rollNumber))
-                                                    .font(AppTypography.mono(10, weight: .black))
-                                                    .foregroundStyle(.black)
+                                                    .font(AppTypography.mono(size: 10, weight: .bold))
+                                                    .foregroundStyle(Color.black)
                                                     .padding(.horizontal, 7)
                                                     .padding(.vertical, 2)
                                                     .background(Palette.accent, in: Capsule())
 
                                                 Text("\(group.frames.count) exposures")
-                                                    .font(AppTypography.mono(11, weight: .bold))
-                                                    .foregroundStyle(Palette.textSub)
+                                                    .font(AppTypography.mono(size: 11, weight: .medium))
+                                                    .foregroundStyle(Palette.dim)
                                             }
 
-                                            Text(formatFilmDisplay(name: group.header.filmName, iso: group.header.iso))
-                                                .font(AppTypography.label(14, weight: .bold))
+                                            Text(shortFilmBadge(name: group.header.filmName, iso: group.header.iso))
+                                                .font(AppTypography.next(size: 15, weight: .semibold))
                                                 .foregroundStyle(Palette.text)
                                                 .lineLimit(1)
                                         }
@@ -1107,42 +981,42 @@ struct FilmLogbookSheet: View {
 
                                 // CSV & Share buttons
                                 Button {
-                                    MechanicalHaptics.confirm()
+                                    UISelectionFeedbackGenerator().selectionChanged()
                                     if let url = ExifAndXmpWriter.createRollCsvFileURL(group.frames) {
                                         shareSheetItem = ShareSheetItem(items: [url])
                                     }
                                 } label: {
                                     Text("CSV")
-                                        .font(AppTypography.mono(10, weight: .bold))
+                                        .font(AppTypography.mono(size: 11, weight: .semibold))
                                         .foregroundStyle(Palette.accent)
-                                        .padding(.horizontal, 9)
+                                        .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
                                         .background(Palette.accent.opacity(0.14), in: Capsule())
                                 }
                                 .buttonStyle(.plain)
 
                                 Button {
-                                    MechanicalHaptics.confirm()
+                                    UISelectionFeedbackGenerator().selectionChanged()
                                     let summary = ExifAndXmpWriter.generateRollTextSummary(group.frames)
                                     if !summary.isEmpty {
                                         shareSheetItem = ShareSheetItem(items: [summary])
                                     }
                                 } label: {
                                     Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 13, weight: .bold))
+                                        .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(Palette.text)
                                         .padding(7)
                                         .background(Color.white.opacity(0.08), in: Circle())
                                 }
                                 .buttonStyle(.plain)
                             }
-                            .padding(12)
+                            .padding(14)
                             .background(
                                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .fill(Palette.panelRaised)
+                                    .fill(Palette.panel)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .strokeBorder(Palette.border, lineWidth: 0.75)
+                                            .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75)
                                     )
                             )
 
@@ -1172,134 +1046,141 @@ struct FilmLogbookSheet: View {
     }
 }
 
-// MARK: - Active Roll Hero Card
+// MARK: - Active Roll Hero Card (Clean, No +/- Stepper, Interactive Rewind Canister)
 
 private struct ActiveRollHeroCard: View {
     let roll: FilmRollState
+    let isBrowsingCatalog: Bool
+    let onToggleCatalog: () -> Void
     let onCompleteRoll: () -> Void
-    let onAdjustFrame: (Int) -> Void
+
+    @State private var rewindProgress: CGFloat = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if roll.isUnloaded {
                 HStack(spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .fill(Palette.accent.opacity(0.16))
-                            .frame(width: 48, height: 48)
+                            .frame(width: 46, height: 46)
                         Image(systemName: "film.stack")
-                            .font(.system(size: 21, weight: .bold))
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(Palette.accent)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(String(format: "CAMERA CHAMBER EMPTY · NEXT ROLL #%02d", roll.rollNumber))
-                            .font(AppTypography.label(10, weight: .bold))
-                            .tracking(0.7)
+                        Text(String(format: "NO FILM LOADED  \u{00B7}  NEXT ROLL #%02d", roll.rollNumber))
+                            .font(AppTypography.next(size: 11, weight: .semibold))
+                            .tracking(1.0)
                             .foregroundStyle(Palette.accent)
 
-                        Text("Select a 35mm or 120 film stock below to load your camera")
-                            .font(AppTypography.label(13, weight: .bold))
+                        Text("Choose a film stock below to load your camera")
+                            .font(AppTypography.next(size: 15, weight: .semibold))
                             .foregroundStyle(Palette.text)
                     }
                     Spacer()
                 }
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: 14) {
                     FilmCanisterArtwork(
                         brand: roll.filmName,
                         familyName: roll.filmName,
                         category: roll.category,
                         iso: roll.boxIso,
                         showLeader: true,
-                        width: 54,
+                        leaderExtension: 1.0 - rewindProgress,
+                        width: 52,
                         height: 64
                     )
 
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Text(String(format: "ACTIVE ROLL #%02d", roll.rollNumber))
-                                .font(AppTypography.mono(10, weight: .black))
-                                .foregroundStyle(.black)
+                            Text(String(format: "ROLL #%02d", roll.rollNumber))
+                                .font(AppTypography.mono(size: 10, weight: .bold))
+                                .foregroundStyle(Color.black)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
                                 .background(Palette.accent, in: Capsule())
 
                             Text(roll.category.uppercased())
-                                .font(AppTypography.mono(9.5, weight: .bold))
-                                .foregroundStyle(Palette.textSub)
-                                .padding(.horizontal, 6)
+                                .font(AppTypography.mono(size: 10, weight: .semibold))
+                                .foregroundStyle(Palette.dim)
+                                .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.08), in: Capsule())
+                                .background(Color.white.opacity(0.06), in: Capsule())
 
                             if roll.isExpired {
                                 Text("EXP \(roll.expiredYear)")
-                                    .font(AppTypography.mono(9.5, weight: .bold))
+                                    .font(AppTypography.mono(size: 10, weight: .semibold))
                                     .foregroundStyle(Palette.slow)
-                                    .padding(.horizontal, 6)
+                                    .padding(.horizontal, 7)
                                     .padding(.vertical, 2)
                                     .background(Palette.slow.opacity(0.16), in: Capsule())
                             }
                         }
 
-                        Text(formatFilmDisplay(name: roll.filmName, iso: roll.boxIso))
-                            .font(AppTypography.label(16, weight: .bold))
+                        Text(shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
+                            .font(AppTypography.next(size: 18, weight: .bold))
                             .foregroundStyle(Palette.text)
                             .lineLimit(1)
 
                         HStack(spacing: 8) {
                             Text(roll.isBonusFrames
                                  ? String(format: "Frame +%02d (Bonus past %d)", roll.currentFrame, roll.maxFrames)
-                                 : String(format: "Frame %02d / %02d", roll.currentFrame, roll.maxFrames))
-                                .font(AppTypography.mono(12, weight: .bold))
+                                 : String(format: "Frame %02d of %02d", roll.currentFrame, roll.maxFrames))
+                                .font(AppTypography.mono(size: 12, weight: .semibold))
                                 .foregroundStyle(roll.isBonusFrames ? Palette.good : Palette.accent)
 
                             if roll.activeExpiredCompEv > 0.05 {
-                                Text("+\(String(format: "%.1f", roll.activeExpiredCompEv)) EV Auto-Comp")
-                                    .font(AppTypography.mono(10, weight: .bold))
+                                Text("+\(String(format: "%.1f", roll.activeExpiredCompEv)) EV")
+                                    .font(AppTypography.mono(size: 11, weight: .semibold))
                                     .foregroundStyle(Palette.slow)
                             }
                         }
                     }
 
-                    Spacer()
+                    Spacer(minLength: 4)
 
-                    // Manual Frame Stepper (- / +)
-                    VStack(spacing: 4) {
-                        Button {
-                            onAdjustFrame(1)
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(Palette.text)
-                                .frame(width: 28, height: 24)
-                                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            onAdjustFrame(-1)
-                        } label: {
-                            Image(systemName: "minus")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(Palette.text)
-                                .frame(width: 28, height: 24)
-                                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
+                    Button(action: onToggleCatalog) {
+                        Text(isBrowsingCatalog ? "Hide" : "Change")
+                            .font(AppTypography.next(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Palette.accent.opacity(0.12), in: Capsule())
                     }
+                    .buttonStyle(.plain)
                 }
 
-                CompleteRollHoldButton(onCompleted: onCompleteRoll)
+                // Subtle roll progress bar
+                GeometryReader { geo in
+                    let frac = min(max(CGFloat(roll.currentFrame - 1) / CGFloat(max(roll.maxFrames, 1)), 0.04), 1.0)
+                    let displayFrac = frac * (1.0 - rewindProgress)
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.white.opacity(0.06))
+                        Capsule()
+                            .fill(roll.isBonusFrames ? Palette.good : Palette.accent)
+                            .frame(width: geo.size.width * displayFrac)
+                    }
+                }
+                .frame(height: 5)
+
+                CompleteRollHoldButton(
+                    currentFrame: roll.currentFrame,
+                    rewindProgress: $rewindProgress,
+                    onCompleted: onCompleteRoll
+                )
             }
         }
-        .padding(14)
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Palette.panelRaised)
+                .fill(Palette.panel)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(roll.isUnloaded ? Palette.border : Palette.accent.opacity(0.45), lineWidth: 1)
+                        .strokeBorder(roll.isUnloaded ? Color.white.opacity(0.09) : Palette.accent.opacity(0.35), lineWidth: 0.75)
                 )
         )
     }
@@ -1334,99 +1215,89 @@ private struct FilmFamilyExpandableCard: View {
                         category: family.category,
                         iso: previewVariant.iso,
                         showLeader: isActiveFamily || isExpanded,
-                        width: 44,
-                        height: 54
+                        width: 40,
+                        height: 50
                     )
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text(family.familyName)
-                                .font(AppTypography.label(14, weight: .bold))
+                                .font(AppTypography.next(size: 15, weight: .semibold))
                                 .foregroundStyle(isActiveFamily ? Palette.accent : Palette.text)
-
-                            Text(family.category.uppercased())
-                                .font(AppTypography.mono(9, weight: .bold))
-                                .foregroundStyle(Palette.textSub)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.06), in: Capsule())
 
                             if isActiveFamily {
                                 Text("LOADED")
-                                    .font(AppTypography.mono(9, weight: .black))
-                                    .foregroundStyle(.black)
+                                    .font(AppTypography.mono(size: 9.5, weight: .bold))
+                                    .foregroundStyle(Color.black)
                                     .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
+                                    .padding(.vertical, 1.5)
                                     .background(Palette.accent, in: Capsule())
                             }
                         }
 
-                        Text(family.variants.map(\.label).joined(separator: "  ·  "))
-                            .font(AppTypography.label(11, weight: .medium))
-                            .foregroundStyle(Palette.textSub)
+                        Text(family.variants.map { "ISO \($0.iso)" }.joined(separator: "  \u{00B7}  "))
+                            .font(AppTypography.mono(size: 11, weight: .medium))
+                            .foregroundStyle(Palette.dim)
                             .lineLimit(1)
                     }
 
                     Spacer()
 
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Palette.textSub)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.dim)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if isExpanded {
-                Divider().overlay(Palette.border)
+                Divider().overlay(Color.white.opacity(0.08))
 
                 // 1. Choose Variant / Speed
-                Text("FILM VARIANT & BOX ISO")
-                    .font(AppTypography.label(10, weight: .bold))
-                    .foregroundStyle(Palette.textSub)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(family.variants) { v in
-                            let sel = (stagedVariant?.id ?? family.variants.first?.id) == v.id
-                            Button {
-                                MechanicalHaptics.tick()
-                                stagedVariant = v
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Text(v.label)
-                                        .font(AppTypography.label(12, weight: .bold))
+                if family.variants.count > 1 {
+                    HStack {
+                        Text("Speed")
+                            .font(AppTypography.next(size: 12, weight: .medium))
+                            .foregroundStyle(Palette.dim)
+                        Spacer()
+                        HStack(spacing: 6) {
+                            ForEach(family.variants) { v in
+                                let sel = (stagedVariant?.id ?? family.variants.first?.id) == v.id
+                                Button {
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    stagedVariant = v
+                                } label: {
                                     Text("ISO \(v.iso)")
-                                        .font(AppTypography.mono(10, weight: .bold))
-                                        .opacity(0.8)
+                                        .font(AppTypography.mono(size: 11, weight: .semibold))
+                                        .foregroundStyle(sel ? Color.black : Palette.text)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(sel ? Palette.accent : Color.white.opacity(0.07), in: Capsule())
                                 }
-                                .foregroundStyle(sel ? .black : Palette.text)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 7)
-                                .background(sel ? Palette.accent : Color.white.opacity(0.07), in: Capsule())
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
 
                 // 2. Roll Exposure Length (12, 16, 24, 36)
                 HStack {
-                    Text("EXPOSURES")
-                        .font(AppTypography.label(10, weight: .bold))
-                        .foregroundStyle(Palette.textSub)
+                    Text("Roll Length")
+                        .font(AppTypography.next(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.dim)
                     Spacer()
                     HStack(spacing: 6) {
                         ForEach(ROLL_LENGTH_OPTIONS, id: \.self) { len in
                             let sel = stagedMaxFrames == len
                             Button {
-                                MechanicalHaptics.tick()
+                                UISelectionFeedbackGenerator().selectionChanged()
                                 stagedMaxFrames = len
                             } label: {
                                 Text("\(len) exp")
-                                    .font(AppTypography.mono(11, weight: .bold))
-                                    .foregroundStyle(sel ? .black : Palette.textSub)
+                                    .font(AppTypography.mono(size: 11, weight: .semibold))
+                                    .foregroundStyle(sel ? Color.black : Palette.dim)
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 5)
                                     .background(sel ? Palette.accent : Color.white.opacity(0.07), in: Capsule())
@@ -1437,31 +1308,29 @@ private struct FilmFamilyExpandableCard: View {
                 }
 
                 // 3. Expired Film Toggle & Decade Compensation
-                HStack {
-                    Toggle(isOn: $stagedExpired) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Expired Film Stock")
-                                .font(AppTypography.label(12, weight: .bold))
-                                .foregroundStyle(Palette.text)
-                            Text(family.category == "Slide" ? "Slide film keeps 0 EV highlight protection" : "+1 stop per decade rule")
-                                .font(AppTypography.label(10, weight: .medium))
-                                .foregroundStyle(Palette.textSub)
-                        }
+                Toggle(isOn: $stagedExpired.animation(.snappy(duration: 0.22))) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Expired Film")
+                            .font(AppTypography.next(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.text)
+                        Text(family.category == "Slide" ? "Slide film keeps 0.0 EV highlight protection" : "+1 stop per decade compensation")
+                            .font(AppTypography.next(size: 11, weight: .regular))
+                            .foregroundStyle(Palette.dim)
                     }
-                    .tint(Palette.accent)
                 }
+                .tint(Palette.accent)
 
                 if stagedExpired {
                     HStack(spacing: 6) {
                         ForEach(expiryDecadeYears, id: \.self) { yr in
                             let sel = stagedExpiredYear == yr
                             Button {
-                                MechanicalHaptics.tick()
+                                UISelectionFeedbackGenerator().selectionChanged()
                                 stagedExpiredYear = yr
                             } label: {
                                 Text("\(yr)s")
-                                    .font(AppTypography.mono(11, weight: .bold))
-                                    .foregroundStyle(sel ? .black : Palette.textSub)
+                                    .font(AppTypography.mono(size: 11, weight: .semibold))
+                                    .foregroundStyle(sel ? Color.black : Palette.dim)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 6)
                                     .background(sel ? Palette.slow : Color.white.opacity(0.06), in: Capsule())
@@ -1471,28 +1340,41 @@ private struct FilmFamilyExpandableCard: View {
                     }
 
                     if family.category != "Slide" {
-                        Toggle("Auto-Apply +1 EV / Decade Compensation", isOn: $stagedAutoComp)
-                            .font(AppTypography.label(11, weight: .semibold))
+                        Toggle("Auto-Apply +1 EV / Decade", isOn: $stagedAutoComp)
+                            .font(AppTypography.next(size: 12, weight: .medium))
                             .foregroundStyle(Palette.slow)
                             .tint(Palette.slow)
                     }
                 }
 
-                // 4. Hold to Load Canister Button
+                // 4. Load Film Button
                 let chosen = stagedVariant ?? family.variants.first!
-                LoadFilmHoldButton(label: "Hold to Load \(chosen.fullName)") {
+                Button {
                     onLoadRoll(chosen)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Text("Load \(shortFilmBadge(name: chosen.fullName, iso: chosen.iso))")
+                            .font(AppTypography.next(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Palette.accent, in: Capsule())
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(isActiveFamily ? Palette.accent.opacity(0.10) : Palette.panelRaised)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isExpanded ? Color.white.opacity(0.05) : (isActiveFamily ? Palette.accent.opacity(0.08) : Color.white.opacity(0.03)))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(isActiveFamily || isExpanded ? Palette.accent.opacity(0.55) : Palette.border, lineWidth: 0.9)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(isActiveFamily || isExpanded ? Palette.accent.opacity(0.40) : Color.white.opacity(0.06), lineWidth: 0.75)
                 )
         )
+        .clipped()
     }
 }
