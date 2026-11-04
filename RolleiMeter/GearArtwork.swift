@@ -36,20 +36,22 @@ struct CameraBrandLogo: View {
             let h = canvasSize.height
             let baseRect = CGRect(x: 0, y: 0, width: w, height: h)
             let baseRRect = Path(roundedRect: baseRect, cornerRadius: w * 0.18)
+            // Brand marks that are already a finished enamel plaque skip the
+            // medallion bevel and sheen.
+            var plainBrand = false
 
             if clean.contains("leica") {
-                let r = min(w, h) * 0.46
-                let circleRect = CGRect(x: w * 0.5 - r, y: h * 0.5 - r, width: r * 2, height: r * 2)
-                ctx.fill(Path(ellipseIn: circleRect), with: .color(Color(hex: 0xE60012)))
-                var lPath = Path()
-                lPath.move(to: CGPoint(x: w * 0.38, y: h * 0.28))
-                lPath.addLine(to: CGPoint(x: w * 0.44, y: h * 0.28))
-                lPath.addLine(to: CGPoint(x: w * 0.44, y: h * 0.65))
-                lPath.addLine(to: CGPoint(x: w * 0.64, y: h * 0.65))
-                lPath.addLine(to: CGPoint(x: w * 0.64, y: h * 0.73))
-                lPath.addLine(to: CGPoint(x: w * 0.38, y: h * 0.73))
-                lPath.closeSubpath()
-                ctx.fill(lPath, with: .color(.white))
+                // A solid red box with the wordmark. The old mark was a red disc
+                // floating inside a translucent square, so every corner showed
+                // empty and the bevel ring read as a stray outline.
+                ctx.fill(baseRRect, with: .color(Color(hex: 0xE60012)))
+                let wordmark = ctx.resolve(
+                    Text("Leica")
+                        .font(.custom("GeistSerif-Regular", size: w * 0.27).italic())
+                        .foregroundStyle(.white)
+                )
+                ctx.draw(wordmark, at: CGPoint(x: w * 0.5, y: h * 0.53))
+                plainBrand = true
             } else if clean.contains("nikon") || clean.contains("nikkormat") || clean.contains("nikkor") {
                 ctx.fill(baseRRect, with: .color(Color(hex: 0xFFD200)))
                 for k in 0...3 {
@@ -65,11 +67,26 @@ struct CameraBrandLogo: View {
                 }
             } else if clean.contains("canon") {
                 ctx.fill(baseRRect, with: .color(Color(hex: 0xCC0000)))
-                let r = h * 0.26
-                let cRect = CGRect(x: w * 0.50 - r, y: h * 0.50 - r, width: r * 2, height: r * 2)
-                ctx.stroke(Path(ellipseIn: cRect), with: .color(.white), lineWidth: w * 0.10)
-                let cutRect = CGRect(x: w * 0.50, y: h * 0.35, width: w * 0.25, height: h * 0.30)
-                ctx.fill(Path(cutRect), with: .color(Color(hex: 0xCC0000)))
+                // The C is a ring with a slice cut out of its right side. The old
+                // version laid a square over a closed ring, so the letter read as
+                // a box instead of an opening.
+                let cx = w * 0.50
+                let cy = h * 0.50
+                let radius = h * 0.27
+                var cPath = Path()
+                let steps = 44
+                let start = 0.055
+                let end = 0.945
+                for i in 0...steps {
+                    let fraction = start + (end - start) * Double(i) / Double(steps)
+                    let angle = fraction * 2 * Double.pi
+                    let point = CGPoint(x: cx + radius * CGFloat(cos(angle)),
+                                        y: cy + radius * CGFloat(sin(angle)))
+                    if i == 0 { cPath.move(to: point) } else { cPath.addLine(to: point) }
+                }
+                ctx.stroke(cPath,
+                           with: .color(.white),
+                           style: StrokeStyle(lineWidth: w * 0.115, lineCap: .butt))
             } else if clean.contains("olympus") {
                 ctx.fill(baseRRect, with: .color(Color(hex: 0x002B66)))
                 let r = h * 0.20
@@ -384,6 +401,8 @@ struct CameraBrandLogo: View {
                     lineWidth: w * 0.08
                 )
             }
+
+            guard !plainBrand else { return }
 
             // Machined enamel medallion finish: metal bevel ring + diagonal glass sheen
             let bevelRect = CGRect(x: w * 0.02, y: h * 0.02, width: w * 0.96, height: h * 0.96)

@@ -188,7 +188,9 @@ struct HoldControl: View {
                 .buttonStyle(PressStyle(scale: 0.94))
                 .accessibilityLabel("Discard reading")
 
-                // Confirm & Log Frame Button (Green Plus + Checkmark)
+                // Confirm & log frame. The frame number already lives in the
+                // top-left panel and the shutter press is obviously an addition,
+                // so the button says one thing: log it.
                 Button {
                     guard !isSaved else { return }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -203,21 +205,9 @@ struct HoldControl: View {
                             .fill(Palette.good)
                             .frame(width: 126 * k, height: 126 * k)
 
-                        VStack(spacing: 2 * k) {
-                            HStack(spacing: 2 * k) {
-                                if !isSaved {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 22 * k, weight: .black))
-                                }
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 34 * k, weight: .black))
-                            }
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 52 * k, weight: .black))
                             .foregroundStyle(Color.black)
-
-                            Text(String(format: "#%02d", frameNumber))
-                                .font(AppTypography.mono(size: 16 * k, weight: .bold))
-                                .foregroundStyle(Color.black.opacity(0.82))
-                        }
                     }
                     .frame(width: 162 * k, height: 162 * k)
                     .contentShape(Circle())

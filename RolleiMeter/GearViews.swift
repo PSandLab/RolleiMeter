@@ -8,8 +8,13 @@ import SwiftUI
 /// Pushed from the parent `NavigationStack` (`RollScreen`). The screen never
 /// creates a stack of its own, so the system back button, the swipe-back
 /// gesture and the grouped `List` chrome all come for free.
+///
+/// `onFinish` clears the whole stack once a body or a lens is mounted: choosing
+/// gear is a detour, and it ends back at the roll, not three screens deep in a
+/// catalog.
 struct GearPickerScreen: View {
     @ObservedObject var store: FilmLogStore
+    var onFinish: () -> Void = {}
 
     private var gear: ActiveGearProfile { store.activeGear }
 
@@ -121,7 +126,7 @@ struct GearPickerScreen: View {
     private var cameraSection: some View {
         Section {
             NavigationLink {
-                CameraCatalogList(store: store)
+                CameraCatalogList(store: store, onFinish: onFinish)
             } label: {
                 HStack(spacing: 12) {
                     ListGlyph(systemName: "camera")
@@ -141,7 +146,7 @@ struct GearPickerScreen: View {
     private var lensSection: some View {
         Section {
             NavigationLink {
-                LensCatalogList(store: store)
+                LensCatalogList(store: store, onFinish: onFinish)
             } label: {
                 HStack(spacing: 12) {
                     ListGlyph(systemName: "camera.aperture")
@@ -161,7 +166,7 @@ struct GearPickerScreen: View {
     private var customGearSection: some View {
         Section {
             NavigationLink {
-                CustomGearForm(store: store)
+                CustomGearForm(store: store, onFinish: onFinish)
             } label: {
                 HStack(spacing: 12) {
                     ListGlyph(systemName: "plus", tint: Palette.good)
@@ -194,6 +199,7 @@ private let cameraPopularBrandOrder: [String] = [
 /// so this screen lists brands first and pushes the bodies of one brand.
 struct CameraCatalogList: View {
     @ObservedObject var store: FilmLogStore
+    var onFinish: () -> Void = {}
 
     @State private var searchText = ""
 
@@ -220,7 +226,7 @@ struct CameraCatalogList: View {
                     Section {
                         ForEach(popular) { group in
                             NavigationLink {
-                                CameraBrandScreen(store: store, brand: group.brand)
+                                CameraBrandScreen(store: store, brand: group.brand, onFinish: onFinish)
                             } label: {
                                 CameraBrandRow(group: group,
                                                isActive: group.brand == activeBrand)
@@ -234,7 +240,7 @@ struct CameraCatalogList: View {
                 if !rare.isEmpty {
                     Section {
                         NavigationLink {
-                            RareBrandScreen(store: store)
+                            RareBrandScreen(store: store, onFinish: onFinish)
                         } label: {
                             HStack(spacing: 12) {
                                 ListGlyph(systemName: "clock.arrow.circlepath")
@@ -256,30 +262,12 @@ struct CameraCatalogList: View {
                         Text("Bodies from small and discontinued makers, kept out of the popular list.")
                     }
                 }
-
-                if !customCameras.isEmpty {
-                    Section {
-                        ForEach(customCameras) { camera in
-                            NavigationLink {
-                                CameraDetailView(store: store, camera: camera)
-                            } label: {
-                                CameraModelRow(camera: camera,
-                                               subtitle: cameraRowSubtitle(camera, includingBrand: true),
-                                               isActive: camera.id == store.activeGear.cameraId)
-                            }
-                        }
-                    } header: {
-                        Text("Custom")
-                    } footer: {
-                        Text("Cameras you added yourself.")
-                    }
-                }
             } else {
                 if !brandMatches.isEmpty {
                     Section {
                         ForEach(brandMatches) { group in
                             NavigationLink {
-                                CameraBrandScreen(store: store, brand: group.brand)
+                                CameraBrandScreen(store: store, brand: group.brand, onFinish: onFinish)
                             } label: {
                                 CameraBrandRow(group: group,
                                                isActive: group.brand == activeBrand)
@@ -294,7 +282,7 @@ struct CameraCatalogList: View {
                     Section {
                         ForEach(cameraMatches) { camera in
                             NavigationLink {
-                                CameraDetailView(store: store, camera: camera)
+                                CameraDetailView(store: store, camera: camera, onFinish: onFinish)
                             } label: {
                                 CameraModelRow(camera: camera,
                                                subtitle: cameraRowSubtitle(camera, includingBrand: true),
@@ -306,6 +294,8 @@ struct CameraCatalogList: View {
                     }
                 }
             }
+
+            customSection(customCameras)
         }
         .listStyle(.insetGrouped)
         .searchable(text: $searchText, prompt: "Search brands or cameras")
@@ -317,12 +307,60 @@ struct CameraCatalogList: View {
         .navigationTitle("Camera")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    /// Always present, so there is a way out when the body is not in the
+    /// catalog — including while searching.
+    @ViewBuilder
+    private func customSection(_ customCameras: [CameraGearSpec]) -> some View {
+        Section {
+            ForEach(customCameras) { camera in
+                NavigationLink {
+                    CameraDetailView(store: store, camera: camera, onFinish: onFinish)
+                } label: {
+                    CameraModelRow(camera: camera,
+                                   subtitle: cameraRowSubtitle(camera, includingBrand: true),
+                                   isActive: camera.id == store.activeGear.cameraId)
+                }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        store.removeCustomCamera(id: camera.id)
+                        Haptics.warning()
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+
+            NavigationLink {
+                CustomGearForm(store: store, onFinish: onFinish, presetKinds: [.fixedLens, .body])
+            } label: {
+                HStack(spacing: 12) {
+                    ListGlyph(systemName: "plus", tint: Palette.good)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Enter a custom camera")
+                            .foregroundStyle(Palette.text)
+                        Text("A body that is not in the catalog")
+                            .font(Geist.text(.subheadline))
+                            .foregroundStyle(Palette.textSub)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        } header: {
+            Text("Custom")
+        } footer: {
+            Text(customCameras.isEmpty
+                 ? "Add any body, fixed lens or interchangeable."
+                 : "Bodies you added. Swipe a row to delete it.")
+        }
+    }
 }
 
 /// The bodies of one brand. Pushes the mount profiles of the selected body.
 struct CameraBrandScreen: View {
     @ObservedObject var store: FilmLogStore
     let brand: String
+    var onFinish: () -> Void = {}
 
     var body: some View {
         let cameras = GearCatalogCache.allCameras(customCameras: store.customCameras)
@@ -333,17 +371,23 @@ struct CameraBrandScreen: View {
             Section {
                 ForEach(cameras) { camera in
                     NavigationLink {
-                        CameraDetailView(store: store, camera: camera)
+                        CameraDetailView(store: store, camera: camera, onFinish: onFinish)
                     } label: {
                         CameraModelRow(camera: camera,
                                        subtitle: cameraRowSubtitle(camera, includingBrand: false),
                                        isActive: camera.id == store.activeGear.cameraId)
                     }
                 }
+
+                NavigationLink {
+                    CustomGearForm(store: store, onFinish: onFinish, presetKinds: [.fixedLens, .body], presetBrand: brand)
+                } label: {
+                    Label("Enter a custom camera", systemImage: "plus")
+                }
             } header: {
                 Text("Bodies")
             } footer: {
-                Text("Every \(brand) body in the catalog.")
+                Text("Every \(brand) body in the catalog, plus any of your own.")
             }
         }
         .listStyle(.insetGrouped)
@@ -364,6 +408,7 @@ struct CameraBrandScreen: View {
 /// on the popular list lands here automatically.
 struct RareBrandScreen: View {
     @ObservedObject var store: FilmLogStore
+    var onFinish: () -> Void = {}
 
     var body: some View {
         let cameras = GearCatalogCache.allCameras(customCameras: store.customCameras)
@@ -374,7 +419,7 @@ struct RareBrandScreen: View {
             Section {
                 ForEach(groups) { group in
                     NavigationLink {
-                        CameraBrandScreen(store: store, brand: group.brand)
+                        CameraBrandScreen(store: store, brand: group.brand, onFinish: onFinish)
                     } label: {
                         CameraBrandRow(group: group,
                                        isActive: group.brand == activeBrand)
@@ -401,32 +446,56 @@ struct RareBrandScreen: View {
 
 // MARK: - Camera detail (mount profiles)
 
-/// The mount profiles of one body: the fixed lens it was built around, or the
-/// native-mount lenses, an adapter profile for anything else, or no lens at
-/// all. Mounting a profile pops back to the catalog.
+/// One body and what goes on it.
+///
+/// A fixed-lens body has exactly one possible setup, so its lens is presented as
+/// the subject of the screen and the only control mounts it — no invisible tap
+/// target, no choices that do not exist. An interchangeable body lists its own
+/// lenses first, with body-only and adapter as explicit alternatives. Whatever
+/// is chosen is applied with a hold, and the gear stack unwinds afterwards.
 struct CameraDetailView: View {
     @ObservedObject var store: FilmLogStore
     let camera: CameraGearSpec
+    var onFinish: () -> Void = {}
 
-    @Environment(\.dismiss) private var dismiss
+    /// What a hold will mount on this body.
+    private enum Choice: Hashable {
+        case fixed
+        case bodyOnly
+        case adapter
+    }
+
+    @State private var choice: Choice?
 
     var body: some View {
         List {
             cameraSection
-            profileSection
+            if camera.isFixed {
+                fixedLensSection
+            } else {
+                bodySection
+                lensSection
+            }
+            mountSection
         }
         .listStyle(.insetGrouped)
         .navigationTitle(camera.model)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if choice == nil, camera.isFixed { choice = .fixed }
+        }
     }
+
+    // MARK: Header
 
     private var cameraSection: some View {
         Section {
             HStack(spacing: 14) {
-                CameraBrandLogo(brand: camera.brand, size: 56)
+                CameraBrandLogo(brand: camera.brand, size: 52)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(camera.model)
-                        .font(Geist.text(.headline))
+                        .font(Geist.serifText(.headline))
+                        .lineLimit(2)
                     Text(camera.brand)
                         .font(Geist.text(.subheadline))
                         .foregroundStyle(.secondary)
@@ -435,7 +504,7 @@ struct CameraDetailView: View {
             .padding(.vertical, 2)
 
             LabeledContent("Mount") {
-                Text(camera.isFixed ? "Fixed lens" : camera.mount)
+                Text(camera.isFixed ? "Fixed lens" : formatMountBadge(camera.mount))
                     .foregroundStyle(.secondary)
             }
 
@@ -449,60 +518,149 @@ struct CameraDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private var profileSection: some View {
-        if camera.isFixed {
-            Section {
-                Button {
-                    mount(fixedProfile)
-                } label: {
-                    GearProfileRow(title: fixedLensTitle,
-                                   subtitle: "Fixed lens · \(formatApertureRange(camera.fixedMinAperture, camera.fixedMaxAperture))",
-                                   isActive: isFixedProfileActive)
+    // MARK: Fixed lens
+
+    private var fixedLensSection: some View {
+        Section {
+            HStack(spacing: 14) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 46, height: 46)
+                    .background(Palette.accent.opacity(0.15),
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(fixedLensTitle)
+                        .font(Geist.serifText(.headline))
+                        .lineLimit(2)
+                    Text("Built in · \(formatApertureRange(camera.fixedMinAperture, camera.fixedMaxAperture))")
+                        .font(Geist.text(.subheadline))
+                        .foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("Lens")
-            } footer: {
-                Text("This body is built around its lens, so mounting it also sets the aperture range.")
+
+                Spacer(minLength: 0)
             }
-        } else {
-            Section {
-                Button {
-                    mount(bodyOnlyProfile)
-                } label: {
-                    GearProfileRow(title: "Body only",
-                                   subtitle: "Use the body without a lens",
-                                   systemImage: "camera",
-                                   isActive: isBodyOnlyActive)
-                }
+            .padding(.vertical, 2)
+        } header: {
+            Text("Lens")
+        } footer: {
+            Text("This body is built around its lens, so there is nothing to choose.")
+        }
+    }
 
-                Button {
-                    mount(adapterProfile)
-                } label: {
-                    GearProfileRow(title: "Use an adapter",
-                                   subtitle: "Any lens you can mount",
-                                   systemImage: "arrow.triangle.swap",
-                                   isActive: isAdapterActive)
-                }
+    // MARK: Interchangeable body
 
+    private var bodySection: some View {
+        Section {
+            choiceRow(.bodyOnly,
+                      title: "Body only",
+                      detail: "A shutter and nothing else on the meter")
+
+            choiceRow(.adapter,
+                      title: "Use an adapter",
+                      detail: "Any lens you can fit, f/1.2 to f/32")
+        } header: {
+            Text("Without a catalog lens")
+        } footer: {
+            Text("Tap an option, then hold the control below. Or open one of the lenses further down to pick its version.")
+        }
+    }
+
+    @ViewBuilder
+    private var lensSection: some View {
+        Section {
+            if mountLenses.isEmpty {
+                Text("No catalog lens uses the \(formatMountBadge(camera.mount)) mount yet.")
+                    .font(Geist.text(.subheadline))
+                    .foregroundStyle(.secondary)
+
+                NavigationLink {
+                    CustomGearForm(store: store, onFinish: onFinish, presetKinds: [.lens])
+                } label: {
+                    Label("Enter a custom lens", systemImage: "plus")
+                }
+            } else {
                 ForEach(mountLenses) { entry in
                     NavigationLink {
-                        LensDetailView(store: store, entry: entry, hostCamera: camera)
+                        LensDetailView(store: store, entry: entry, hostCamera: camera, onFinish: onFinish)
                     } label: {
                         GearProfileRow(title: lensTitles(mountLenses)[entry.id] ?? lensRowTitle(entry),
                                        subtitle: lensRowSubtitle(entry),
                                        isActive: isEntryActive(entry))
                     }
                 }
-            } header: {
-                Text("Lens")
-            } footer: {
-                if mountLenses.isEmpty {
-                    Text("No catalog lens uses the \(formatMountBadge(camera.mount)) mount yet. Add one under Custom gear.\nAdapter: any lens you can mount, from f/1.2 to f/32.")
-                } else {
-                    Text("Lenses made for the \(formatMountBadge(camera.mount)) mount.\nAdapter: any lens you can mount, from f/1.2 to f/32.")
-                }
             }
+        } header: {
+            Text("\(formatMountBadge(camera.mount)) lenses")
+        } footer: {
+            if !mountLenses.isEmpty {
+                Text("Every lens in the catalog made for this mount.")
+            }
+        }
+    }
+
+    private func choiceRow(_ value: Choice, title: String, detail: String) -> some View {
+        Button {
+            Haptics.tap()
+            withAnimation(.snappy(duration: 0.2)) { choice = value }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: choice == value ? "checkmark.circle.fill" : "circle")
+                    .font(Geist.text(.body))
+                    .foregroundStyle(choice == value ? Palette.accent : Palette.textDim)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(Geist.text(.body))
+                        .foregroundStyle(Palette.text)
+                    Text(detail)
+                        .font(Geist.text(.subheadline))
+                        .foregroundStyle(Palette.textSub)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(choice == value ? [.isButton, .isSelected] : .isButton)
+    }
+
+    // MARK: Mount
+
+    private var mountSection: some View {
+        Section {
+            IrisHoldControl(
+                title: mountTitle,
+                workingTitle: "Mounting",
+                doneTitle: "Mounted",
+                hint: choice == nil ? "Choose an option above first" : "Press and hold to apply",
+                doneDetail: "The meter follows this gear",
+                holdDuration: 1.1,
+                isEnabled: choice != nil
+            ) {
+                guard let profile = selectedProfile else { return }
+                store.activeGear = profile
+                onFinish()
+            }
+        } footer: {
+            Text("The meter is limited to this body's shutter range and the mounted lens's aperture range.")
+        }
+    }
+
+    private var mountTitle: String {
+        switch choice {
+        case .fixed:
+            return "Hold to mount \(camera.model)"
+        case .bodyOnly:
+            return "Hold to mount the body"
+        case .adapter:
+            return "Hold to mount with an adapter"
+        case nil:
+            return "Choose what goes on the body"
         }
     }
 
@@ -517,26 +675,20 @@ struct CameraDetailView: View {
         camera.fixedLensName.isEmpty ? "Fixed lens" : camera.fixedLensName
     }
 
-    private var isFixedProfileActive: Bool {
-        let gear = store.activeGear
-        return gear.cameraId == camera.id && gear.isFixedLens
-    }
-
-    private var isBodyOnlyActive: Bool {
-        let gear = store.activeGear
-        return gear.cameraId == camera.id && !gear.hasLens
-    }
-
-    private var isAdapterActive: Bool {
-        let gear = store.activeGear
-        return gear.cameraId == camera.id && gear.lensId == adapterProfile.lensId
-    }
-
     private func isEntryActive(_ entry: PrewarmedLensEntry) -> Bool {
         let gear = store.activeGear
         guard gear.cameraId == camera.id, !gear.lensId.isEmpty else { return false }
         if gear.lensId == entry.lens.id { return true }
         return entry.variants.contains { $0.spec.id == gear.lensId }
+    }
+
+    private var selectedProfile: ActiveGearProfile? {
+        switch choice {
+        case .fixed: return fixedProfile
+        case .bodyOnly: return bodyOnlyProfile
+        case .adapter: return adapterProfile
+        case nil: return nil
+        }
     }
 
     private var fixedProfile: ActiveGearProfile {
@@ -585,12 +737,6 @@ struct CameraDetailView: View {
             maxAperture: 32.0
         )
     }
-
-    private func mount(_ profile: ActiveGearProfile) {
-        store.activeGear = profile
-        Haptics.success()
-        dismiss()
-    }
 }
 
 // MARK: - Lens catalog
@@ -599,6 +745,7 @@ struct CameraDetailView: View {
 /// row per family; the versions live in `LensDetailView`.
 struct LensCatalogList: View {
     @ObservedObject var store: FilmLogStore
+    var onFinish: () -> Void = {}
 
     @State private var searchText = ""
 
@@ -612,16 +759,50 @@ struct LensCatalogList: View {
                 Section {
                     ForEach(section.entries) { entry in
                         NavigationLink {
-                            LensDetailView(store: store, entry: entry)
+                            LensDetailView(store: store, entry: entry, onFinish: onFinish)
                         } label: {
                             GearLensRow(entry: entry,
                                         displayTitle: titles[entry.id],
                                         isActive: isEntryActive(entry))
                         }
+                        .swipeActions {
+                            if entry.lens.isCustom {
+                                Button(role: .destructive) {
+                                    store.removeCustomLens(id: entry.lens.id)
+                                    Haptics.warning()
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
                     }
                 } header: {
                     Text(section.title)
+                } footer: {
+                    if section.id == "custom" {
+                        Text("Lenses you added. Swipe a row to delete it.")
+                    }
                 }
+            }
+
+            Section {
+                NavigationLink {
+                    CustomGearForm(store: store, onFinish: onFinish, presetKinds: [.lens])
+                } label: {
+                    HStack(spacing: 12) {
+                        ListGlyph(systemName: "plus", tint: Palette.good)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Enter a custom lens")
+                                .foregroundStyle(Palette.text)
+                            Text("A lens that is not in the catalog")
+                                .font(Geist.text(.subheadline))
+                                .foregroundStyle(Palette.textSub)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            } footer: {
+                Text("Custom lenses appear under their focal length and on matching bodies.")
             }
         }
         .listStyle(.insetGrouped)
@@ -713,14 +894,18 @@ struct LensDetailView: View {
     @ObservedObject var store: FilmLogStore
     let entry: PrewarmedLensEntry
     let hostCamera: CameraGearSpec?
+    var onFinish: () -> Void = {}
 
-    @Environment(\.dismiss) private var dismiss
     @State private var selectedVariantID: String
 
-    init(store: FilmLogStore, entry: PrewarmedLensEntry, hostCamera: CameraGearSpec? = nil) {
+    init(store: FilmLogStore,
+         entry: PrewarmedLensEntry,
+         hostCamera: CameraGearSpec? = nil,
+         onFinish: @escaping () -> Void = {}) {
         self.store = store
         self.entry = entry
         self.hostCamera = hostCamera
+        self.onFinish = onFinish
         _selectedVariantID = State(initialValue: entry.variants.first?.id ?? "")
     }
 
@@ -823,22 +1008,26 @@ struct LensDetailView: View {
 
     private var mountSection: some View {
         Section {
-            Button {
+            IrisHoldControl(
+                title: mountTitle,
+                workingTitle: "Mounting",
+                doneTitle: "Lens mounted",
+                hint: "Press and hold to apply",
+                doneDetail: "The meter follows this lens",
+                holdDuration: 1.1
+            ) {
                 mountSelected()
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "camera.aperture")
-                    Text("Mount lens")
-                    Spacer(minLength: 0)
-                }
-                .font(Geist.text(.body, .semibold))
-                .foregroundStyle(Palette.accent)
-                .frame(minHeight: Metrics.minTap)
-                .contentShape(Rectangle())
             }
         } footer: {
             Text(mountFooter)
         }
+    }
+
+    private var mountTitle: String {
+        if let hostCamera {
+            return "Hold to mount on the \(hostCamera.model)"
+        }
+        return "Hold to mount \(lensRowTitle(entry))"
     }
 
     private var mountFooter: String {
@@ -867,8 +1056,7 @@ struct LensDetailView: View {
         gear.maxAperture = lens.maxAperture
 
         store.activeGear = gear
-        Haptics.success()
-        dismiss()
+        onFinish()
     }
 }
 

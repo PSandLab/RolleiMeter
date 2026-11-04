@@ -379,6 +379,27 @@ final class FilmLogStore: ObservableObject {
         customLenses = updated
     }
 
+    /// Removes a user-added body and detaches it from the meter if it was in use.
+    func removeCustomCamera(id: String) {
+        customCameras.removeAll { $0.id == id }
+        if activeGear.cameraId == id {
+            activeGear = .unloaded
+        }
+    }
+
+    /// Removes a user-added lens and clears it from the meter if it was mounted.
+    func removeCustomLens(id: String) {
+        customLenses.removeAll { $0.id == id }
+        if activeGear.lensId == id {
+            var gear = activeGear
+            gear.lensId = ""
+            gear.lensName = ""
+            gear.minAperture = 1.0
+            gear.maxAperture = 32.0
+            activeGear = gear
+        }
+    }
+
     func loadSnapshotImage(_ fileName: String?) -> UIImage? {
         guard let fileName, !fileName.isEmpty else { return nil }
         if let cached = snapshotCache.object(forKey: fileName as NSString) {

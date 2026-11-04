@@ -3,204 +3,202 @@ import SwiftUI
 // MARK: - Custom gear form
 
 /// Creates a camera (fixed-lens or interchangeable body) or a lens that is not
-/// in the bundled catalog, then mounts it. Adding is the toolbar action; gear
-/// that was added before can be swiped away at the bottom of the form.
+/// in the bundled catalog, then mounts it.
+///
+/// The form shows only what is unavoidable — a name, and the mount if the body
+/// takes lenses — and puts the stop ranges behind disclosures. A gear form that
+/// asks for eight numbers up front is one people abandon, and the defaults
+/// (1 s to 1/500, f/2.8 to f/22) are right for most manual bodies anyway.
 struct CustomGearForm: View {
     @ObservedObject var store: FilmLogStore
+    var onFinish: () -> Void = {}
+    var presetKinds: [CustomGearKind] = CustomGearKind.allCases
+    var presetBrand: String = ""
 
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var kind: CustomGearKind = .fixedLens
+    @State private var kind: CustomGearKind
     @State private var brand = ""
     @State private var modelName = ""
-    @State private var fixedLensName = "40mm f/2.8"
-    @State private var mountName = "Leica M"
+    @State private var fixedLensName = ""
+    @State private var mountSelection: String
+    @State private var customMount = ""
+
+    @State private var showShutter = false
+    @State private var showAperture = false
 
     // Indices into the analog stop tables.
     @State private var fastestShutterIndex = 14   // 1/500
-    @State private var slowestShutterIndex = 5    // 1 s
-    @State private var widestApertureIndex = 8    // f/2.8
-    @State private var smallestApertureIndex = 20 // f/22
+    @State private var slowestShutterIndex = 5     // 1 s
+    @State private var widestApertureIndex = 8     // f/2.8
+    @State private var smallestApertureIndex = 20  // f/22
+
+    private static let otherMountTag = "Other mount…"
+
+    init(store: FilmLogStore,
+         onFinish: @escaping () -> Void = {},
+         presetKinds: [CustomGearKind] = CustomGearKind.allCases,
+         presetBrand: String = "") {
+        self.store = store
+        self.onFinish = onFinish
+        self.presetKinds = presetKinds
+        self.presetBrand = presetBrand
+
+        let initial = presetKinds.first ?? .fixedLens
+        _kind = State(initialValue: initial)
+        _brand = State(initialValue: presetBrand)
+
+        let mounts = GearCatalogCache.loadBundledCatalog().mounts.filter { $0 != "Fixed" }
+        _mountSelection = State(initialValue: mounts.first { $0 == "Leica M" } ?? mounts.first ?? CustomGearForm.otherMountTag)
+    }
 
     var body: some View {
         Form {
-            Section {
-                Picker("Type", selection: $kind) {
-                    ForEach(CustomGearKind.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-            } footer: {
-                Text(kind.explanation)
-            }
-
-            Section {
-                TextField("Brand", text: $brand)
-                    .textInputAutocapitalization(.words)
-                TextField(modelFieldTitle, text: $modelName)
-                    .textInputAutocapitalization(.words)
-
-                if kind == .fixedLens {
-                    TextField("Lens", text: $fixedLensName)
-                        .textInputAutocapitalization(.words)
-                } else {
-                    TextField("Mount", text: $mountName)
-                        .textInputAutocapitalization(.words)
-
-                    Menu {
-                        ForEach(knownMounts, id: \.self) { mount in
-                            Button(mount) { mountName = mount }
+            if presetKinds.count > 1 {
+                Section {
+                    Picker("Type", selection: $kind) {
+                        ForEach(presetKinds) { option in
+                            Text(option.pickerTitle).tag(option)
                         }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                } footer: {
+                    Text(kind.explanation)
+                }
+            }
+
+            identitySection
+
+            Section {
+                if kind != .lens {
+                    DisclosureGroup(isExpanded: $showShutter) {
+                        shutterSteppers
                     } label: {
-                        Label("Choose a known mount", systemImage: "list.bullet")
+                        LabeledContent("Shutter", value: "\(formatShutterStopLabel(slowestShutterStop))–\(formatShutterStopLabel(fastestShutterStop))")
+                            .font(Geist.text(.body))
+                    }
+                }
+
+                if kind != .body {
+                    DisclosureGroup(isExpanded: $showAperture) {
+                        apertureSteppers
+                    } label: {
+                        LabeledContent("Aperture", value: formatApertureRange(widestApertureStop, smallestApertureStop))
+                            .font(Geist.text(.body))
                     }
                 }
             } header: {
-                Text("Details")
+                Text("Limits")
             } footer: {
-                Text(detailsFooter)
+                Text("Only the extremes matter: the fastest and slowest marked speeds, the widest and smallest f-stops. The defaults suit most manual gear.")
             }
 
-            if kind != .lens {
-                Section {
-                    Stepper {
-                        LabeledContent("Fastest", value: formatShutterStopLabel(fastestShutterStop))
-                    } onIncrement: {
-                        setFastestShutter(fastestShutterIndex + 1)
-                    } onDecrement: {
-                        setFastestShutter(fastestShutterIndex - 1)
-                    }
-
-                    Stepper {
-                        LabeledContent("Slowest", value: formatShutterStopLabel(slowestShutterStop))
-                    } onIncrement: {
-                        setSlowestShutter(slowestShutterIndex + 1)
-                    } onDecrement: {
-                        setSlowestShutter(slowestShutterIndex - 1)
-                    }
-                } header: {
-                    Text("Shutter")
-                } footer: {
-                    Text("The fastest and slowest marked speeds on the body.")
+            Section {
+                IrisHoldControl(
+                    title: addTitle,
+                    workingTitle: "Adding gear",
+                    doneTitle: "Added",
+                    hint: canAdd ? "Press and hold to save and mount" : "Add a model name first",
+                    doneDetail: "Saved to your gear and mounted",
+                    holdDuration: 1.1,
+                    isEnabled: canAdd
+                ) {
+                    addGear()
                 }
+            } footer: {
+                Text("The gear is stored on this device and applied to the meter.")
             }
-
-            if kind != .body {
-                Section {
-                    Stepper {
-                        LabeledContent("Widest", value: formatApertureStopLabel(widestApertureStop))
-                    } onIncrement: {
-                        setWidestAperture(widestApertureIndex + 1)
-                    } onDecrement: {
-                        setWidestAperture(widestApertureIndex - 1)
-                    }
-
-                    Stepper {
-                        LabeledContent("Smallest", value: formatApertureStopLabel(smallestApertureStop))
-                    } onIncrement: {
-                        setSmallestAperture(smallestApertureIndex + 1)
-                    } onDecrement: {
-                        setSmallestAperture(smallestApertureIndex - 1)
-                    }
-                } header: {
-                    Text("Aperture")
-                } footer: {
-                    Text("The widest and smallest apertures marked on the lens.")
-                }
-            }
-
-            savedCamerasSection
-            savedLensesSection
         }
-        .navigationTitle("Custom gear")
+        .navigationTitle(presetTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Add") { addGear() }
-                    .disabled(!canAdd)
-            }
-        }
     }
 
-    // MARK: Saved gear
+    // MARK: Identity
 
     @ViewBuilder
-    private var savedCamerasSection: some View {
-        if !store.customCameras.isEmpty {
-            Section {
-                ForEach(store.customCameras) { camera in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(camera.model)
-                            .lineLimit(1)
-                        Text(savedCameraSubtitle(camera))
-                            .font(Geist.monoText(.subheadline))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+    private var identitySection: some View {
+        Section {
+            TextField("Brand", text: $brand)
+                .textInputAutocapitalization(.words)
+
+            TextField(kind == .lens ? "Lens model" : "Camera model", text: $modelName)
+                .textInputAutocapitalization(.words)
+
+            if kind == .fixedLens {
+                TextField("Lens", text: $fixedLensName)
+                    .textInputAutocapitalization(.words)
+            }
+
+            if kind == .body {
+                Picker("Mount", selection: $mountSelection) {
+                    ForEach(knownMounts, id: \.self) { mount in
+                        Text(mount).tag(mount)
                     }
+                    Text(Self.otherMountTag).tag(Self.otherMountTag)
                 }
-                .onDelete(perform: deleteCameras)
-            } header: {
-                Text("Custom cameras")
-            } footer: {
-                Text("Swipe a row to delete it.")
+
+                if mountSelection == Self.otherMountTag {
+                    TextField("Mount name", text: $customMount)
+                        .textInputAutocapitalization(.words)
+                }
+            }
+        } header: {
+            Text(kind == .lens ? "Lens" : "Camera")
+        } footer: {
+            Text(identityFooter)
+        }
+    }
+
+    private var identityFooter: String {
+        switch kind {
+        case .fixedLens:
+            return "A body with a built-in lens: a rangefinder, a point-and-shoot, a TLR."
+        case .body:
+            return "An interchangeable-lens body. The mount links it to the lenses made for it."
+        case .lens:
+            return "A lens for any mount. It appears in the lens catalog and on matching bodies."
+        }
+    }
+
+    // MARK: Steppers
+
+    private var shutterSteppers: some View {
+        Group {
+            Stepper {
+                LabeledContent("Fastest", value: formatShutterStopLabel(fastestShutterStop))
+            } onIncrement: {
+                setFastestShutter(fastestShutterIndex + 1)
+            } onDecrement: {
+                setFastestShutter(fastestShutterIndex - 1)
+            }
+
+            Stepper {
+                LabeledContent("Slowest", value: formatShutterStopLabel(slowestShutterStop))
+            } onIncrement: {
+                setSlowestShutter(slowestShutterIndex + 1)
+            } onDecrement: {
+                setSlowestShutter(slowestShutterIndex - 1)
             }
         }
     }
 
-    @ViewBuilder
-    private var savedLensesSection: some View {
-        if !store.customLenses.isEmpty {
-            Section {
-                ForEach(store.customLenses) { lens in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(lens.model)
-                            .lineLimit(1)
-                        Text("\(lens.brand) · \(formatMountBadge(lens.mount)) · \(formatApertureRange(lens.minAperture, lens.maxAperture))")
-                            .font(Geist.monoText(.subheadline))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .onDelete(perform: deleteLenses)
-            } header: {
-                Text("Custom lenses")
-            } footer: {
-                Text("Swipe a row to delete it.")
+    private var apertureSteppers: some View {
+        Group {
+            Stepper {
+                LabeledContent("Widest", value: formatApertureStopLabel(widestApertureStop))
+            } onIncrement: {
+                setWidestAperture(widestApertureIndex + 1)
+            } onDecrement: {
+                setWidestAperture(widestApertureIndex - 1)
+            }
+
+            Stepper {
+                LabeledContent("Smallest", value: formatApertureStopLabel(smallestApertureStop))
+            } onIncrement: {
+                setSmallestAperture(smallestApertureIndex + 1)
+            } onDecrement: {
+                setSmallestAperture(smallestApertureIndex - 1)
             }
         }
-    }
-
-    private func savedCameraSubtitle(_ camera: CameraGearSpec) -> String {
-        if camera.isFixed {
-            return camera.fixedLensName.isEmpty ? "Fixed lens" : camera.fixedLensName
-        }
-        let slow = max(camera.minShutter, camera.maxShutter)
-        let fast = min(camera.minShutter, camera.maxShutter)
-        return "\(formatMountBadge(camera.mount)) · \(formatShutterStopLabel(slow))–\(formatShutterStopLabel(fast))"
-    }
-
-    private func deleteCameras(at offsets: IndexSet) {
-        let removed = offsets.map { store.customCameras[$0].id }
-        store.customCameras.remove(atOffsets: offsets)
-        if removed.contains(store.activeGear.cameraId) {
-            store.activeGear = .unloaded
-        }
-        Haptics.warning()
-    }
-
-    private func deleteLenses(at offsets: IndexSet) {
-        let removed = offsets.map { store.customLenses[$0].id }
-        store.customLenses.remove(atOffsets: offsets)
-        if removed.contains(store.activeGear.lensId) {
-            var gear = store.activeGear
-            gear.lensId = ""
-            gear.lensName = ""
-            gear.minAperture = 1.0
-            gear.maxAperture = 32.0
-            store.activeGear = gear
-        }
-        Haptics.warning()
     }
 
     // MARK: Stops
@@ -249,18 +247,20 @@ struct CustomGearForm: View {
         GearCatalogCache.loadBundledCatalog().mounts.filter { $0 != "Fixed" }
     }
 
-    private var modelFieldTitle: String {
-        kind == .lens ? "Lens model" : "Camera model"
+    private var presetTitle: String {
+        if presetKinds.count > 1 { return "Custom gear" }
+        switch presetKinds.first {
+        case .lens: return "Custom lens"
+        case .body, .fixedLens: return "Custom camera"
+        case nil: return "Custom gear"
+        }
     }
 
-    private var detailsFooter: String {
+    private var addTitle: String {
         switch kind {
-        case .fixedLens:
-            return "A camera with a built-in lens, like a point-and-shoot or a TLR."
-        case .body:
-            return "An interchangeable-lens body. The mount links it to the lenses made for it."
-        case .lens:
-            return "A lens for any mount. It appears in the lens catalog and on matching bodies."
+        case .fixedLens: return "Hold to add this camera"
+        case .body: return "Hold to add this body"
+        case .lens: return "Hold to add this lens"
         }
     }
 
@@ -286,8 +286,7 @@ struct CustomGearForm: View {
             addLens()
         }
 
-        Haptics.success()
-        dismiss()
+        onFinish()
     }
 
     private func addCamera(isFixed: Bool) {
@@ -355,8 +354,11 @@ struct CustomGearForm: View {
     }
 
     private var cleanMount: String {
-        let value = mountName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "Custom" : value
+        if mountSelection == Self.otherMountTag {
+            let value = customMount.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? "Custom" : value
+        }
+        return mountSelection
     }
 
     private var cleanFixedLens: String {
@@ -367,14 +369,24 @@ struct CustomGearForm: View {
 
 // MARK: - Kind
 
-private enum CustomGearKind: String, CaseIterable, Identifiable {
+enum CustomGearKind: String, CaseIterable, Identifiable {
     case fixedLens
     case body
     case lens
 
     var id: String { rawValue }
 
+    /// Full label for menus and footers.
     var title: String {
+        switch self {
+        case .fixedLens: return "Fixed lens"
+        case .body: return "Interchangeable"
+        case .lens: return "Lens"
+        }
+    }
+
+    /// Tighter label for the segmented control.
+    var pickerTitle: String {
         switch self {
         case .fixedLens: return "Fixed"
         case .body: return "Body"

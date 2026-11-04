@@ -97,15 +97,20 @@ private struct RollScreen: View {
                 NavigationLink(value: FilmRoute.library) {
                     ActiveRollRow(roll: roll)
                 }
-                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 12, trailing: 16))
+
+                NavigationLink(value: FilmRoute.gear) {
+                    ActiveCameraRow(gear: gear, brand: activeCameraBrand)
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
 
                 if !roll.isUnloaded {
-                    HoldActionRow(
+                    FilmStripHoldControl(
                         title: "Hold to complete roll",
-                        workingTitle: "Completing roll",
+                        workingTitle: "Winding on",
                         doneTitle: "Roll completed",
-                        systemImage: "film",
-                        holdDuration: 1.1
+                        direction: .windOn,
+                        holdDuration: 1.4
                     ) {
                         completeRoll()
                     }
@@ -117,32 +122,9 @@ private struct RollScreen: View {
                 Text("Current roll")
             } footer: {
                 if roll.isUnloaded {
-                    Text("Tap the card to choose a film stock.")
+                    Text("Tap the film to choose a stock, or the body to choose a camera.")
                 } else {
-                    Text("Tap the card to change film.")
-                }
-            }
-
-            Section("Camera & Lens") {
-                NavigationLink(value: FilmRoute.gear) {
-                    HStack(spacing: 12) {
-                        if let brand = activeCameraBrand {
-                            CameraBrandLogo(brand: brand, size: 30)
-                        } else {
-                            ListGlyph(systemName: "camera.aperture")
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(gear.hasCamera ? gear.cameraName : "No camera selected")
-                                .lineLimit(1)
-                            Text(gear.hasLens
-                                 ? gear.lensName
-                                 : "\(formatShutterStopLabel(gear.minShutter)) – \(formatShutterStopLabel(gear.maxShutter))")
-                                .font(Geist.text(.subheadline))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
+                    Text("Tap the film to change stock, or the body to change camera and lens.")
                 }
             }
 
@@ -187,7 +169,7 @@ private struct RollScreen: View {
                     popToRoll()
                 }
             case .gear:
-                GearPickerScreen(store: store)
+                GearPickerScreen(store: store, onFinish: popToRoll)
             }
         }
         .navigationTitle("Film Log")
@@ -212,20 +194,25 @@ private struct RollScreen: View {
         }
     }
 
-    /// Lets the load animation breathe, then returns to the roll.
+    /// Lets the load or mount animation finish, then clears the whole stack so
+    /// choosing gear never leaves the user deep in a catalog.
     private func popToRoll() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
             path = NavigationPath()
         }
     }
 
+    /// The roll is cleared only after the strip has finished winding, so the
+    /// completion animation is not cut off by the row disappearing.
     private func completeRoll() {
-        var next = roll
-        next.rollNumber = roll.rollNumber + 1
-        next.filmName = ""
-        next.currentFrame = 1
-        next.isExpired = false
-        withAnimation(.snappy) { store.rollState = next }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            var next = roll
+            next.rollNumber = roll.rollNumber + 1
+            next.filmName = ""
+            next.currentFrame = 1
+            next.isExpired = false
+            withAnimation(.snappy) { store.rollState = next }
+        }
     }
 }
 
@@ -289,6 +276,52 @@ private struct ActiveRollRow: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+}
+
+/// The body, given the same weight as the film: same icon box, same serif name.
+/// A camera is not a secondary detail of a roll.
+private struct ActiveCameraRow: View {
+    let gear: ActiveGearProfile
+    let brand: String?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Group {
+                if let brand {
+                    CameraBrandLogo(brand: brand, size: 46)
+                } else {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Palette.textSub)
+                }
+            }
+            .frame(width: 52, height: 48)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(gear.hasCamera ? gear.cameraName : "No camera")
+                    .font(Geist.serifText(.headline))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text(subtitle)
+                    .font(Geist.text(.subheadline))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var subtitle: String {
+        guard gear.hasCamera else { return "Choose the body you are shooting" }
+        if gear.isFixedLens || gear.mount.isEmpty || gear.mount == "Fixed" {
+            return gear.hasLens ? gear.lensName : "Fixed lens"
+        }
+        if gear.hasLens { return gear.lensName }
+        return "\(formatMountBadge(gear.mount)) · no lens"
     }
 }
 
@@ -559,12 +592,12 @@ private struct FilmFamilyScreen: View {
             }
 
             Section {
-                HoldActionRow(
+                FilmStripHoldControl(
                     title: "Hold to load \(shortFilmBadge(name: variant.fullName, iso: variant.iso))",
                     workingTitle: "Loading film",
                     doneTitle: "Loaded",
-                    systemImage: "film.stack",
-                    holdDuration: 1.2
+                    direction: .feedIn,
+                    holdDuration: 1.3
                 ) {
                     load()
                 }
@@ -640,12 +673,12 @@ private struct CustomFilmScreen: View {
             }
 
             Section {
-                HoldActionRow(
+                FilmStripHoldControl(
                     title: "Hold to save and load",
                     workingTitle: "Saving film",
                     doneTitle: "Saved",
-                    systemImage: "film.stack",
-                    holdDuration: 1.2
+                    direction: .feedIn,
+                    holdDuration: 1.3
                 ) {
                     create()
                 }
@@ -934,164 +967,5 @@ private struct PhotoViewer: View {
             .toolbarBackground(Color.black, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
-    }
-}
-
-// MARK: - Hold to act
-
-/// Press-and-hold button used to load a film and to complete a roll.
-///
-/// The original app did this with a cranking film canister; this keeps the
-/// idea but draws it with the same native styling as the rest of the log.
-private struct HoldPressStyle: ButtonStyle {
-    @Binding var isPressed: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .onChange(of: configuration.isPressed) { _, pressed in
-                isPressed = pressed
-            }
-    }
-}
-
-struct HoldActionRow: View {
-    let title: String
-    var workingTitle: String = "Working"
-    var doneTitle: String = "Done"
-    var systemImage: String = "film"
-    var holdDuration: Double = 1.0
-    var tint: Color = Palette.accent
-    let onComplete: () -> Void
-
-    private enum Phase { case idle, holding, done }
-
-    @State private var phase: Phase = .idle
-    @State private var progress: CGFloat = 0
-    @State private var task: Task<Void, Never>?
-
-    @State private var isPressed = false
-
-    var body: some View {
-        Button(action: {}) {
-            bar
-        }
-        .buttonStyle(HoldPressStyle(isPressed: $isPressed))
-        .onChange(of: isPressed) { _, pressed in
-            if pressed {
-                guard phase == .idle else { return }
-                start()
-            } else if phase == .holding {
-                cancel()
-            }
-        }
-        .accessibilityElement()
-        .accessibilityLabel(title)
-        .accessibilityHint("Press and hold, or use the action to do it immediately.")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            guard phase == .idle else { return }
-            perform()
-            onComplete()
-        }
-        .onDisappear { task?.cancel() }
-    }
-
-    private var bar: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(tint.opacity(0.18))
-
-                if progress > 0.001 {
-                    Capsule()
-                        .fill(tint)
-                        .frame(width: geo.size.width * progress)
-                }
-
-                HStack(spacing: 10) {
-                    Image(systemName: phase == .done ? "checkmark" : systemImage)
-                        .font(.system(size: 15, weight: .semibold))
-                        .rotationEffect(.degrees(Double(progress) * 540))
-
-                    Text(label)
-                        .font(Geist.text(.subheadline, .semibold))
-                        .lineLimit(1)
-
-                    Spacer(minLength: 0)
-
-                    if phase == .holding {
-                        Text("\(Int((progress * 100).rounded()))%")
-                            .font(Geist.monoText(.caption, .semibold))
-                            .contentTransition(.numericText())
-                    }
-                }
-                .padding(.horizontal, 16)
-                .foregroundStyle(phase == .idle ? Palette.text : Palette.onAccent)
-            }
-        }
-        .frame(height: 50)
-        .contentShape(Capsule())
-        .scaleEffect(phase == .done ? 0.98 : 1)
-        .animation(.spring(response: 0.28, dampingFraction: 0.7), value: phase)
-    }
-
-    private var label: String {
-        switch phase {
-        case .idle: return title
-        case .holding: return workingTitle
-        case .done: return doneTitle
-        }
-    }
-
-    private func start() {
-        Haptics.press()
-        phase = .holding
-        task?.cancel()
-        task = Task { @MainActor in
-            let started = Date()
-            var lastTick = -1
-            while !Task.isCancelled {
-                let elapsed = Date().timeIntervalSince(started)
-                let raw = min(1, max(0, elapsed / holdDuration))
-                progress = CGFloat(raw)
-
-                let tick = Int(raw * 10)
-                if tick != lastTick {
-                    lastTick = tick
-                    if tick > 0 && tick < 10 { Haptics.rigid() }
-                }
-
-                if raw >= 1 {
-                    perform()
-                    onComplete()
-                    try? await Task.sleep(nanoseconds: 650_000_000)
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.snappy) {
-                        progress = 0
-                        phase = .idle
-                    }
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 16_000_000)
-            }
-        }
-    }
-
-    private func cancel() {
-        task?.cancel()
-        task = nil
-        Haptics.tap()
-        withAnimation(.snappy(duration: 0.2)) {
-            progress = 0
-            phase = .idle
-        }
-    }
-
-    private func perform() {
-        Haptics.success()
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
-            progress = 1
-            phase = .done
-        }
     }
 }
