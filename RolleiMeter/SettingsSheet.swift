@@ -1,11 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// Standard iOS settings sheet: film speed units, distance units, meter calibration
-/// and the arm-length offset.
 struct SettingsSheet: View {
     @Binding var useDIN: Bool
     @Binding var useFeet: Bool
+    @Binding var showFocusModule: Bool
     @Binding var calibration: Double
     @Binding var armOffset: Double
     let rawDistance: () -> Double?
@@ -20,11 +19,12 @@ struct SettingsSheet: View {
         NavigationStack {
             Form {
                 Section("Units") {
-                    Picker("Film speed", selection: $useDIN) {
+                    Picker("Film Speed", selection: $useDIN) {
                         Text("ISO").tag(false)
                         Text("DIN").tag(true)
                     }
                     .pickerStyle(.segmented)
+
                     Picker("Distance", selection: $useFeet) {
                         Text("Meters").tag(false)
                         Text("Feet").tag(true)
@@ -32,48 +32,46 @@ struct SettingsSheet: View {
                     .pickerStyle(.segmented)
                 }
 
-                Section {
+                Section("Light Meter") {
                     Stepper {
                         LabeledContent("Calibration", value: Fmt.stops(calibration) + " EV")
+                            .monospacedDigit()
                     } onIncrement: {
                         stepCalibration(1)
                     } onDecrement: {
                         stepCalibration(-1)
                     }
-                } header: {
-                    Text("Light meter")
-                } footer: {
-                    Text("Shifts every reading, in third-stop steps.")
                 }
 
-                Section {
+                Section("Distance") {
+                    Toggle("LiDAR Focus Scale", isOn: $showFocusModule.animation(.spring(response: 0.3, dampingFraction: 0.8)))
+
                     Stepper {
-                        LabeledContent("Arm offset", value: Fmt.distance(armOffset, feet: useFeet))
+                        LabeledContent("Arm Offset", value: Fmt.distance(armOffset, feet: useFeet))
+                            .monospacedDigit()
                     } onIncrement: {
                         stepArm(1)
                     } onDecrement: {
                         stepArm(-1)
                     }
+
                     Button(action: startArmCalibration) {
-                        Text(armStage == 0 ? "Measure arm length" : "Hold phone at your eye\u{2026} \(armCountdown)")
+                        Text(armStage == 0 ? "Measure Arm Length" : "Hold at Eye… \(armCountdown)")
+                            .monospacedDigit()
                             .contentTransition(.numericText())
                     }
                     .disabled(armStage != 0)
-                } header: {
-                    Text("Distance")
-                } footer: {
-                    Text("Measure: aim at a wall with the phone at arm\u{2019}s length, then pull it to your eye when asked.")
                 }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .listSectionSpacing(.compact)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .close) { dismiss() }
                 }
             }
         }
-        .preferredColorScheme(.dark)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .onDisappear {

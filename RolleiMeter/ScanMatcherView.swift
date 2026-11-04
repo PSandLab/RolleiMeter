@@ -27,11 +27,6 @@ private struct LoggedRoll: Identifiable {
 
 // MARK: - Lab Scan Matcher
 
-/// Pairs the frames of one logged roll with the scans imported from a lab,
-/// then writes the logbook metadata into the matched scans.
-///
-/// The screen is a plain inset-grouped `List` so it inherits the parent
-/// `NavigationStack` and the system's grouped-table look.
 struct ScanMatcherTabView: View {
     @ObservedObject var store: FilmLogStore
     let onShareItems: ([Any]) -> Void
@@ -60,8 +55,6 @@ struct ScanMatcherTabView: View {
             scansSection
 
             if let currentRoll, !frames.isEmpty {
-                // Keep the write/share actions within reach before the long
-                // frame lists, the way a native task screen front-loads its action.
                 exportSection(frames: frames, scans: scans, matchedCount: matchedCount)
 
                 if !scans.isEmpty {
@@ -76,7 +69,6 @@ struct ScanMatcherTabView: View {
                 framesSection(roll: currentRoll, scans: scans, shifts: shifts)
             }
         }
-        .listStyle(.insetGrouped)
         .fileImporter(
             isPresented: $showFolderImporter,
             allowedContentTypes: [.folder],
@@ -99,43 +91,33 @@ struct ScanMatcherTabView: View {
 
     @ViewBuilder
     private func rollSection(rolls: [LoggedRoll], currentRoll: LoggedRoll?) -> some View {
-        Section {
-            if let currentRoll {
-                Picker("Active roll", selection: rollSelectionBinding(rolls: rolls)) {
+        if let currentRoll {
+            Section("Roll") {
+                Picker("Active Roll", selection: rollSelectionBinding(rolls: rolls)) {
                     ForEach(rolls) { roll in
                         Text(rollMenuTitle(roll)).tag(roll.id)
                     }
                 }
                 .pickerStyle(.menu)
 
-                LabeledContent("Frames logged") {
-                    Text("\(currentRoll.frames.count)")
-                        .monospacedDigit()
-                        .foregroundStyle(Palette.textSub)
-                }
-            } else {
-                ContentUnavailableView(
-                    "No Logged Frames",
-                    systemImage: "film",
-                    description: Text("Hold the shutter in the viewfinder, then log the frame.")
-                )
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                LabeledContent("Frames", value: "\(currentRoll.frames.count)")
+                    .monospacedDigit()
             }
-        } header: {
-            Text("Roll")
+        } else {
+            Section {
+                ContentUnavailableView("No Logged Frames", systemImage: "film")
+            }
         }
     }
 
     @ViewBuilder
     private var scansSection: some View {
-        Section {
+        Section("Scans") {
             Button {
                 Haptics.press()
                 showFolderImporter = true
             } label: {
-                Label("Import folder…", systemImage: "folder")
+                Label("Import Folder…", systemImage: "folder")
             }
             .disabled(isLoadingScans || isInjectingExif)
 
@@ -143,7 +125,7 @@ struct ScanMatcherTabView: View {
                 Haptics.press()
                 showPhotoFilesImporter = true
             } label: {
-                Label("Import files…", systemImage: "doc")
+                Label("Import Files…", systemImage: "doc")
             }
             .disabled(isLoadingScans || isInjectingExif)
 
@@ -151,25 +133,17 @@ struct ScanMatcherTabView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Reading scans…")
-                        .foregroundStyle(Palette.textSub)
+                        .foregroundStyle(.secondary)
                 }
-                .frame(minHeight: Metrics.minTap)
                 .accessibilityElement(children: .combine)
             } else {
-                LabeledContent("Imported scans") {
-                    Text("\(importedScans.count)")
-                        .monospacedDigit()
-                        .foregroundStyle(Palette.textSub)
-                }
+                LabeledContent("Imported", value: "\(importedScans.count)")
+                    .monospacedDigit()
 
                 if importedScans.count > 1 {
-                    Toggle("Reverse scan order", isOn: $reverseScanOrder)
+                    Toggle("Reverse Order", isOn: $reverseScanOrder)
                 }
             }
-        } header: {
-            Text("Scans")
-        } footer: {
-            Text("Scans are matched to frames in filename order, starting with the first logged frame. Turn on reverse order if the lab numbered the files backwards.")
         }
     }
 
@@ -180,15 +154,12 @@ struct ScanMatcherTabView: View {
         shifts: [Int],
         matchedCount: Int
     ) -> some View {
-        Section {
-            LabeledContent("Matched scans") {
-                Text("\(matchedCount) of \(roll.frames.count)")
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.textSub)
-            }
+        Section("Alignment") {
+            LabeledContent("Matched", value: "\(matchedCount) / \(roll.frames.count)")
+                .monospacedDigit()
 
             if hasActiveShifts {
-                Button("Reset shift adjustments", role: .destructive) {
+                Button("Reset Shifts", role: .destructive) {
                     Haptics.rigid()
                     cascadeShiftAtFrame.removeAll()
                 }
@@ -207,10 +178,6 @@ struct ScanMatcherTabView: View {
                     }
                 )
             }
-        } header: {
-            Text("Match")
-        } footer: {
-            Text("Each frame uses the scan in the same position. A shift moves that frame and every frame after it.")
         }
     }
 
@@ -227,10 +194,9 @@ struct ScanMatcherTabView: View {
                         Image(systemName: "wand.and.stars")
                     }
 
-                    Text(isInjectingExif ? "Writing EXIF…" : "Write EXIF to matched scans")
+                    Text(isInjectingExif ? "Writing EXIF…" : "Write EXIF to Scans")
                 }
             }
-            .controlSize(.large)
             .disabled(matchedCount == 0 || isInjectingExif)
 
             if !scans.isEmpty {
@@ -238,35 +204,26 @@ struct ScanMatcherTabView: View {
                     Haptics.press()
                     onShareItems(scans.map(\.url))
                 } label: {
-                    Label("Share scans", systemImage: "square.and.arrow.up")
+                    Label("Share Scans", systemImage: "square.and.arrow.up")
                 }
                 .disabled(isInjectingExif)
             }
 
             Menu {
-                Button {
-                    guard let url = ExifAndXmpWriter.createRollCsvFileURL(frames) else { return }
-                    onShareItems([url])
-                } label: {
-                    Label("Roll log spreadsheet", systemImage: "tablecells")
+                if let url = ExifAndXmpWriter.createRollCsvFileURL(frames) {
+                    ShareLink("Roll as CSV", item: url)
                 }
 
-                Button {
-                    guard let url = ExifAndXmpWriter.createXmpSidecarsFileURL(frames) else { return }
-                    onShareItems([url])
-                } label: {
-                    Label("XMP sidecars", systemImage: "doc.badge.gearshape")
+                if let url = ExifAndXmpWriter.createXmpSidecarsFileURL(frames) {
+                    ShareLink("XMP Sidecars", item: url)
                 }
 
-                Button {
-                    let summary = ExifAndXmpWriter.generateRollTextSummary(frames)
-                    guard !summary.isEmpty else { return }
-                    onShareItems([summary])
-                } label: {
-                    Label("Text summary", systemImage: "text.alignleft")
+                let summary = ExifAndXmpWriter.generateRollTextSummary(frames)
+                if !summary.isEmpty {
+                    ShareLink("Roll Summary", item: summary)
                 }
             } label: {
-                Label("Export roll…", systemImage: "square.and.arrow.up.on.square")
+                Label("Export Roll…", systemImage: "square.and.arrow.up.on.square")
             }
             .disabled(isInjectingExif)
         } header: {
@@ -274,15 +231,13 @@ struct ScanMatcherTabView: View {
         } footer: {
             if let message = injectionStatusMessage {
                 Text(message)
-            } else {
-                Text("Writes film, exposure and gear metadata into each matched scan without re-encoding the image.")
             }
         }
     }
 
     @ViewBuilder
     private func framesSection(roll: LoggedRoll, scans: [ImportedLabScan], shifts: [Int]) -> some View {
-        Section {
+        Section("Frames") {
             ForEach(Array(roll.frames.enumerated()), id: \.element.id) { index, frame in
                 let localShift = cascadeShiftAtFrame[index] ?? 0
                 let targetIndex = index + shifts[index]
@@ -309,10 +264,6 @@ struct ScanMatcherTabView: View {
                     }
                 )
             }
-        } header: {
-            Text("Frames")
-        } footer: {
-            Text("Use a frame's menu to share its scan, reset its alignment, or import scans.")
         }
     }
 
@@ -421,7 +372,7 @@ struct ScanMatcherTabView: View {
         }
 
         guard !jobs.isEmpty else {
-            injectionStatusMessage = "No scans are matched to this roll yet."
+            injectionStatusMessage = "No scans matched."
             Haptics.warning()
             return
         }
@@ -443,13 +394,13 @@ struct ScanMatcherTabView: View {
 
                 if written == jobs.count {
                     Haptics.success()
-                    injectionStatusMessage = "EXIF written to \(written) matched scan\(written == 1 ? "" : "s")."
+                    injectionStatusMessage = "EXIF written to \(written) scan\(written == 1 ? "" : "s")."
                 } else if written > 0 {
                     Haptics.warning()
-                    injectionStatusMessage = "EXIF written to \(written) of \(jobs.count) matched scans."
+                    injectionStatusMessage = "EXIF written to \(written) / \(jobs.count) scans."
                 } else {
                     Haptics.error()
-                    injectionStatusMessage = "No EXIF metadata could be written to the matched scans."
+                    injectionStatusMessage = "Could not write EXIF."
                 }
             }
         }
@@ -540,20 +491,17 @@ private struct FrameShiftRow: View {
         Stepper {
             LabeledContent {
                 Text(targetLabel)
-                    .font(Geist.text(.body))
                     .monospacedDigit()
-                    .foregroundStyle(Palette.textSub)
             } label: {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading) {
                     Text("Frame \(frame.frameNumber)")
-                        .font(Geist.text(.body))
                         .monospacedDigit()
 
                     if localShift != 0 {
                         Text(shiftDescription)
-                            .font(Geist.text(.caption))
+                            .font(.caption)
                             .monospacedDigit()
-                            .foregroundStyle(Palette.slow)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -565,7 +513,7 @@ private struct FrameShiftRow: View {
     }
 
     private var shiftDescription: String {
-        localShift > 0 ? "Shifted +\(localShift)" : "Shifted \(localShift)"
+        localShift > 0 ? "+\(localShift)" : "\(localShift)"
     }
 }
 
@@ -586,103 +534,66 @@ private struct FrameScanRow: View {
         HStack(spacing: 12) {
             ScanThumbnail(image: scan?.thumbnail)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text("Frame \(frame.frameNumber)")
-                        .font(Geist.text(.headline))
-                        .monospacedDigit()
-
-                    statusLabel
-                }
-
-                Text(formatFilmDisplay(name: frame.filmName, iso: frame.iso))
-                    .font(Geist.text(.subheadline))
-                    .foregroundStyle(Palette.textSub)
-                    .lineLimit(1)
-
-                Text(exposureDescription)
-                    .font(Geist.text(.caption))
+            VStack(alignment: .leading) {
+                Text("Frame \(frame.frameNumber)")
                     .monospacedDigit()
-                    .foregroundStyle(Palette.textSub)
-                    .lineLimit(1)
 
-                if let scan, let scanNumber {
-                    Text("Scan \(scanNumber) · \(scan.displayName)")
-                        .font(Geist.text(.caption))
-                        .monospacedDigit()
-                        .foregroundStyle(Palette.textDim)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                Text(subtitleText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .monospacedDigit()
             }
 
-            Spacer(minLength: 8)
+            Spacer()
 
-            actionsMenu
+            Menu {
+                if let scan {
+                    Button {
+                        onShareScan(scan)
+                    } label: {
+                        Label("Share Scan", systemImage: "square.and.arrow.up")
+                    }
+                }
+
+                if localShift != 0 {
+                    Button {
+                        onResetShift()
+                    } label: {
+                        Label("Reset Shift", systemImage: "arrow.counterclockwise")
+                    }
+                }
+
+                if scan == nil {
+                    Button {
+                        onImportScans()
+                    } label: {
+                        Label("Import Scans…", systemImage: "folder")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityLabel("Actions for frame \(frame.frameNumber)")
         }
-        .padding(.vertical, 3)
     }
 
-    private var exposureDescription: String {
+    private var subtitleText: String {
         let aperture = frame.aperture.lowercased().hasPrefix("f/")
             ? frame.aperture
             : "f/\(frame.aperture)"
-        return "\(frame.shutterSpeed) · \(aperture) · ISO \(frame.iso)"
-    }
-
-    @ViewBuilder
-    private var statusLabel: some View {
-        if scan != nil {
-            status("Matched", systemImage: "checkmark.circle.fill", tint: Palette.good)
-        } else if isSkipped {
-            status("Skipped", systemImage: "minus.circle.fill", tint: Palette.textSub)
-        } else if hasScans {
-            status("Unmatched", systemImage: "exclamationmark.triangle.fill", tint: Palette.slow)
-        } else {
-            status("No scans", systemImage: "exclamationmark.circle", tint: Palette.textSub)
+        let exp = "\(frame.shutterSpeed) · \(aperture)"
+        if let scan, let scanNumber {
+            return "Scan \(scanNumber) · \(scan.displayName)"
         }
-    }
-
-    private func status(_ text: String, systemImage: String, tint: Color) -> some View {
-        Label(text, systemImage: systemImage)
-            .font(Geist.text(.caption, .semibold))
-            .foregroundStyle(tint)
-    }
-
-    private var actionsMenu: some View {
-        Menu {
-            if let scan {
-                Button {
-                    onShareScan(scan)
-                } label: {
-                    Label("Share scan", systemImage: "square.and.arrow.up")
-                }
-            }
-
-            if localShift != 0 {
-                Button {
-                    onResetShift()
-                } label: {
-                    Label("Reset shift", systemImage: "arrow.counterclockwise")
-                }
-            }
-
-            if scan == nil {
-                Button {
-                    onImportScans()
-                } label: {
-                    Label("Import scans…", systemImage: "folder")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(Geist.text(.body))
-                .foregroundStyle(Palette.textSub)
-                .frame(width: Metrics.minTap, height: Metrics.minTap)
-                .contentShape(Rectangle())
+        if isSkipped {
+            return "\(exp) · Skipped"
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text("Actions for frame \(frame.frameNumber)"))
+        if hasScans {
+            return "\(exp) · Unmatched"
+        }
+        return exp
     }
 }
 
@@ -698,16 +609,12 @@ private struct ScanThumbnail: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                ZStack {
-                    Palette.panelRaised
-                    Image(systemName: "photo")
-                        .font(Geist.text(.title3))
-                        .foregroundStyle(Palette.textDim)
-                }
+                Image(systemName: "photo")
+                    .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: 56, height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(width: 40, height: 40)
+        .clipShape(.rect(cornerRadius: 10, style: .continuous))
         .accessibilityHidden(true)
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Film speed
+// MARK: - Universal Camera & Film Top Bar Glass Pill
 
 struct FilmPanel: View {
     @Binding var isoIndex: Int
@@ -10,7 +10,6 @@ struct FilmPanel: View {
     let boxISO: Int
     var isUnloaded: Bool = false
     var cameraBadge: String = ""
-    let k: CGFloat
     let onTap: () -> Void
 
     @State private var dragBase: Int?
@@ -23,7 +22,12 @@ struct FilmPanel: View {
         return useDIN ? value + "\u{00B0}" : "ISO " + value
     }
 
-    private var readout: String {
+    private var resolvedCameraName: String {
+        let trimmed = cameraBadge.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Camera" : trimmed
+    }
+
+    private var resolvedFilmLabel: String {
         if isUnloaded {
             return dragBase != nil ? speedText : "Load Film"
         }
@@ -37,56 +41,55 @@ struct FilmPanel: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
-                .fill(Palette.accent)
-
-            if cameraBadge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                PanelTitle(text: "FILM", k: k, color: Palette.accentInk)
-            } else {
-                Text(cameraBadge.uppercased())
-                    .font(AppTypography.next(size: 22 * k, weight: .medium))
-                    .tracking(1.6 * k)
-                    .foregroundStyle(Palette.accentInk)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 22 * k)
-                    .padding(.trailing, 18 * k)
-                    .padding(.top, 17 * k)
-            }
-
-            RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                .fill(Palette.accentInk)
-                .overlay {
-                    Text(readout)
-                        .font(AppTypography.next(size: 36 * k, weight: .semibold))
-                        .foregroundStyle(isUnloaded ? Palette.accent : Palette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                        .padding(.horizontal, 14 * k)
-                        .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.15), value: readout)
-                }
-                .padding(.horizontal, 14 * k)
-                .padding(.top, 65 * k)
-                .padding(.bottom, 14 * k)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
+        Button {
             UISelectionFeedbackGenerator().selectionChanged()
             onTap()
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(Color(red: 1.0, green: 0.84, blue: 0.04))
+                    .frame(width: 7, height: 7)
+
+                Text(resolvedCameraName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text("·")
+                    .foregroundStyle(.secondary)
+
+                Text(resolvedFilmLabel)
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+                    .animation(.smooth(duration: 0.15), value: resolvedFilmLabel)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+            )
         }
-        .onLongPressGesture(minimumDuration: 0.5) {
-            guard let box = ISOScale.values.firstIndex(of: boxISO), isoIndex != box else { return }
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-            isoIndex = box
-        }
-        .gesture(
-            DragGesture(minimumDistance: 8)
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in
+                    guard let box = ISOScale.values.firstIndex(of: boxISO), isoIndex != box else { return }
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
+                    isoIndex = box
+                }
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10)
                 .onChanged { value in
                     if dragBase == nil { dragBase = safeIndex }
-                    let steps = Int((value.translation.width / (26 * k)).rounded())
+                    let steps = Int((value.translation.width / 22).rounded())
                     let target = min(max((dragBase ?? safeIndex) + steps, 0), ISOScale.values.count - 1)
                     guard target != isoIndex else { return }
                     isoIndex = target
@@ -99,8 +102,8 @@ struct FilmPanel: View {
                 .onEnded { _ in dragBase = nil }
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Film")
-        .accessibilityValue(readout)
-        .accessibilityHint("Tap to choose film, drag horizontally to rate ISO")
+        .accessibilityLabel("Camera and Film")
+        .accessibilityValue("\(resolvedCameraName), \(resolvedFilmLabel)")
+        .accessibilityHint("Tap to choose camera or film, drag horizontally to rate ISO")
     }
 }

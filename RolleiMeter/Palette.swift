@@ -1,25 +1,8 @@
 import SwiftUI
 import UIKit
 
-extension Color {
-    /// 0xRRGGBB, sRGB.
-    init(hex: UInt32, opacity: Double = 1) {
-        self.init(.sRGB,
-                  red: Double((hex >> 16) & 0xFF) / 255.0,
-                  green: Double((hex >> 8) & 0xFF) / 255.0,
-                  blue: Double(hex & 0xFF) / 255.0,
-                  opacity: opacity)
-    }
-}
-
-/// Semantic color tokens.
-///
-/// Everything maps to a system color so the app adapts to Dark Mode,
-/// Increase Contrast and Reduce Transparency like a system app. The vintage
-/// yellow survives as the single brand accent, declared in the asset catalog
-/// (`AccentColor`) instead of being hard-coded in views.
+/// Semantic color tokens mapping directly to system colors.
 enum Palette {
-    // Surfaces
     static let background = Color(uiColor: .systemBackground)
     static let bg = Color(uiColor: .systemBackground)
     static let panel = Color(uiColor: .secondarySystemBackground)
@@ -27,7 +10,6 @@ enum Palette {
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let groupedCell = Color(uiColor: .secondarySystemGroupedBackground)
 
-    // Type
     static let text = Color(uiColor: .label)
     static let textSub = Color(uiColor: .secondaryLabel)
     static let textDim = Color(uiColor: .tertiaryLabel)
@@ -35,18 +17,14 @@ enum Palette {
     static let faint = Color(uiColor: .quaternaryLabel)
     static let border = Color(uiColor: .separator)
 
-    /// Metered shutter speed, EV marker and selection states.
     static let accent = Color.accentColor
-    /// Ink used inside the amber film card.
     static let accentInk = Color.black
-    /// Foreground for content sitting *on* the amber accent fill.
     static let onAccent = Color.black
 
     static let good = Color(uiColor: .systemGreen)
     static let slow = Color(uiColor: .systemOrange)
     static let bad = Color(uiColor: .systemRed)
 
-    /// Marks drawn over the live camera image, which is always photographic.
     static let lensLight = Color.white
     static let lensDark = Color.black
 }

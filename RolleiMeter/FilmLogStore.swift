@@ -131,7 +131,14 @@ final class FilmLogStore: ObservableObject {
 
         if let data = UserDefaults.standard.data(forKey: Keys.activeGear),
            let decoded = try? decoder.decode(ActiveGearProfile.self, from: data) {
-            self.activeGear = decoded
+            if decoded.apertureStops.isEmpty,
+               let resolved = GearCatalogCache.resolveApertureStops(for: decoded) {
+                var migrated = decoded
+                migrated.apertureStops = resolved
+                self.activeGear = migrated
+            } else {
+                self.activeGear = decoded
+            }
         } else {
             self.activeGear = ActiveGearProfile()
         }
@@ -396,6 +403,7 @@ final class FilmLogStore: ObservableObject {
             gear.lensName = ""
             gear.minAperture = 1.0
             gear.maxAperture = 32.0
+            gear.apertureStops = []
             activeGear = gear
         }
     }

@@ -14,6 +14,7 @@ struct CameraGearSpec: Codable, Identifiable, Equatable, Hashable {
     var fixedLensName: String = ""
     var fixedMinAperture: Double = 0.0
     var fixedMaxAperture: Double = 0.0
+    var fixedApertureStops: [Double] = []
     var isCustom: Bool = false
 
     enum CodingKeys: String, CodingKey {
@@ -24,6 +25,7 @@ struct CameraGearSpec: Codable, Identifiable, Equatable, Hashable {
         case fixedLensName = "fixed_lens_name"
         case fixedMinAperture = "fixed_min_aperture"
         case fixedMaxAperture = "fixed_max_aperture"
+        case fixedApertureStops = "fixed_aperture_stops"
         case isCustom = "is_custom"
     }
 
@@ -38,6 +40,7 @@ struct CameraGearSpec: Codable, Identifiable, Equatable, Hashable {
         fixedLensName: String = "",
         fixedMinAperture: Double = 0.0,
         fixedMaxAperture: Double = 0.0,
+        fixedApertureStops: [Double] = [],
         isCustom: Bool = false
     ) {
         self.id = id
@@ -50,6 +53,7 @@ struct CameraGearSpec: Codable, Identifiable, Equatable, Hashable {
         self.fixedLensName = fixedLensName
         self.fixedMinAperture = fixedMinAperture
         self.fixedMaxAperture = fixedMaxAperture
+        self.fixedApertureStops = fixedApertureStops
         self.isCustom = isCustom
     }
 
@@ -65,6 +69,7 @@ struct CameraGearSpec: Codable, Identifiable, Equatable, Hashable {
         fixedLensName = try c.decodeIfPresent(String.self, forKey: .fixedLensName) ?? ""
         fixedMinAperture = try c.decodeIfPresent(Double.self, forKey: .fixedMinAperture) ?? 0.0
         fixedMaxAperture = try c.decodeIfPresent(Double.self, forKey: .fixedMaxAperture) ?? 0.0
+        fixedApertureStops = try c.decodeIfPresent([Double].self, forKey: .fixedApertureStops) ?? []
         isCustom = try c.decodeIfPresent(Bool.self, forKey: .isCustom) ?? false
     }
 }
@@ -76,12 +81,14 @@ struct LensGearSpec: Codable, Identifiable, Equatable, Hashable {
     let mount: String
     let minAperture: Double
     let maxAperture: Double
+    var apertureStops: [Double] = []
     var isCustom: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case id, brand, model, mount
         case minAperture = "min_aperture"
         case maxAperture = "max_aperture"
+        case apertureStops = "aperture_stops"
         case isCustom = "is_custom"
     }
 
@@ -92,6 +99,7 @@ struct LensGearSpec: Codable, Identifiable, Equatable, Hashable {
         mount: String,
         minAperture: Double,
         maxAperture: Double,
+        apertureStops: [Double] = [],
         isCustom: Bool = false
     ) {
         self.id = id
@@ -100,6 +108,7 @@ struct LensGearSpec: Codable, Identifiable, Equatable, Hashable {
         self.mount = mount
         self.minAperture = minAperture
         self.maxAperture = maxAperture
+        self.apertureStops = apertureStops
         self.isCustom = isCustom
     }
 
@@ -111,6 +120,7 @@ struct LensGearSpec: Codable, Identifiable, Equatable, Hashable {
         mount = try c.decodeIfPresent(String.self, forKey: .mount) ?? ""
         minAperture = try c.decodeIfPresent(Double.self, forKey: .minAperture) ?? 2.8
         maxAperture = try c.decodeIfPresent(Double.self, forKey: .maxAperture) ?? 16.0
+        apertureStops = try c.decodeIfPresent([Double].self, forKey: .apertureStops) ?? []
         isCustom = try c.decodeIfPresent(Bool.self, forKey: .isCustom) ?? false
     }
 }
@@ -126,9 +136,56 @@ struct ActiveGearProfile: Codable, Equatable {
     var lensName: String = "Rollei-HFT Sonnar 40mm f/2.8"
     var minAperture: Double = 2.8
     var maxAperture: Double = 22.0
+    var apertureStops: [Double] = [2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0]
 
     var hasCamera: Bool { !cameraName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var hasLens: Bool { !lensName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    enum CodingKeys: String, CodingKey {
+        case cameraId, cameraName, mount, isFixedLens, minShutter, maxShutter
+        case lensId, lensName, minAperture, maxAperture, apertureStops
+    }
+
+    init(
+        cameraId: String = "rollei_35_s",
+        cameraName: String = "Rollei 35 S / 35 SE",
+        mount: String = "Fixed",
+        isFixedLens: Bool = true,
+        minShutter: Double = 0.5,
+        maxShutter: Double = 1.0 / 500.0,
+        lensId: String = "rollei_35_s_fixed",
+        lensName: String = "Rollei-HFT Sonnar 40mm f/2.8",
+        minAperture: Double = 2.8,
+        maxAperture: Double = 22.0,
+        apertureStops: [Double] = [2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0]
+    ) {
+        self.cameraId = cameraId
+        self.cameraName = cameraName
+        self.mount = mount
+        self.isFixedLens = isFixedLens
+        self.minShutter = minShutter
+        self.maxShutter = maxShutter
+        self.lensId = lensId
+        self.lensName = lensName
+        self.minAperture = minAperture
+        self.maxAperture = maxAperture
+        self.apertureStops = apertureStops
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cameraId = try c.decodeIfPresent(String.self, forKey: .cameraId) ?? "rollei_35_s"
+        cameraName = try c.decodeIfPresent(String.self, forKey: .cameraName) ?? "Rollei 35 S / 35 SE"
+        mount = try c.decodeIfPresent(String.self, forKey: .mount) ?? "Fixed"
+        isFixedLens = try c.decodeIfPresent(Bool.self, forKey: .isFixedLens) ?? true
+        minShutter = try c.decodeIfPresent(Double.self, forKey: .minShutter) ?? 0.5
+        maxShutter = try c.decodeIfPresent(Double.self, forKey: .maxShutter) ?? (1.0 / 500.0)
+        lensId = try c.decodeIfPresent(String.self, forKey: .lensId) ?? "rollei_35_s_fixed"
+        lensName = try c.decodeIfPresent(String.self, forKey: .lensName) ?? "Rollei-HFT Sonnar 40mm f/2.8"
+        minAperture = try c.decodeIfPresent(Double.self, forKey: .minAperture) ?? 2.8
+        maxAperture = try c.decodeIfPresent(Double.self, forKey: .maxAperture) ?? 22.0
+        apertureStops = try c.decodeIfPresent([Double].self, forKey: .apertureStops) ?? []
+    }
 
     static let unloaded = ActiveGearProfile(
         cameraId: "",
@@ -140,7 +197,8 @@ struct ActiveGearProfile: Codable, Equatable {
         lensId: "",
         lensName: "",
         minAperture: 0.95,
-        maxAperture: 64.0
+        maxAperture: 64.0,
+        apertureStops: []
     )
 }
 
@@ -159,7 +217,7 @@ let ALL_ANALOG_APERTURE_STOPS: [Double] = [
 ]
 
 let FULL_APERTURE_STOPS: [Double] = [
-    1.0, 1.2, 1.4, 1.7, 1.8, 2.0, 2.8, 3.5, 4.0, 4.5, 5.6, 8.0, 11.0, 16.0, 22.0, 32.0
+    1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0, 32.0, 45.0, 64.0
 ]
 
 /// Returns the valid shutter speeds (sorted fast -> slow to match the RolleiMeter dial) for the active gear.
@@ -183,23 +241,17 @@ func clampShutterStopsForGear(_ gear: ActiveGearProfile) -> [(label: String, t: 
     }
 }
 
-/// Returns the valid aperture stops (sorted wide -> narrow) for the active gear.
-func clampApertureStopsForGear(_ gear: ActiveGearProfile) -> [(label: String, n: Double)] {
-    guard gear.hasLens else {
-        return Rollei.stops
+/// Formats a sorted array of f-numbers into dial stop tuples.
+private func formatApertureStopTuples(_ stops: [Double]) -> [(label: String, n: Double)] {
+    var deduped: [Double] = []
+    for f in stops.sorted() where f > 0 {
+        if let last = deduped.last, abs(last - f) < 0.04 {
+            continue
+        }
+        deduped.append(f)
     }
-    let minF = min(gear.minAperture, gear.maxAperture)
-    let maxF = max(gear.minAperture, gear.maxAperture)
-    var stops = FULL_APERTURE_STOPS.filter { $0 >= minF - 0.05 && $0 <= maxF + 0.05 }
-    if !stops.contains(where: { abs($0 - minF) < 0.08 }) {
-        stops.insert(minF, at: 0)
-    }
-    if !stops.contains(where: { abs($0 - maxF) < 0.08 }) {
-        stops.append(maxF)
-    }
-    let unique = stops.sorted()
-    guard !unique.isEmpty else { return Rollei.stops }
-    return unique.map { f in
+    guard !deduped.isEmpty else { return Rollei.stops }
+    return deduped.map { f in
         let label: String
         if f.truncatingRemainder(dividingBy: 1.0) == 0.0 {
             label = String(format: "%.0f", f)
@@ -210,6 +262,43 @@ func clampApertureStopsForGear(_ gear: ActiveGearProfile) -> [(label: String, n:
         }
         return (label: label, n: f)
     }
+}
+
+/// Generates realistic physical aperture ring stops from a (minAperture, maxAperture) range
+/// when explicit stops are not provided (e.g. user-added custom gear or generic adapter).
+func defaultApertureStopsForRange(minAperture: Double, maxAperture: Double) -> [Double] {
+    let minF = min(minAperture, maxAperture)
+    let maxF = max(minAperture, maxAperture)
+    guard minF > 0, maxF > 0 else { return FULL_APERTURE_STOPS }
+
+    var stops = FULL_APERTURE_STOPS.filter { $0 >= minF - 0.05 && $0 <= maxF + 0.05 }
+
+    // If the wide-open aperture is a fractional stop (e.g. f/0.95, f/1.7, f/1.8, f/1.9),
+    // physical aperture rings omit a standard full stop that sits within ~0.28 EV of wide-open
+    // (for example f/1.7 and f/1.8 step directly to f/2.8, and f/0.95 steps directly to f/1.4).
+    if !stops.contains(where: { abs($0 - minF) < 0.08 }) {
+        stops.removeAll { candidate in
+            let evGap = abs(2.0 * log2(candidate / minF))
+            return evGap < 0.28
+        }
+        stops.insert(minF, at: 0)
+    }
+    if !stops.contains(where: { abs($0 - maxF) < 0.08 }) {
+        stops.append(maxF)
+    }
+    return stops.sorted()
+}
+
+/// Returns the valid aperture stops (sorted wide -> narrow) for the active gear.
+func clampApertureStopsForGear(_ gear: ActiveGearProfile) -> [(label: String, n: Double)] {
+    guard gear.hasLens else {
+        return Rollei.stops
+    }
+    if let explicitStops = GearCatalogCache.resolveApertureStops(for: gear), !explicitStops.isEmpty {
+        return formatApertureStopTuples(explicitStops)
+    }
+    let stops = defaultApertureStopsForRange(minAperture: gear.minAperture, maxAperture: gear.maxAperture)
+    return formatApertureStopTuples(stops)
 }
 
 func formatShutterStopLabel(_ seconds: Double) -> String {
@@ -341,21 +430,28 @@ func resolveLensVariants(_ lens: LensGearSpec) -> [LensVariantItem] {
         }
         base = base.trimmingCharacters(in: .whitespacesAndNewlines)
         base = base.trimmingCharacters(in: CharacterSet(charactersIn: "/- "))
+
+        // Early Canon FD Breech-Lock / FL 50mm f/1.8 stops down to f/16, whereas New FD 50mm f/1.8 reaches f/22.
+        let breechMaxAperture = (lens.id == "canon_fd_50_18") ? 16.0 : lens.maxAperture
+        let breechStops = (lens.id == "canon_fd_50_18")
+            ? [1.8, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0]
+            : lens.apertureStops
+
         return [
             LensVariantItem(
                 badge: "New FD (nFD)",
                 subtitle: "Bayonet lock ring · S.C./S.S.C. multi-coated",
-                spec: LensGearSpec(id: "\(lens.id)_nfd", brand: lens.brand, model: "Canon New FD \(base)", mount: mount, minAperture: lens.minAperture, maxAperture: lens.maxAperture, isCustom: lens.isCustom)
+                spec: LensVariantSpec(lens, idSuffix: "nfd", model: "Canon New FD \(base)")
             ),
             LensVariantItem(
                 badge: "FD Breech-Lock",
                 subtitle: "Chrome/black breech ring · S.C. / S.S.C.",
-                spec: LensVariantSpec(lens, idSuffix: "fd_breech", model: "Canon FD \(base) (Breech-Lock)")
+                spec: LensVariantSpec(lens, idSuffix: "fd_breech", model: "Canon FD \(base) (Breech-Lock)", maxAperture: breechMaxAperture, apertureStops: breechStops)
             ),
             LensVariantItem(
                 badge: "FL Mount",
                 subtitle: "Stop-down metering vintage series",
-                spec: LensVariantSpec(lens, idSuffix: "fl", model: "Canon FL \(base)")
+                spec: LensVariantSpec(lens, idSuffix: "fl", model: "Canon FL \(base)", maxAperture: breechMaxAperture, apertureStops: breechStops)
             )
         ]
     }
@@ -464,10 +560,17 @@ func resolveLensVariants(_ lens: LensGearSpec) -> [LensVariantItem] {
             .replacingOccurrences(of: "Minolta MD ", with: "")
             .replacingOccurrences(of: "Minolta MC ", with: "")
             .trimmingCharacters(in: .whitespaces)
+
+        // Minolta MC Rokkor-PF 50mm f/1.7 stops down to f/16, whereas MD 50mm f/1.7 reaches f/22.
+        let mcMaxAperture = (lens.id == "minolta_md_50_17") ? 16.0 : lens.maxAperture
+        let mcStops = (lens.id == "minolta_md_50_17")
+            ? [1.7, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0]
+            : lens.apertureStops
+
         return [
             LensVariantItem(badge: "New MD (Plain MD)", subtitle: "Compact lightweight barrel · Minimum aperture lock", spec: LensVariantSpec(lens, idSuffix: "nmd", model: "Minolta MD \(base)")),
             LensVariantItem(badge: "MD Rokkor-X", subtitle: "Second-gen MD · Achromatic coating", spec: LensVariantSpec(lens, idSuffix: "md_rokkor", model: "Minolta MD Rokkor-X \(base)")),
-            LensVariantItem(badge: "MC Rokkor", subtitle: "All-metal metered-coupled vintage barrel", spec: LensVariantSpec(lens, idSuffix: "mc_rokkor", model: "Minolta MC Rokkor \(base)"))
+            LensVariantItem(badge: "MC Rokkor", subtitle: "All-metal metered-coupled vintage barrel", spec: LensVariantSpec(lens, idSuffix: "mc_rokkor", model: "Minolta MC Rokkor \(base)", maxAperture: mcMaxAperture, apertureStops: mcStops))
         ]
     }
 
@@ -492,14 +595,22 @@ func resolveLensVariants(_ lens: LensGearSpec) -> [LensVariantItem] {
     ]
 }
 
-private func LensVariantSpec(_ base: LensGearSpec, idSuffix: String, model: String) -> LensGearSpec {
+private func LensVariantSpec(
+    _ base: LensGearSpec,
+    idSuffix: String,
+    model: String,
+    minAperture: Double? = nil,
+    maxAperture: Double? = nil,
+    apertureStops: [Double]? = nil
+) -> LensGearSpec {
     LensGearSpec(
         id: "\(base.id)_\(idSuffix)",
         brand: base.brand,
         model: model,
         mount: base.mount,
-        minAperture: base.minAperture,
-        maxAperture: base.maxAperture,
+        minAperture: minAperture ?? base.minAperture,
+        maxAperture: maxAperture ?? base.maxAperture,
+        apertureStops: apertureStops ?? base.apertureStops,
         isCustom: base.isCustom
     )
 }
@@ -593,7 +704,8 @@ enum GearCatalogCache {
                         maxShutter: 0.002,
                         fixedLensName: "Rollei-HFT Sonnar 40mm f/2.8",
                         fixedMinAperture: 2.8,
-                        fixedMaxAperture: 22.0
+                        fixedMaxAperture: 22.0,
+                        fixedApertureStops: [2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0]
                     )
                 ],
                 lenses: []
@@ -603,6 +715,43 @@ enum GearCatalogCache {
         }
         cachedCatalog = decoded
         return decoded
+    }
+
+    /// Resolves the physical aperture stop markings for an active gear profile,
+    /// including profiles decoded from older persisted UserDefaults state.
+    static func resolveApertureStops(for gear: ActiveGearProfile) -> [Double]? {
+        if !gear.apertureStops.isEmpty {
+            return gear.apertureStops
+        }
+
+        let catalog = loadBundledCatalog()
+
+        if gear.isFixedLens || gear.lensId.hasSuffix("_fixed") {
+            if let cam = catalog.cameras.first(where: { $0.id == gear.cameraId || "\($0.id)_fixed" == gear.lensId }),
+               !cam.fixedApertureStops.isEmpty {
+                return cam.fixedApertureStops
+            }
+        }
+
+        if !gear.lensId.isEmpty && !gear.lensId.hasSuffix("_adapter") {
+            let entries = prewarmedBundledLenses()
+            for entry in entries {
+                if entry.lens.id == gear.lensId, !entry.lens.apertureStops.isEmpty {
+                    return entry.lens.apertureStops
+                }
+                if let variant = entry.variants.first(where: { $0.spec.id == gear.lensId }),
+                   !variant.spec.apertureStops.isEmpty {
+                    return variant.spec.apertureStops
+                }
+            }
+            for entry in entries {
+                if gear.lensId.hasPrefix(entry.lens.id + "_"), !entry.lens.apertureStops.isEmpty {
+                    return entry.lens.apertureStops
+                }
+            }
+        }
+
+        return nil
     }
 
     static func prewarmedBundledLenses() -> [PrewarmedLensEntry] {

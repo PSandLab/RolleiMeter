@@ -1,6 +1,8 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Interactive LiDAR Focus Scrubber Card
+
 struct FocusPanel: View {
     /// 0.0 (closest focus / 0.9m on Left) to 1.0 (infinity on Right)
     let position: Double
@@ -13,7 +15,6 @@ struct FocusPanel: View {
     let aperture: (label: String, n: Double)
     let feet: Bool
     var isHeld: Bool = false
-    let k: CGFloat
     let onBegin: () -> Double
     let onSlide: (Double) -> Void
     let onEnd: () -> Void
@@ -25,7 +26,7 @@ struct FocusPanel: View {
     @State private var rippleProgress: Double = 1.0
     @State private var rippleCenter: Double = 0.5
 
-    private let totalTicks = 36
+    private let totalTicks = 32
     private let tickHaptic = UISelectionFeedbackGenerator()
     private let stopHaptic = UIImpactFeedbackGenerator(style: .rigid)
 
@@ -83,42 +84,67 @@ struct FocusPanel: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            PanelTitle(text: "FOCUS", k: k)
+        let greenColor = Color(red: 0.19, green: 0.82, blue: 0.35)
+        let yellowColor = Color(red: 1.0, green: 0.84, blue: 0.04)
+        let redColor = Color(red: 1.0, green: 0.27, blue: 0.23)
+        let isAutoFocus = !manual
 
-            // Static Bed Dial Track (No box, no ball, lines span end to end)
+        VStack(spacing: 6) {
+            // Header Row: AF Toggle + Focus Label + Live Distance Readout
+            HStack {
+                Button {
+                    guard available else { return }
+                    stopHaptic.impactOccurred(intensity: 0.6)
+                    withAnimation(.spring(response: 0.25)) {
+                        if manual {
+                            onAuto()
+                        } else {
+                            _ = onBegin()
+                            onEnd()
+                        }
+                    }
+                } label: {
+                    Text(isAutoFocus ? "AF" : "MF")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(isAutoFocus ? greenColor : yellowColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(
+                            (isAutoFocus ? greenColor : yellowColor).opacity(0.16),
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(manual ? "Switch to autofocus" : "Autofocus active")
+
+                Spacer()
+
+                Text("FOCUS")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                let displayDistance = subject != nil ? Fmt.distance(subject, feet: feet) : (hasLiDAR ? "∞" : "—")
+                Button(action: onUnits) {
+                    Text(displayDistance)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(isAutoFocus ? (tooClose ? redColor : greenColor) : yellowColor)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Focus distance, \(displayDistance)")
+            }
+
+            // Interactive Touch-Scrubbable LiDAR Focus Scale
             GeometryReader { geo in
                 let w = geo.size.width
-                let h = geo.size.height
-                let lineMargin: CGFloat = 2 * k
+                let lineMargin: CGFloat = 2
                 let usableWidth = max(w - lineMargin * 2, 1)
-                let ribH = h - 22 * k
-                let touchX = lineMargin + CGFloat(min(max(activePosition, 0.0), 1.0)) * usableWidth
+                let normalizedCenter = min(max(activePosition, 0.08), 0.92)
 
-                ZStack(alignment: .leading) {
-                    // Atmospheric red gradient wash following finger directly
-                    let glowWidth = max(w * 0.82, 110 * k)
-                    RoundedRectangle(cornerRadius: 8 * k, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 0.0),
-                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.20),
-                                    .init(color: Color(hex: 0xFF1E1E).opacity(0.60), location: 0.50),
-                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.18), location: 0.80),
-                                    .init(color: Color(hex: 0xFF2A2A).opacity(0.0), location: 1.0)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: glowWidth, height: ribH + 6 * k)
-                        .position(x: touchX, y: ribH / 2)
-                        .opacity(isScrolling && manual ? 1.0 : 0.0)
-                        .animation(.easeInOut(duration: 0.25), value: isScrolling)
-                        .allowsHitTesting(false)
-
-                    // Lines with gentle dock zoom, release ripple & DoF coloring
+                VStack(spacing: 4) {
                     FocusStripLines(
                         focusPosition: activePosition,
                         scrollProgress: isScrolling ? 1.0 : 0.0,
@@ -129,57 +155,29 @@ struct FocusPanel: View {
                         dofFar: currentDoFRange.far,
                         hasMeasurement: subject != nil || !manual,
                         isTooClose: tooClose,
-                        totalTicks: totalTicks,
-                        k: k
+                        totalTicks: totalTicks
                     )
+                    .frame(height: 24)
                     .animation(.easeInOut(duration: 0.22), value: activePosition)
                     .animation(.easeInOut(duration: 0.22), value: currentDoFRange.near)
 
-                    // DoF boundary markers displayed under the lines on HOLD (shutter pressed)
-                    if (isHeld || (manual && !isScrolling)), let markers = dofBoundaryMarkers {
-                        let leftX = lineMargin + CGFloat(markers.near.pos) * usableWidth
-                        let rightX = lineMargin + CGFloat(markers.far.pos) * usableWidth
-                        let minGap: CGFloat = 34 * k
-                        let actualGap = max(rightX - leftX, minGap)
-                        let midX = (leftX + rightX) / 2
-                        let adjLeftX = min(leftX, midX - actualGap / 2)
-                        let adjRightX = max(rightX, midX + actualGap / 2)
-                        let markerY = ribH + 11 * k
+                    // Dynamic Near / Far Depth-of-Field Labels Positioned Under the Active Zone
+                    ZStack(alignment: .leading) {
+                        Color.clear.frame(height: 12)
 
-                        ZStack {
-                            VStack(spacing: 2 * k) {
-                                Rectangle()
-                                    .fill(Palette.accent)
-                                    .frame(width: 1.5 * k, height: 4 * k)
+                        if let markers = dofBoundaryMarkers {
+                            HStack(spacing: 10) {
                                 Text(markers.near.label)
-                                    .font(AppTypography.mono(size: 13 * k, weight: .bold))
-                                    .foregroundStyle(Palette.accent)
-                                    .lineLimit(1)
-                            }
-                            .position(x: adjLeftX, y: markerY)
-
-                            VStack(spacing: 2 * k) {
-                                Rectangle()
-                                    .fill(Palette.accent)
-                                    .frame(width: 1.5 * k, height: 4 * k)
                                 Text(markers.far.label)
-                                    .font(AppTypography.mono(size: 13 * k, weight: .bold))
-                                    .foregroundStyle(Palette.accent)
-                                    .lineLimit(1)
                             }
-                            .position(x: adjRightX, y: markerY)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(yellowColor)
+                            .offset(x: max(0, min(w - 58, w * normalizedCenter - 26)))
+                            .animation(.easeInOut(duration: 0.22), value: normalizedCenter)
                         }
-                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                        .animation(.easeInOut(duration: 0.22), value: markers.near.pos)
-                        .animation(.easeInOut(duration: 0.22), value: markers.far.pos)
-                        .animation(.easeInOut(duration: 0.22), value: aperture.n)
-                        .animation(.easeInOut(duration: 0.25), value: isHeld)
-                        .allowsHitTesting(false)
                     }
                 }
                 .contentShape(Rectangle())
-                .animation(.easeInOut(duration: 0.25), value: isScrolling)
-                .animation(.easeInOut(duration: 0.25), value: manual)
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
@@ -228,44 +226,18 @@ struct FocusPanel: View {
                     }
                 )
             }
-            .padding(.top, 56 * k)
-            .padding(.bottom, 10 * k)
-            .padding(.horizontal, 14 * k)
+            .frame(height: 40)
         }
-        .overlay(alignment: .topLeading) {
-            Button {
-                if manual {
-                    stopHaptic.impactOccurred(intensity: 0.6)
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        onAuto()
-                    }
-                }
-            } label: {
-                Text(manual ? "MF" : "AF")
-                    .font(AppTypography.next(size: 19 * k, weight: .bold))
-                    .foregroundStyle(manual ? Palette.bad : Palette.good)
-                    .padding(.top, 17 * k)
-                    .padding(.leading, 18 * k)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(manual ? "Switch to autofocus" : "Autofocus active")
-        }
-        .overlay(alignment: .topTrailing) {
-            let displayDistance = subject != nil ? Fmt.distance(subject, feet: feet) : (hasLiDAR ? "∞" : "—")
-            Button(action: onUnits) {
-                Text(displayDistance)
-                    .font(AppTypography.mono(size: 19 * k, weight: .semibold))
-                    .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.good))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .padding(.top, 17 * k)
-                    .padding(.trailing, 18 * k)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Focus distance, \(displayDistance)")
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(
+                    isScrolling ? yellowColor.opacity(0.6) : Color.white.opacity(0.12),
+                    lineWidth: isScrolling ? 1.0 : 0.5
+                )
+        )
         .onAppear {
             tickHaptic.prepare()
         }

@@ -2,63 +2,6 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 
-private struct GlassCircle: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Circle())
-        } else {
-            content
-                .background(Circle().fill(Palette.panel))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
-        }
-    }
-}
-
-private struct GlassCapsule: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            content
-                .background(Capsule().fill(Palette.panel))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 0.75))
-        }
-    }
-}
-
-/// Portrait only: a gentle card with a hairline edge (and optionally a rule under the title)
-/// so neighbouring readouts never run into each other.
-private struct SoftCard: ViewModifier {
-    let k: CGFloat
-    let on: Bool
-    var rule: Bool = false
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if on {
-            let shape = RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
-            content
-                .background(shape.fill(Color.white.opacity(0.045)))
-                .overlay(alignment: .top) {
-                    if rule {
-                        Rectangle()
-                            .fill(Color.white.opacity(0.09))
-                            .frame(height: 0.5)
-                            .padding(.horizontal, 16 * k)
-                            .padding(.top, 62 * k)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5).allowsHitTesting(false))
-        } else {
-            content
-        }
-    }
-}
-
 private struct SpotReticle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -81,8 +24,9 @@ struct ContentView: View {
     @AppStorage("isoIndex") private var isoIndex = 6
     @AppStorage("useDIN") private var useDIN = false
     @AppStorage("useFeet") private var useFeet = false
+    @AppStorage("showFocusModule") private var showFocusModule = true
     @AppStorage("simpleAperture") private var apertureStop = 0
-    @AppStorage("autoAperture") private var autoAperture = false
+    @AppStorage("autoAperture") private var autoAperture = true
     @AppStorage("calibration") private var calibration = 0.0
     @AppStorage("armOffset") private var armOffset = 0.0
 
@@ -95,9 +39,7 @@ struct ContentView: View {
     @State private var capturedMoment: CapturedMoment? = nil
     @State private var momentSaved: Bool = false
     @State private var showEvPopover: Bool = false
-    // Wake-up cover: the held frame softens while the camera restarts, then dissolves into live.
     @State private var snapshotOpacity: Double = 1
-    @State private var snapshotBlur: CGFloat = 0
     @State private var wakeToken = 0
     @State private var showSettings = false
     @State private var spotActive = false
@@ -153,6 +95,7 @@ struct ContentView: View {
     private var comp: Double { logStore.totalEvComp }
     private var liveEV: Double { meter.sceneEV + calibration }
     private var ev: Double { frozenEV ?? liveEV }
+    private var isHeld: Bool { frozenEV != nil && !isResuming }
 
     private var shownDistance: Double? {
         guard let raw = frozenEV != nil ? frozenDist : meter.distance else { return nil }
@@ -174,66 +117,42 @@ struct ContentView: View {
     }
 
     var body: some View {
-        GeometryReader { screen in
-            let grid = LiquidGrid(screen: screen.size, insets: screen.safeAreaInsets)
-            let k = grid.k
-            let p = grid.portrait
-            let roll = logStore.rollState
-            let gear = logStore.activeGear
+        let roll = logStore.rollState
+        let gear = logStore.activeGear
 
-            ZStack {
-                Palette.background
+        ZStack {
+            // 1. Base OLED Black Canvas
+            Color.black.ignoresSafeArea()
 
-                ZStack(alignment: .topLeading) {
-                    ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, speeds: activeShutterSpeeds, k: k)
-                        .modifier(SoftCard(k: k, on: p, rule: true))
-                        .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
-
-                    FilmPanel(
-                        isoIndex: $isoIndex,
-                        useDIN: useDIN,
-                        filmName: shortFilmBadge(name: roll.filmName, iso: roll.boxIso),
-                        boxISO: roll.boxIso,
-                        isUnloaded: roll.isUnloaded,
-                        cameraBadge: gear.cameraName,
-                        k: k,
-                        onTap: {
-                            logbookInitialTab = 0
-                            showFilmLogbook = true
-                        }
+            // 2. Ambient Viewfinder Backlight (Allows Liquid Glass to refract color over dark background)
+            VStack {
+                Spacer()
+                RoundedRectangle(cornerRadius: 48)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.38, green: 0.33, blue: 0.24).opacity(0.32),
+                                Color(red: 0.14, green: 0.26, blue: 0.20).opacity(0.18),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                     )
-                    .cell(grid, col: 0, row: p ? 11 : 4, cols: 3, rows: 2)
+                    .frame(height: 440)
+                    .blur(radius: 55)
+            }
+            .ignoresSafeArea()
 
-                    FramePanel(
-                        frame: roll.currentFrame,
-                        rollLength: roll.maxFrames,
-                        isUnloaded: roll.isUnloaded,
-                        loggedCount: logStore.loggedFrames.count,
-                        k: k,
-                        onTap: {
-                            logbookInitialTab = 1
-                            showFilmLogbook = true
-                        }
-                    )
-                    .modifier(SoftCard(k: k, on: p, rule: true))
-                    .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 2)
+            // 3. Main Interface Stack
+            VStack(spacing: 12) {
+                topToolbar(roll: roll, gear: gear)
 
-                    preview(k: k)
-                        .cell(grid, col: p ? 0 : 3, row: 1, cols: 6, rows: p ? 6 : 5)
+                viewfinderStage
 
-                    AperturePanel(
-                        index: resolvedApertureIndex,
-                        stops: activeApertureStops,
-                        auto: autoAperture,
-                        lamp: autoLampState,
-                        k: k,
-                        onPick: pickAperture,
-                        onTap: toggleAutoAperture,
-                        onHome: returnHomeAperture
-                    )
-                    .modifier(SoftCard(k: k, on: p, rule: true))
-                    .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
+                exposureWheelsRow
 
+                if showFocusModule {
                     FocusPanel(
                         position: focusPos,
                         manual: manualFocus,
@@ -244,44 +163,22 @@ struct ContentView: View {
                         tooClose: tooClose,
                         aperture: resolvedAperture,
                         feet: useFeet,
-                        isHeld: (frozenEV != nil && !isResuming),
-                        k: k,
+                        isHeld: isHeld,
                         onBegin: beginFocusDrag,
                         onSlide: slideFocus,
                         onEnd: endFocusDrag,
                         onAuto: resumeAutoFocus,
                         onUnits: toggleUnits
                     )
-                    .modifier(SoftCard(k: k, on: p))
-                    .cell(grid, col: p ? 3 : 9, row: p ? 9 : 2, cols: 3, rows: 2)
-
-                    HoldControl(
-                        frozen: (frozenEV != nil && !isResuming),
-                        frameNumber: capturedMoment?.frameNumber ?? roll.currentFrame,
-                        isSaved: momentSaved,
-                        k: k,
-                        modes: meterModes,
-                        meterIndex: meterIndex,
-                        onPickMeter: pickMeterMode,
-                        onHold: toggleFreeze,
-                        onConfirmLog: confirmAndLogHeldFrame,
-                        onDiscardHold: unfreeze
-                    )
-                    .modifier(SoftCard(k: k, on: p))
-                    .cell(grid, col: p ? 3 : 9, row: p ? 11 : 4, cols: 3, rows: 2)
-
-                    // Last in the stack so the camera view (which overflows its cell) can't block taps.
-                    topBar(k: k)
-                        .cell(grid, col: p ? 0 : 3, row: 0, cols: 6, rows: 1)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .frame(width: grid.size.width, height: grid.size.height)
-                .offset(y: grid.yShift)
+
+                bottomFrameAndConfirmRow(roll: roll)
             }
-            .frame(width: screen.size.width, height: screen.size.height)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 12)
         }
-        .ignoresSafeArea()
-        .background(Palette.background.ignoresSafeArea())
-        .dynamicTypeSize(.large)
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
@@ -330,6 +227,7 @@ struct ContentView: View {
             SettingsSheet(
                 useDIN: $useDIN,
                 useFeet: $useFeet,
+                showFocusModule: $showFocusModule,
                 calibration: $calibration,
                 armOffset: $armOffset,
                 rawDistance: { meter.distance },
@@ -376,6 +274,402 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - 1. Top Bar (Universal Camera/Film Chip + Unified Glass Toolbar)
+
+    private func topToolbar(roll: FilmRollState, gear: ActiveGearProfile) -> some View {
+        HStack(spacing: 10) {
+            FilmPanel(
+                isoIndex: $isoIndex,
+                useDIN: useDIN,
+                filmName: shortFilmBadge(name: roll.filmName, iso: roll.boxIso),
+                boxISO: roll.boxIso,
+                isUnloaded: roll.isUnloaded,
+                cameraBadge: gear.cameraName,
+                onTap: {
+                    logbookInitialTab = 0
+                    showFilmLogbook = true
+                }
+            )
+
+            Spacer(minLength: 4)
+
+            // Unified Glass Toolbar (Consistent button sizing)
+            HStack(spacing: 2) {
+                let hasEvBias = abs(logStore.totalEvComp) >= 0.05
+                toolbarButton(
+                    title: hasEvBias ? formatEvComp(logStore.totalEvComp) : "±EV",
+                    systemImage: nil,
+                    tint: hasEvBias ? Color(red: 1.0, green: 0.84, blue: 0.04) : .white
+                ) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showEvPopover.toggle()
+                }
+                .popover(isPresented: $showEvPopover) {
+                    ExposureCompDialPopover(store: logStore)
+                        .presentationCompactAdaptation(.popover)
+                }
+
+                toolbarButton(title: nil, systemImage: "film.stack") {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    logbookInitialTab = 0
+                    showFilmLogbook = true
+                }
+                .accessibilityLabel("Film Roll Log")
+
+                toolbarButton(title: nil, systemImage: "gearshape") {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    showSettings = true
+                }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showFocusModule.toggle()
+                        }
+                    }
+                )
+                .accessibilityLabel("Settings")
+            }
+            .padding(4)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+            )
+        }
+    }
+
+    private func toolbarButton(
+        title: String?,
+        systemImage: String?,
+        tint: Color = .white,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Group {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                } else if let title {
+                    Text(title)
+                        .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+            }
+            .foregroundStyle(tint)
+            .frame(minWidth: 34, minHeight: 30)
+            .padding(.horizontal, title != nil ? 4 : 0)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 2. Viewfinder Stage (With LiDAR Focus Peaking & Floating Glass HUD)
+
+    private var viewfinderStage: some View {
+        let radius: CGFloat = 22
+        let held = isHeld
+        let yellowColor = Color(red: 1.0, green: 0.84, blue: 0.04)
+
+        return GeometryReader { geo in
+            ZStack {
+                CameraPreview(
+                    session: meter.session,
+                    onVolumePress: { toggleFreeze() },
+                    onRotate: { rotation = $0 }
+                )
+                .frame(width: fullFrame(geo.size).width, height: fullFrame(geo.size).height)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                .clipped()
+
+                if let frozenPreviewImage {
+                    Image(uiImage: frozenPreviewImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .opacity(snapshotOpacity)
+                        .overlay(Palette.lensLight.opacity(0.04))
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                } else if frozenEV != nil {
+                    Color.black.opacity(0.35)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
+
+                if peakingVisible || manualFocus || focusTouching {
+                    PeakingOverlay(feed: meter.peakingFeed)
+                        .frame(width: fullFrame(geo.size).width, height: fullFrame(geo.size).height)
+                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                        .transition(.opacity)
+                }
+
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(
+                        SpatialTapGesture().onEnded { value in
+                            if suppressTap { return }
+                            let p = normalized(value.location, geo.size)
+                            focusPulse &+= 1
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
+                            if frozenEV != nil {
+                                if let dist = meter.sampleFrozenDepth(at: bufferPoint(p, in: previewSize)) {
+                                    frozenDist = dist
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                } else {
+                                    toggleFreeze()
+                                }
+                            } else {
+                                toggleFreeze()
+                            }
+                        }
+                    )
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.4)
+                            .sequenced(before: DragGesture(minimumDistance: 0))
+                            .onChanged { value in
+                                guard case .second(true, let drag?) = value else { return }
+                                if !spotGestureLive {
+                                    spotGestureLive = true
+                                    suppressTap = true
+                                    unfreeze()
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                }
+                                let p = normalized(drag.location, geo.size)
+                                withAnimation(.interactiveSpring) {
+                                    spot = p
+                                    spotActive = true
+                                }
+                            }
+                            .onEnded { _ in
+                                spotGestureLive = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { suppressTap = false }
+                            }
+                    )
+                    .simultaneousGesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                spotRadius = min(max(pinchBase * value.magnification, 0.02), 0.15)
+                            }
+                            .onEnded { _ in
+                                pinchBase = spotRadius
+                            }
+                    )
+
+                if spotActive {
+                    let full = fullFrame(geo.size)
+                    let d = spotRadius * 2 * max(full.width, full.height)
+                    ZStack {
+                        Circle().fill(Palette.lensLight.opacity(0.05))
+                        SpotReticle()
+                            .stroke(Palette.lensLight.opacity(0.95),
+                                    style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
+                        Circle().fill(Palette.lensLight).frame(width: 2.5, height: 2.5)
+                    }
+                    .frame(width: d, height: d)
+                    .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
+                    .animation(.interactiveSpring, value: spotRadius)
+                    .transition(.scale(scale: 1.6).combined(with: .opacity))
+                    .allowsHitTesting(false)
+
+                    if let delta = meter.spotDelta {
+                        Text(Fmt.stops(delta))
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Palette.lensLight)
+                            .contentTransition(.numericText())
+                            .position(x: spot.x * geo.size.width,
+                                      y: max(14, spot.y * geo.size.height - d / 2 - 14))
+                            .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
+                            .animation(.smooth(duration: 0.15), value: Fmt.stops(delta))
+                            .allowsHitTesting(false)
+                    }
+                }
+
+                // Center / Active Spot Metering & LiDAR Reticle
+                FocusMarker(tooClose: tooClose, pulseID: focusPulse)
+                    .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
+                    .allowsHitTesting(false)
+
+                if showHint {
+                    VStack(spacing: 4) {
+                        Text("Tap: hold reading   \u{00B7}   Hold: spot meter")
+                        Text("Tap aperture: auto   \u{00B7}   Slide focus: manual")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.lensLight)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Palette.lensDark.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+                }
+
+                if meter.denied {
+                    VStack(spacing: 10) {
+                        Text("Camera access is off")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Palette.text)
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Text("OPEN SETTINGS")
+                                .font(.system(size: 12, weight: .semibold))
+                                .tracking(1)
+                                .foregroundStyle(yellowColor)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(20)
+                }
+
+                Color.black
+                    .opacity(flash)
+                    .allowsHitTesting(false)
+
+                // Top Floating HUD Row (HOLD/LIVE EV Chip + Active LiDAR Peaking Indicator / Meter Mode)
+                VStack {
+                    HStack {
+                        EVChip(
+                            damp: evDamp,
+                            frozen: held,
+                            spot: spotActive,
+                            onTap: {
+                                withAnimation(.spring(response: 0.25)) {
+                                    toggleFreeze()
+                                }
+                            }
+                        )
+
+                        Spacer()
+
+                        if focusTouching || peakingVisible {
+                            LiDARPeakingBadge()
+                                .transition(.scale.combined(with: .opacity))
+                        } else {
+                            Button {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                let nextIdx = (meterIndex + 1) % meterModes.count
+                                pickMeterMode(nextIdx)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(spotActive ? yellowColor : Color.white.opacity(0.65))
+                                        .frame(width: 5, height: 5)
+                                    Text(meterChoice.title.uppercased())
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(.white)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(
+                                    Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Metering mode: \(meterChoice.title)")
+                        }
+                    }
+                    .padding(14)
+
+                    Spacer()
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(
+                // Yellow border appears ONLY when HOLD is active
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        held ? yellowColor.opacity(0.85) : Color.white.opacity(0.14),
+                        lineWidth: held ? 2.0 : 1.0
+                    )
+                    .allowsHitTesting(false)
+            )
+            .containerShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .onAppear { previewSize = geo.size }
+            .onChange(of: geo.size) { _, newSize in previewSize = newSize }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    // MARK: - 3. Primary Exposure Deck (Hero Shutter & Aperture Wheels)
+
+    private var exposureWheelsRow: some View {
+        HStack(spacing: 12) {
+            ShutterPanel(
+                damp: evDamp,
+                iso: iso,
+                comp: comp,
+                aperture: resolvedAperture,
+                speeds: activeShutterSpeeds,
+                isHeld: isHeld
+            )
+
+            AperturePanel(
+                index: resolvedApertureIndex,
+                stops: activeApertureStops,
+                auto: autoAperture,
+                lamp: autoLampState,
+                onPick: pickAperture,
+                onTap: toggleAutoAperture,
+                onHome: returnHomeAperture
+            )
+        }
+        .frame(height: 108)
+    }
+
+    // MARK: - 5. Bottom Row (Frame Counter + Unboxed Glass Confirm/Reject)
+
+    private func bottomFrameAndConfirmRow(roll: FilmRollState) -> some View {
+        HStack(spacing: 12) {
+            FramePanel(
+                frame: roll.currentFrame,
+                rollLength: roll.maxFrames,
+                isUnloaded: roll.isUnloaded,
+                loggedCount: logStore.loggedFrames.count,
+                onTap: {
+                    logbookInitialTab = 1
+                    showFilmLogbook = true
+                }
+            )
+
+            HoldControl(
+                frozen: isHeld,
+                frameNumber: capturedMoment?.frameNumber ?? roll.currentFrame,
+                isSaved: momentSaved,
+                onConfirmLog: {
+                    if isHeld {
+                        confirmAndLogHeldFrame()
+                    } else {
+                        captureAndLogLiveFrame()
+                    }
+                },
+                onDiscardHold: {
+                    if isHeld {
+                        unfreeze()
+                    } else if spotActive || manualFocus {
+                        spotActive = false
+                        resumeAutoFocus()
+                    } else {
+                        toggleFreeze()
+                    }
+                }
+            )
+        }
+    }
+
+    // MARK: - Meter & Capture Actions
+
     private func pushConfig() {
         meter.setConfig(
             mode: engineMode,
@@ -386,37 +680,39 @@ struct ContentView: View {
         )
     }
 
+    private func makeCurrentMoment(heldEV: Double, snapshot: UIImage?) -> CapturedMoment {
+        let idealT = Exposure.idealShutter(ev100: heldEV, iso: iso, comp: comp, n: resolvedAperture.n)
+        let shutterRes = Exposure.result(for: idealT, speeds: activeShutterSpeeds)
+        let formattedShutter = shutterRes.label.hasSuffix("\"") ? shutterRes.label.replacingOccurrences(of: "\"", with: "s") : "1/\(shutterRes.label)"
+        let formattedAperture = "f/\(resolvedAperture.label)"
+        let computedZone = Int((5.0 + (meter.spotDelta ?? 0.0)).rounded()).clamped(to: 0...10)
+
+        return logStore.captureMoment(
+            shutterSpeed: formattedShutter,
+            aperture: formattedAperture,
+            iso: Int(iso.rounded()),
+            sceneEv: heldEV,
+            compensatedEv: heldEV - comp,
+            zone: computedZone,
+            meterMode: engineMode.rawValue.uppercased(),
+            isAutoExposure: autoAperture,
+            previewImage: snapshot
+        )
+    }
+
     private func toggleFreeze() {
         guard !isResuming, !isModalOpen else { return }
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         if frozenEV == nil {
             shutterBlink()
             let snapshot = meter.previewSnapshot()
-            wakeToken &+= 1            // cancels any pending wake-up cleanup
+            wakeToken &+= 1
             snapshotOpacity = 1
-            snapshotBlur = 0
             momentSaved = false
 
             let heldEV = liveEV
-            let idealT = Exposure.idealShutter(ev100: heldEV, iso: iso, comp: comp, n: resolvedAperture.n)
-            let shutterRes = Exposure.result(for: idealT, speeds: activeShutterSpeeds)
-            let formattedShutter = shutterRes.label.hasSuffix("\"") ? shutterRes.label.replacingOccurrences(of: "\"", with: "s") : "1/\(shutterRes.label)"
-            let formattedAperture = "f/\(resolvedAperture.label)"
-            let computedZone = Int((5.0 + (meter.spotDelta ?? 0.0)).rounded()).clamped(to: 0...10)
+            let moment = makeCurrentMoment(heldEV: heldEV, snapshot: snapshot)
 
-            let moment = logStore.captureMoment(
-                shutterSpeed: formattedShutter,
-                aperture: formattedAperture,
-                iso: Int(iso.rounded()),
-                sceneEv: heldEV,
-                compensatedEv: heldEV - comp,
-                zone: computedZone,
-                meterMode: engineMode.rawValue.uppercased(),
-                isAutoExposure: autoAperture,
-                previewImage: snapshot
-            )
-
-            // Fade the held frame in over the live image instead of swapping it in one frame.
             withAnimation(.easeOut(duration: 0.28)) {
                 frozenPreviewImage = snapshot
                 frozenEV = heldEV
@@ -430,6 +726,15 @@ struct ContentView: View {
             }
         } else {
             unfreeze()
+        }
+    }
+
+    private func captureAndLogLiveFrame() {
+        shutterBlink()
+        let snapshot = meter.previewSnapshot()
+        let moment = makeCurrentMoment(heldEV: liveEV, snapshot: snapshot)
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+            _ = logStore.recordMoment(moment)
         }
     }
 
@@ -450,7 +755,6 @@ struct ContentView: View {
 
     private func shutterBlink() {
         AudioServicesPlaySystemSound(1108)
-        // A soft, quick dip like a shutter closing, then a slow release; not a hard flash.
         withAnimation(.easeOut(duration: 0.07)) { flash = 0.3 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) {
             withAnimation(.easeInOut(duration: 0.5)) { flash = 0 }
@@ -470,16 +774,11 @@ struct ContentView: View {
         momentSaved = false
         meter.unfreezeDepth()
 
-        // Immediate feedback: the held frame starts to soften while the camera wakes up.
-        withAnimation(.easeInOut(duration: 0.7)) { snapshotBlur = 7 }
-
         meter.resume {
-            // Give auto-exposure a moment to settle before revealing the live image.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 guard token == self.wakeToken else { return }
                 withAnimation(.easeInOut(duration: 0.95)) {
                     self.snapshotOpacity = 0
-                    self.snapshotBlur = 18
                     self.frozenEV = nil
                     self.frozenDist = nil
                     self.isResuming = false
@@ -487,7 +786,6 @@ struct ContentView: View {
                         self.updateDoFOverlay()
                     }
                 }
-                // Remove the (now invisible) snapshot once the dissolve has finished.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     guard token == self.wakeToken else { return }
                     var t = Transaction()
@@ -495,7 +793,6 @@ struct ContentView: View {
                     withTransaction(t) {
                         self.frozenPreviewImage = nil
                         self.snapshotOpacity = 1
-                        self.snapshotBlur = 0
                     }
                 }
             }
@@ -528,6 +825,15 @@ struct ContentView: View {
     private func endFocusDrag() {
         focusTouching = false
         updateDoFOverlay()
+        peakingTask?.cancel()
+        peakingTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            if !Task.isCancelled && !focusTouching {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    peakingVisible = false
+                }
+            }
+        }
     }
 
     private func resumeAutoFocus() {
@@ -587,267 +893,9 @@ struct ContentView: View {
         return rotation.toBuffer(q)
     }
 
-    /// Size of the full camera frame when aspect-filled into `size`.
     private func fullFrame(_ size: CGSize) -> CGSize {
         let a = rotation.frameAspect
         return CGSize(width: max(size.width, size.height * a), height: max(size.height, size.width / a))
-    }
-
-    // MARK: - Viewfinder
-
-    private func preview(k: CGFloat) -> some View {
-        let radius = 22 * k
-        let held = frozenEV != nil && !isResuming
-        return GeometryReader { geo in
-            ZStack {
-                CameraPreview(
-                    session: meter.session,
-                    onVolumePress: { toggleFreeze() },
-                    onRotate: { rotation = $0 }
-                )
-                .frame(width: fullFrame(geo.size).width, height: fullFrame(geo.size).height)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                .clipped()
-
-                if let frozenPreviewImage {
-                    Image(uiImage: frozenPreviewImage)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .blur(radius: snapshotBlur, opaque: true)
-                        .clipped()
-                        .opacity(snapshotOpacity)
-                        .overlay(Palette.lensLight.opacity(0.04))
-                        .transition(.opacity)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                } else if frozenEV != nil {
-                    Color.black.opacity(0.35)
-                        .transition(.opacity)
-                        .allowsHitTesting(false)
-                }
-
-                // Preserved in HOLD: Renders on top of the frozen snapshot
-                if peakingVisible || manualFocus {
-                    PeakingOverlay(feed: meter.peakingFeed)
-                        .frame(width: fullFrame(geo.size).width, height: fullFrame(geo.size).height)
-                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                        .transition(.opacity)
-                }
-
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(
-                        SpatialTapGesture().onEnded { value in
-                            if suppressTap { return }
-                            let p = normalized(value.location, geo.size)
-                            focusPulse &+= 1
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.72)) { focus = p }
-                            if frozenEV != nil {
-                                if let dist = meter.sampleFrozenDepth(at: bufferPoint(p, in: previewSize)) {
-                                    frozenDist = dist
-                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                } else {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                }
-                            } else {
-                                unfreeze()
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            }
-                        }
-                    )
-                    .simultaneousGesture(
-                        LongPressGesture(minimumDuration: 0.4)
-                            .sequenced(before: DragGesture(minimumDistance: 0))
-                            .onChanged { value in
-                                guard case .second(true, let drag?) = value else { return }
-                                if !spotGestureLive {
-                                    spotGestureLive = true
-                                    suppressTap = true
-                                    unfreeze()
-                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                }
-                                let p = normalized(drag.location, geo.size)
-                                withAnimation(.interactiveSpring) {
-                                    spot = p
-                                    spotActive = true
-                                }
-                            }
-                            .onEnded { _ in
-                                spotGestureLive = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { suppressTap = false }
-                            }
-                    )
-                    .simultaneousGesture(
-                        MagnifyGesture()
-                            .onChanged { value in
-                                spotRadius = min(max(pinchBase * value.magnification, 0.02), 0.15)
-                            }
-                            .onEnded { _ in
-                                pinchBase = spotRadius
-                            }
-                    )
-
-                if spotActive {
-                    let full = fullFrame(geo.size)
-                    let d = spotRadius * 2 * max(full.width, full.height)
-                    ZStack {
-                        Circle().fill(Palette.lensLight.opacity(0.05))
-                        SpotReticle()
-                            .stroke(Palette.lensLight.opacity(0.95),
-                                    style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
-                        Circle().fill(Palette.lensLight).frame(width: 2.5, height: 2.5)
-                    }
-                    .shadow(color: Palette.lensDark.opacity(0.40), radius: 1.5)
-                    .frame(width: d, height: d)
-                    .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
-                    .animation(.interactiveSpring, value: spotRadius)
-                    .transition(.scale(scale: 1.6).combined(with: .opacity))
-                    .allowsHitTesting(false)
-
-                    if let delta = meter.spotDelta {
-                        Text(Fmt.stops(delta))
-                            .font(AppTypography.font(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.lensLight)
-                            .shadow(color: Palette.lensDark.opacity(0.8), radius: 2)
-                            .contentTransition(.numericText())
-                            .position(x: spot.x * geo.size.width,
-                                      y: max(14, spot.y * geo.size.height - d / 2 - 14))
-                            .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
-                            .animation(.smooth(duration: 0.15), value: Fmt.stops(delta))
-                            .allowsHitTesting(false)
-                    }
-                }
-
-                // Hide live LiDAR bracket during HOLD
-                if meter.hasLiDAR {
-                    FocusMarker(tooClose: tooClose, pulseID: focusPulse)
-                        .position(x: focus.x * geo.size.width, y: focus.y * geo.size.height)
-                        .animation(.spring(response: 0.4, dampingFraction: 0.72), value: focus)
-                        .allowsHitTesting(false)
-                }
-
-                if showHint {
-                    VStack(spacing: 4) {
-                        Text("Tap: distance   \u{00B7}   Hold: spot meter")
-                        Text("Tap aperture: auto   \u{00B7}   Slide focus: manual")
-                    }
-                    .font(AppTypography.next(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.lensLight)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Palette.lensDark.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .position(x: geo.size.width / 2, y: geo.size.height * 0.3)
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
-                }
-
-                if meter.denied {
-                    VStack(spacing: 10) {
-                        Text("Camera access is off")
-                            .font(AppTypography.next(size: 16, weight: .semibold))
-                            .foregroundStyle(Palette.text)
-                        Button {
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                UIApplication.shared.open(url)
-                            }
-                        } label: {
-                            Text("OPEN SETTINGS")
-                                .font(AppTypography.next(size: 12, weight: .semibold))
-                                .tracking(1)
-                                .foregroundStyle(Palette.accent)
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(20)
-                }
-
-                Color.black
-                    .opacity(flash)
-                    .allowsHitTesting(false)
-
-                EVChip(damp: evDamp, frozen: (frozenEV != nil && !isResuming), spot: spotActive)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(10)
-                    .allowsHitTesting(false)
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(held ? Palette.accent.opacity(0.75) : Color.white.opacity(0.12),
-                                  lineWidth: held ? 1.5 : 1)
-                    .animation(.easeInOut(duration: 0.35), value: held)
-                    .allowsHitTesting(false)
-            }
-            .onAppear { previewSize = geo.size }
-            .onChange(of: geo.size) { _, newSize in previewSize = newSize }
-        }
-    }
-
-    /// Slim bar above the viewfinder: app name on the left, ±EV & Scans/Gear & Settings on the right.
-    private func topBar(k: CGFloat) -> some View {
-        HStack(spacing: 8 * k) {
-            Text("ROLLEIMETER")
-                .font(Geist.serif(23 * k))
-                .tracking(1.8 * k)
-                .foregroundStyle(Palette.dim)
-                .padding(.leading, 17 * k)
-                .lineLimit(1)
-
-            Spacer()
-
-            // ±EV Compensation Pill
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                showEvPopover.toggle()
-            } label: {
-                Text(abs(logStore.totalEvComp) >= 0.05 ? formatEvComp(logStore.totalEvComp) : "±EV")
-                    .font(AppTypography.mono(size: 19 * k, weight: .bold))
-                    .foregroundStyle(abs(logStore.totalEvComp) >= 0.05 ? Palette.accent : Palette.text)
-                    .padding(.horizontal, 14 * k)
-                    .frame(height: 62 * k)
-                    .modifier(GlassCapsule())
-            }
-            .buttonStyle(.plain)
-            .popover(isPresented: $showEvPopover) {
-                ExposureCompDialPopover(store: logStore)
-                    .presentationCompactAdaptation(.popover)
-            }
-
-            // Lab Scan Matcher & Gear Quick Button
-            Button {
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                logbookInitialTab = 2
-                showFilmLogbook = true
-            } label: {
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 24 * k, weight: .medium))
-                    .foregroundStyle(Palette.text)
-                    .frame(width: 66 * k, height: 66 * k)
-                    .modifier(GlassCircle())
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Lab Scan Matcher and Film Logbook")
-
-            Button {
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 28 * k, weight: .medium))
-                    .foregroundStyle(Palette.text)
-                    .frame(width: 70 * k, height: 70 * k)
-                    .modifier(GlassCircle())
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
-        }
     }
 
     private let meterModes: [MeterMode] = [.matrix, .highlight, .spot]
@@ -882,7 +930,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Native iOS Exposure Compensation Dial & Stepper Popover
+// MARK: - Exposure Compensation Popover
 
 private struct ExposureCompDialPopover: View {
     @ObservedObject var store: FilmLogStore
@@ -891,16 +939,14 @@ private struct ExposureCompDialPopover: View {
 
     var body: some View {
         let idx = store.manualEvCompIndex.clamped(to: 0...(EV_COMP_STOPS.count - 1))
-        let manualEv = EV_COMP_STOPS[idx]
         let totalEv = store.totalEvComp
         let isNonZero = idx != zeroIdx
 
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("EXPOSURE BIAS")
-                    .font(AppTypography.next(size: 11, weight: .semibold))
-                    .tracking(1.4)
-                    .foregroundStyle(Palette.dim)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
                 Spacer()
 
@@ -912,26 +958,17 @@ private struct ExposureCompDialPopover: View {
                         }
                     } label: {
                         Text("Reset")
-                            .font(AppTypography.next(size: 12, weight: .semibold))
-                            .foregroundStyle(Palette.accent)
+                            .font(.caption.weight(.semibold))
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
             if store.rollState.isSlideFilm {
-                HStack(spacing: 10) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
-                    Text("Slide film locks exposure bias to 0.0 EV to protect highlights.")
-                        .font(AppTypography.next(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.textSub)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
+                Label("Slide film locks exposure bias to 0.0 EV.", systemImage: "lock.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             } else {
-                // Tactile Stepper Row (-1/3 / Readout / +1/3)
                 HStack(spacing: 16) {
                     Button {
                         guard idx > 0 else { return }
@@ -941,28 +978,22 @@ private struct ExposureCompDialPopover: View {
                         }
                     } label: {
                         Image(systemName: "minus")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(idx > 0 ? Palette.text : Palette.faint)
+                            .font(.headline.weight(.bold))
                             .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.08), in: Circle())
                     }
-                    .buttonStyle(.plain)
                     .disabled(idx <= 0)
 
                     VStack(spacing: 2) {
                         Text(formatEvComp(totalEv))
-                            .font(AppTypography.next(size: 28, weight: .bold).monospacedDigit())
+                            .font(.title2.weight(.bold).monospacedDigit())
                             .foregroundStyle(abs(totalEv) >= 0.05 ? Palette.accent : Palette.text)
                             .contentTransition(.numericText())
 
                         if store.rollState.activeExpiredCompEv > 0.05 {
-                            Text("Includes +\(String(format: "%.1f", store.rollState.activeExpiredCompEv)) EV expired film comp")
-                                .font(AppTypography.next(size: 10, weight: .medium))
-                                .foregroundStyle(Palette.dim)
-                        } else {
-                            Text("1/3-stop steps")
-                                .font(AppTypography.next(size: 11, weight: .medium))
-                                .foregroundStyle(Palette.dim)
+                            Text("+\(String(format: "%.1f", store.rollState.activeExpiredCompEv)) EV expired")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -975,31 +1006,25 @@ private struct ExposureCompDialPopover: View {
                         }
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(idx < EV_COMP_STOPS.count - 1 ? Palette.text : Palette.faint)
+                            .font(.headline.weight(.bold))
                             .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.08), in: Circle())
                     }
-                    .buttonStyle(.plain)
                     .disabled(idx >= EV_COMP_STOPS.count - 1)
                 }
 
-                // Interactive Machined Exposure Scale (-3 .. 0 .. +3)
                 GeometryReader { geo in
                     let w = geo.size.width
                     let count = EV_COMP_STOPS.count
-                    let stepW = w / CGFloat(max(count - 1, 1))
 
                     ZStack(alignment: .topLeading) {
-                        // Tick marks
                         HStack(spacing: 0) {
                             ForEach(0..<count, id: \.self) { i in
                                 let isWhole = i % 3 == 0
                                 let isSelected = i == idx
                                 let isZero = i == zeroIdx
                                 VStack(spacing: 5) {
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(isSelected ? Palette.accent : (isZero ? Palette.text : (isWhole ? Color.white.opacity(0.55) : Color.white.opacity(0.22))))
+                                    Capsule()
+                                        .fill(isSelected ? Palette.accent : (isZero ? Palette.text : (isWhole ? Palette.textSub : Palette.faint)))
                                         .frame(width: isSelected ? 2.5 : (isWhole ? 1.5 : 1.0),
                                                height: isSelected ? 18 : (isWhole ? 13 : 8))
                                         .frame(height: 18, alignment: .bottom)
@@ -1007,11 +1032,11 @@ private struct ExposureCompDialPopover: View {
                                     if isWhole {
                                         let wholeVal = Int(EV_COMP_STOPS[i].rounded())
                                         Text(wholeVal > 0 ? "+\(wholeVal)" : "\(wholeVal)")
-                                            .font(AppTypography.mono(size: 10, weight: isSelected ? .bold : .medium))
-                                            .foregroundStyle(isSelected ? Palette.accent : Palette.dim)
+                                            .font(.caption2.weight(isSelected ? .bold : .medium).monospacedDigit())
+                                            .foregroundStyle(isSelected ? Palette.accent : .secondary)
                                     } else {
                                         Text(" ")
-                                            .font(AppTypography.mono(size: 10, weight: .medium))
+                                            .font(.caption2)
                                     }
                                 }
                                 .frame(maxWidth: .infinity)
@@ -1040,6 +1065,5 @@ private struct ExposureCompDialPopover: View {
         }
         .padding(16)
         .frame(width: 286)
-        .background(Palette.panel)
     }
 }

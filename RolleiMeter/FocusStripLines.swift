@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Focus (Static Bed Dial with Left-to-Right Knob)
+// MARK: - Focus Strip Lines (Calmed Inactive Ticks + Bright Green DoF Zone)
 
 struct FocusStripLines: View, Animatable {
     var focusPosition: Double
@@ -13,7 +13,7 @@ struct FocusStripLines: View, Animatable {
     var hasMeasurement: Bool
     var isTooClose: Bool
     let totalTicks: Int
-    let k: CGFloat
+    var k: CGFloat = 1.0
 
     var animatableData: AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, Double>>>>> {
         get {
@@ -33,101 +33,71 @@ struct FocusStripLines: View, Animatable {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let lineMargin: CGFloat = 2 * k
+            let lineMargin: CGFloat = 2
             let linesWidth = max(w - lineMargin * 2, 1)
             let touchX = lineMargin + CGFloat(min(max(focusPosition, 0.0), 1.0)) * linesWidth
             let rippleX = lineMargin + CGFloat(min(max(rippleCenter, 0.0), 1.0)) * linesWidth
-            let baseRibH = h - 22 * k
-            let zoomRadius = 42 * k
+            let baseRibH: CGFloat = max(18, h - 4)
+            let zoomRadius: CGFloat = 44
 
             Canvas { ctx, size in
-                for i in 0...totalTicks {
-                    let fraction = CGFloat(i) / CGFloat(totalTicks)
+                for i in 0..<totalTicks {
+                    let fraction = CGFloat(i) / CGFloat(max(totalTicks - 1, 1))
                     let x = lineMargin + fraction * linesWidth
                     let d = abs(x - touchX)
 
-                    // 1. Gentle macOS dock zoom magnification following finger
+                    // 1. Gentle dock zoom magnification following finger
                     var boost: CGFloat = 0
                     if scrollProgress > 0 && d < zoomRadius {
                         let t = 1.0 - (d / zoomRadius)
                         let wCurve = t * t * (3 - 2 * t)
-                        boost = 11 * k * CGFloat(scrollProgress) * wCurve
+                        boost = 4 * CGFloat(scrollProgress) * wCurve
                     }
 
                     // 2. Gentle ripple wave expanding outward on release
                     if rippleProgress < 1.0 {
                         let dRipple = abs(x - rippleX)
-                        let waveRadius = CGFloat(rippleProgress) * 95 * k
-                        let waveWidth: CGFloat = 30 * k
+                        let waveRadius = CGFloat(rippleProgress) * 95
+                        let waveWidth: CGFloat = 30
                         let distToWave = abs(dRipple - waveRadius)
                         if distToWave < waveWidth {
                             let waveT = 1.0 - (distToWave / waveWidth)
                             let waveCurve = waveT * waveT * (3 - 2 * waveT)
                             let decay = 1.0 - CGFloat(rippleProgress)
-                            let rippleBoost = 7 * k * decay * waveCurve
+                            let rippleBoost = 3 * decay * waveCurve
                             boost = max(boost, rippleBoost)
                         }
                     }
 
-                    let lineH = baseRibH + boost
-                    let topY = (h - 22 * k - lineH) / 2
-                    let botY = topY + lineH
+                    let inDoF = hasMeasurement && fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
+                    let tickH: CGFloat = (inDoF ? min(baseRibH + 4, h) : baseRibH) + boost
+                    let topY = (h - tickH) / 2
+                    let botY = topY + tickH
 
                     var path = Path()
                     path.move(to: CGPoint(x: x, y: topY))
                     path.addLine(to: CGPoint(x: x, y: botY))
 
-                    var r: Double = 1.0
-                    var g: Double = 1.0
-                    var b: Double = 1.0
-                    var alpha: Double = 0.85
-                    var lw = max(1.2, 1.8 * k) + (boost > 0 ? 0.6 * k : 0)
+                    let tickColor: Color
+                    let lw: CGFloat
 
-                    if manual {
-                        // Manual Mode: Lines inside depth-of-field turn RED when resting
-                        if scrollProgress < 0.95 {
-                            let inDoF = fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
-                            if inDoF {
-                                let restingFactor = 1.0 - scrollProgress
-                                let distToFocus = abs(fraction - focusPosition)
-                                let centerBonus = max(0.0, 1.0 - distToFocus / max(0.05, (dofFar - dofNear) * 0.5))
-                                r = 1.0
-                                g = 1.0 - restingFactor * (1.0 - 0.23)
-                                b = 1.0 - restingFactor * (1.0 - 0.19)
-                                alpha = min(1.0, 0.85 + restingFactor * 0.15)
-                                if centerBonus > 0.6 {
-                                    lw += 0.4 * k
-                                }
-                            }
-                        }
+                    if isTooClose && !manual && fraction <= 0.12 {
+                        tickColor = Color(red: 1.0, green: 0.27, blue: 0.23)
+                        lw = 2.0
+                    } else if inDoF {
+                        // Bright #30D158 green for active Depth-of-Field zone
+                        tickColor = Color(red: 0.19, green: 0.82, blue: 0.35)
+                        lw = 2.0 + (boost > 0 ? 0.3 : 0)
                     } else {
-                        // Auto Mode: Green lines reflecting measurement and DoF in real time
-                        if isTooClose {
-                            if fraction <= 0.12 {
-                                r = 1.0
-                                g = 0.27
-                                b = 0.23
-                                alpha = 1.0
-                            }
-                        } else if hasMeasurement {
-                            let inDoF = fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
-                            if inDoF {
-                                let distToFocus = abs(fraction - focusPosition)
-                                let centerBonus = max(0.0, 1.0 - distToFocus / max(0.06, (dofFar - dofNear) * 0.5))
-                                r = 0.19
-                                g = 0.82 + 0.14 * centerBonus
-                                b = 0.35
-                                alpha = min(1.0, 0.88 + 0.12 * centerBonus)
-                                if centerBonus > 0.5 {
-                                    lw += 0.4 * k
-                                }
-                            }
-                        }
+                        // Calmed inactive ruler ticks (0.26 on major 4th ticks, 0.13 on minor ticks)
+                        let inactiveAlpha: Double = (i % 4 == 0) ? 0.26 : 0.13
+                        tickColor = Color.white.opacity(inactiveAlpha)
+                        lw = 1.5
                     }
 
                     ctx.stroke(
                         path,
-                        with: .color(Color(red: r, green: g, blue: b, opacity: alpha)),
+                        with: .color(tickColor),
                         lineWidth: lw
                     )
                 }

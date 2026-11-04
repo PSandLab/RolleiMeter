@@ -3,8 +3,6 @@ import UIKit
 
 // MARK: - Film Logbook
 
-/// Destinations pushed from the Roll tab. Value-based so the tab can pop back
-/// to the roll after a film is loaded.
 private enum FilmRoute: Hashable {
     case library
     case family(FilmFamily)
@@ -12,9 +10,6 @@ private enum FilmRoute: Hashable {
     case gear
 }
 
-/// The logbook is a three-tab sheet: the loaded roll, the logged frames and the
-/// lab-scan matcher. Every screen below is a plain `List`/`Form` so the system
-/// supplies the chrome, separators, swipe actions and Dynamic Type.
 struct FilmLogbookSheet: View {
     @ObservedObject var store: FilmLogStore
     var initialTab: Int = 0
@@ -26,35 +21,33 @@ struct FilmLogbookSheet: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack(path: $rollPath) {
-                RollScreen(store: store, shareSheetItem: $shareSheetItem, path: $rollPath)
-            }
-            .tabItem { Label("Roll", systemImage: "film") }
-            .tag(0)
-
-            NavigationStack {
-                FramesScreen(store: store, shareSheetItem: $shareSheetItem)
-            }
-            .tabItem { Label("Frames", systemImage: "photo.on.rectangle") }
-            .tag(1)
-
-            NavigationStack {
-                ScanMatcherTabView(store: store) { items in
-                    shareSheetItem = ShareSheetItem(items: items)
+            Tab("Roll", systemImage: "film", value: 0) {
+                NavigationStack(path: $rollPath) {
+                    RollView(store: store, path: $rollPath)
                 }
-                .navigationTitle("Scans")
-                .navigationBarTitleDisplayMode(.large)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
+            }
+
+            Tab("Frames", systemImage: "photo.on.rectangle", value: 1) {
+                NavigationStack {
+                    FramesView(store: store)
+                }
+            }
+
+            Tab("Scans", systemImage: "scanner", value: 2) {
+                NavigationStack {
+                    ScanMatcherTabView(store: store) { items in
+                        shareSheetItem = ShareSheetItem(items: items)
+                    }
+                    .navigationTitle("Scans")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button(role: .close) { dismiss() }
+                        }
                     }
                 }
             }
-            .tabItem { Label("Scans", systemImage: "photo.stack") }
-            .tag(2)
         }
-        .tint(Palette.accent)
-        .preferredColorScheme(.dark)
+        .tabBarMinimizeBehavior(.onScrollDown)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .onAppear { selectedTab = initialTab }
@@ -64,11 +57,10 @@ struct FilmLogbookSheet: View {
     }
 }
 
-// MARK: - Roll
+// MARK: - Screen 1: Film Log (Roll tab)
 
-private struct RollScreen: View {
+struct RollView: View {
     @ObservedObject var store: FilmLogStore
-    @Binding var shareSheetItem: ShareSheetItem?
     @Binding var path: NavigationPath
 
     @Environment(\.dismiss) private var dismiss
@@ -82,8 +74,9 @@ private struct RollScreen: View {
         }
     }
 
-    /// The active body's brand, so the log shows the real emblem instead of a
-    /// generic camera glyph.
+    private var logged: Int { rollFrames.count }
+    private var total: Int { roll.maxFrames }
+
     private var activeCameraBrand: String? {
         guard gear.hasCamera, !gear.cameraId.isEmpty else { return nil }
         return GearCatalogCache.allCameras(customCameras: store.customCameras)
@@ -91,77 +84,50 @@ private struct RollScreen: View {
             .brand
     }
 
+    private var csvURL: URL {
+        ExifAndXmpWriter.createRollCsvFileURL(rollFrames)
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("film_roll_log.csv")
+    }
+
+    private var summaryText: String {
+        ExifAndXmpWriter.generateRollTextSummary(rollFrames)
+    }
+
     var body: some View {
         List {
             Section {
                 NavigationLink(value: FilmRoute.library) {
-                    ActiveRollRow(roll: roll)
+                    Label {
+                        filmRowText
+                    } icon: {
+                        FilmCanisterArtwork(
+                            brand: roll.isUnloaded ? "Kodak" : roll.filmName,
+                            familyName: roll.isUnloaded ? "Portra" : roll.filmName,
+                            category: roll.category,
+                            iso: roll.boxIso,
+                            width: 28,
+                            height: 28
+                        )
+                        .frame(width: 28, height: 28)
+                    }
                 }
-                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 12, trailing: 16))
 
                 NavigationLink(value: FilmRoute.gear) {
-                    ActiveCameraRow(gear: gear, brand: activeCameraBrand)
-                }
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 14, trailing: 16))
-
-                if !roll.isUnloaded {
-                    FilmStripHoldControl(
-                        title: "Hold to complete roll",
-                        workingTitle: "Winding on",
-                        doneTitle: "Roll completed",
-                        direction: .windOn,
-                        holdDuration: 1.4
-                    ) {
-                        completeRoll()
-                    }
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                }
-            } header: {
-                Text("Current roll")
-            } footer: {
-                if roll.isUnloaded {
-                    Text("Tap the film to choose a stock, or the body to choose a camera.")
-                } else {
-                    Text("Tap the film to change stock, or the body to change camera and lens.")
+                    cameraRow
                 }
             }
 
             Section {
-                Button {
-                    Haptics.tap()
-                    if let url = ExifAndXmpWriter.createRollCsvFileURL(rollFrames) {
-                        shareSheetItem = ShareSheetItem(items: [url])
-                    }
-                } label: {
-                    Label("Share roll as CSV", systemImage: "square.and.arrow.up")
-                }
-                .disabled(rollFrames.isEmpty)
-
-                Button {
-                    Haptics.tap()
-                    let summary = ExifAndXmpWriter.generateRollTextSummary(rollFrames)
-                    if !summary.isEmpty {
-                        shareSheetItem = ShareSheetItem(items: [summary])
-                    }
-                } label: {
-                    Label("Share roll summary", systemImage: "text.alignleft")
-                }
-                .disabled(rollFrames.isEmpty)
-            } header: {
-                Text("Share")
-            } footer: {
-                Text("\(rollFrames.count) of \(roll.maxFrames) frames logged on this roll.")
+                LabeledContent("Frames", value: "\(logged) / \(total)")
+                    .monospacedDigit()
             }
         }
-        .listStyle(.insetGrouped)
         .navigationDestination(for: FilmRoute.self) { route in
             switch route {
             case .library:
                 FilmLibraryScreen(store: store)
             case .family(let family):
-                FilmFamilyScreen(store: store, family: family) {
+                FilmStockView(store: store, family: family) {
                     popToRoll()
                 }
             case .customFilm:
@@ -169,11 +135,10 @@ private struct RollScreen: View {
                     popToRoll()
                 }
             case .gear:
-                GearPickerScreen(store: store, onFinish: popToRoll)
+                CameraLensView(store: store, onFinish: popToRoll)
             }
         }
         .navigationTitle("Film Log")
-        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -185,8 +150,19 @@ private struct RollScreen: View {
                 .accessibilityLabel("Location tagging")
                 .accessibilityValue(LocationCache.shared.lastKnownCoordinate != nil ? "On" : "Off")
             }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    ShareLink("Roll as CSV", item: csvURL)
+                    ShareLink("Roll Summary", item: summaryText)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .disabled(logged == 0)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .close) { dismiss() }
             }
         }
         .onAppear {
@@ -194,143 +170,62 @@ private struct RollScreen: View {
         }
     }
 
-    /// Lets the load or mount animation finish, then clears the whole stack so
-    /// choosing gear never leaves the user deep in a catalog.
-    private func popToRoll() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
-            path = NavigationPath()
-        }
-    }
-
-    /// The roll is cleared only after the strip has finished winding, so the
-    /// completion animation is not cut off by the row disappearing.
-    private func completeRoll() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-            var next = roll
-            next.rollNumber = roll.rollNumber + 1
-            next.filmName = ""
-            next.currentFrame = 1
-            next.isExpired = false
-            withAnimation(.snappy) { store.rollState = next }
-        }
-    }
-}
-
-private struct ActiveRollRow: View {
-    let roll: FilmRollState
-
-    var body: some View {
+    @ViewBuilder
+    private var filmRowText: some View {
         if roll.isUnloaded {
-            HStack(spacing: 14) {
-                Image(systemName: "film")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Palette.textSub)
-                    .frame(width: 52, height: 48)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("No film loaded")
-                        .font(Geist.text(.headline))
-                    Text("Choose a stock to start shooting")
-                        .font(Geist.text(.subheadline))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
+            Text("Choose Film")
+                .foregroundStyle(.tint)
         } else {
-            HStack(spacing: 14) {
-                FilmCanisterArtwork(
-                    brand: roll.filmName,
-                    familyName: roll.filmName,
-                    category: roll.category,
-                    iso: roll.boxIso,
-                    width: 52,
-                    height: 48
-                )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
-                        .font(Geist.serifText(.headline))
-                        .lineLimit(1)
-
-                    Text(roll.isBonusFrames
-                         ? "Frame +\(roll.currentFrame)"
-                         : "Frame \(roll.currentFrame) of \(roll.maxFrames)")
-                        .font(Geist.text(.subheadline))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    HStack(spacing: 6) {
-                        if roll.isExpired {
-                            Label("\(roll.yearsExpired) years expired", systemImage: "clock.arrow.circlepath")
-                                .labelStyle(.titleAndIcon)
-                                .font(Geist.text(.caption))
-                                .foregroundStyle(Palette.slow)
-                        }
-                        if roll.activeExpiredCompEv > 0.05 {
-                            Text(String(format: "+%.1f EV", roll.activeExpiredCompEv))
-                                .font(Geist.text(.caption))
-                                .foregroundStyle(Palette.slow)
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-}
-
-/// The body, given the same weight as the film: same icon box, same serif name.
-/// A camera is not a secondary detail of a roll.
-private struct ActiveCameraRow: View {
-    let gear: ActiveGearProfile
-    let brand: String?
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Group {
-                if let brand {
-                    CameraBrandLogo(brand: brand, size: 46)
-                } else {
-                    Image(systemName: "camera.aperture")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(Palette.textSub)
-                }
-            }
-            .frame(width: 52, height: 48)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(gear.hasCamera ? gear.cameraName : "No camera")
-                    .font(Geist.serifText(.headline))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-
-                Text(subtitle)
-                    .font(Geist.text(.subheadline))
+            VStack(alignment: .leading) {
+                Text(shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
+                Text("\(roll.maxFrames) exp" + (roll.isExpired ? " · Expired" : ""))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
-
-            Spacer(minLength: 0)
         }
-        .contentShape(Rectangle())
     }
 
-    private var subtitle: String {
-        guard gear.hasCamera else { return "Choose the body you are shooting" }
-        if gear.isFixedLens || gear.mount.isEmpty || gear.mount == "Fixed" {
-            return gear.hasLens ? gear.lensName : "Fixed lens"
+    private var cameraRow: some View {
+        HStack(spacing: 12) {
+            if let brand = activeCameraBrand {
+                CameraBrandLogo(brand: brand, size: 40)
+            } else {
+                Image(systemName: "camera")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, height: 40)
+            }
+
+            VStack(alignment: .leading) {
+                Text(gear.hasCamera ? gear.cameraName : "Choose Camera")
+                    .foregroundStyle(gear.hasCamera ? .primary : .tint)
+                if let subtitle = cameraSubtitle {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+    }
+
+    private var cameraSubtitle: String? {
+        guard gear.hasCamera else { return nil }
         if gear.hasLens { return gear.lensName }
-        return "\(formatMountBadge(gear.mount)) · no lens"
+        if gear.isFixedLens || gear.mount.isEmpty || gear.mount == "Fixed" {
+            return "Fixed lens"
+        }
+        return formatMountBadge(gear.mount)
+    }
+
+    private func popToRoll() {
+        path = NavigationPath()
     }
 }
 
-// MARK: - Film library
+// MARK: - Film Library
 
 private struct FilmLibraryScreen: View {
     @ObservedObject var store: FilmLogStore
 
-    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var category = "Color"
 
@@ -370,8 +265,6 @@ private struct FilmLibraryScreen: View {
                     ForEach(categories, id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
             }
 
             if category == "Custom", query.isEmpty {
@@ -388,10 +281,10 @@ private struct FilmLibraryScreen: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
         .searchable(text: $query, prompt: "Search film")
         .navigationTitle("Film")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.hidden, for: .tabBar)
     }
 
     @ViewBuilder
@@ -407,16 +300,18 @@ private struct FilmLibraryScreen: View {
                             familyName: stock.name,
                             category: stock.category,
                             iso: stock.iso,
-                            width: 44,
+                            width: 40,
                             height: 40
                         )
-                        VStack(alignment: .leading, spacing: 2) {
+                        .clipShape(.rect(cornerRadius: 10, style: .continuous))
+
+                        VStack(alignment: .leading) {
                             Text(stock.name)
                             Text("ISO \(stock.iso) · \(stock.category)")
-                                .font(Geist.text(.subheadline))
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
-                        Spacer(minLength: 0)
                     }
                 }
                 .swipeActions {
@@ -427,17 +322,9 @@ private struct FilmLibraryScreen: View {
                     }
                 }
             }
-        } header: {
-            Text("Your film")
-        } footer: {
-            if store.customFilms.isEmpty {
-                Text("Save a stock once and it stays here.")
-            }
-        }
 
-        Section {
             NavigationLink(value: FilmRoute.customFilm) {
-                Label("Create custom film", systemImage: "plus")
+                Label("Add Custom Film", systemImage: "plus")
             }
         }
     }
@@ -474,25 +361,27 @@ private struct FilmFamilyRow: View {
                 familyName: family.familyName,
                 category: family.category,
                 iso: family.variants.first?.iso ?? 400,
-                width: 44,
+                width: 40,
                 height: 40
             )
+            .clipShape(.rect(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading) {
                 Text(family.familyName)
                     .lineLimit(1)
                 Text(summary)
-                    .font(Geist.text(.subheadline))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .monospacedDigit()
             }
 
-            Spacer(minLength: 8)
+            Spacer()
 
             if isActive {
                 Image(systemName: "checkmark")
-                    .font(Geist.text(.body, .semibold))
-                    .foregroundStyle(Palette.accent)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
                     .accessibilityLabel("Loaded")
             }
         }
@@ -506,15 +395,15 @@ private struct FilmFamilyRow: View {
     }
 }
 
-private struct FilmFamilyScreen: View {
+// MARK: - Screen 2: Film Stock + Hold-to-Load
+
+struct FilmStockView: View {
     @ObservedObject var store: FilmLogStore
     let family: FilmFamily
     var onLoaded: () -> Void = {}
 
-    @Environment(\.dismiss) private var dismiss
-
     @State private var variantID: String = ""
-    @State private var maxFrames: Int = 36
+    @State private var frames: Int = 36
     @State private var expired = false
     @State private var expiredYears = 10
 
@@ -522,103 +411,62 @@ private struct FilmFamilyScreen: View {
         family.variants.first { $0.id == variantID } ?? family.variants[0]
     }
 
-    private var expiredComp: Double {
-        guard expired, family.category != "Slide" else { return 0 }
-        return ((Double(expiredYears) / 10.0) * 3.0).rounded() / 3.0
+    private var stockNavigationTitle: String {
+        if family.familyName.localizedCaseInsensitiveContains(family.brand) || family.brand.contains("·") {
+            return family.familyName
+        }
+        return "\(family.brand) \(family.familyName)"
     }
 
     var body: some View {
         Form {
-            Section {
-                HStack(spacing: 14) {
-                    FilmCanisterArtwork(
-                        brand: family.brand,
-                        familyName: family.familyName,
-                        category: family.category,
-                        iso: variant.iso,
-                        width: 56,
-                        height: 50
-                    )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(family.familyName)
-                            .font(Geist.text(.headline))
-                        Text("\(family.brand) · \(family.category)")
-                            .font(Geist.text(.subheadline))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            if family.variants.count > 1 {
-                Section("Stock") {
-                    Picker("Speed", selection: $variantID) {
-                        ForEach(family.variants) { variant in
-                            Text(variant.label).tag(variant.id)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-            }
-
-            Section("Roll") {
-                Picker("Exposures", selection: $maxFrames) {
-                    ForEach(ROLL_LENGTH_OPTIONS, id: \.self) { length in
-                        Text("\(length)").tag(length)
+            Section("ISO") {
+                Picker("ISO", selection: $variantID) {
+                    ForEach(family.variants) { option in
+                        Text(option.label).tag(option.id)
                     }
                 }
                 .pickerStyle(.segmented)
             }
 
-            Section {
-                Toggle("Expired film", isOn: $expired.animation(.snappy))
-
-                if expired {
-                    Stepper(value: $expiredYears, in: 1...50) {
-                        LabeledContent("Expired \(expiredYears) \(expiredYears == 1 ? "year" : "years")",
-                                       value: expiredComp > 0.04 ? String(format: "+%.1f EV", expiredComp) : "No compensation")
-                    }
+            Section("Roll") {
+                Picker("Roll length", selection: $frames) {
+                    ForEach([12, 16, 24, 36], id: \.self) { Text("\($0)").tag($0) }
                 }
-            } header: {
-                Text("Condition")
-            } footer: {
-                if expired && family.category == "Slide" {
-                    Text("Slide film gets no expired-film compensation.")
-                } else if expired {
-                    Text("Adds \(String(format: "+%.1f EV", expiredComp)) of exposure compensation to every reading.")
-                } else {
-                    Text("Colour negative film gains about a stop of compensation per decade.")
-                }
+                .pickerStyle(.segmented)
             }
 
             Section {
-                FilmStripHoldControl(
-                    title: "Hold to load \(shortFilmBadge(name: variant.fullName, iso: variant.iso))",
-                    workingTitle: "Loading film",
-                    doneTitle: "Loaded",
-                    direction: .feedIn,
-                    holdDuration: 1.3
-                ) {
-                    load()
+                Toggle("Expired", isOn: $expired)
+                if expired {
+                    Stepper("Years: \(expiredYears)", value: $expiredYears, in: 1...50)
+                        .monospacedDigit()
                 }
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
             } footer: {
-                Text("Press and hold to load the roll and go back to the log.")
+                if expired {
+                    Text("+1 stop per decade.")
+                }
             }
         }
-        .navigationTitle(family.familyName)
+        .navigationTitle(stockNavigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .listSectionSpacing(.compact)
+        .toolbarVisibility(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom) {
+            HoldToLoadButton(rollLength: frames) {
+                load()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
         .onAppear {
             if variantID.isEmpty { variantID = family.variants[0].id }
-            maxFrames = store.rollState.maxFrames
+            frames = store.rollState.maxFrames
             expired = false
         }
     }
 
     private func load() {
-        Haptics.success()
         let currentYear = Calendar.current.component(.year, from: Date())
         var next = store.rollState
         if !next.isUnloaded { next.rollNumber += 1 }
@@ -626,7 +474,7 @@ private struct FilmFamilyScreen: View {
         next.boxIso = variant.iso
         next.category = family.category
         next.currentFrame = 1
-        next.maxFrames = maxFrames
+        next.maxFrames = frames
         next.isExpired = expired
         next.expiredYear = expired ? currentYear - expiredYears : currentYear
         next.autoApplyExpiredComp = true
@@ -639,12 +487,10 @@ private struct CustomFilmScreen: View {
     @ObservedObject var store: FilmLogStore
     var onLoaded: () -> Void = {}
 
-    @Environment(\.dismiss) private var dismiss
-
     @State private var name = ""
     @State private var iso = 400
     @State private var category = "Color"
-    @State private var maxFrames = 36
+    @State private var frames = 36
 
     private var trimmedName: String {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -656,7 +502,7 @@ private struct CustomFilmScreen: View {
             Section("Film") {
                 TextField("Name", text: $name)
                     .textInputAutocapitalization(.words)
-                Picker("Speed", selection: $iso) {
+                Picker("ISO", selection: $iso) {
                     ForEach(FILM_ISO_STOPS, id: \.self) { Text("\($0)").tag($0) }
                 }
                 Picker("Process", selection: $category) {
@@ -666,35 +512,26 @@ private struct CustomFilmScreen: View {
             }
 
             Section("Roll") {
-                Picker("Exposures", selection: $maxFrames) {
-                    ForEach(ROLL_LENGTH_OPTIONS, id: \.self) { Text("\($0)").tag($0) }
+                Picker("Roll length", selection: $frames) {
+                    ForEach([12, 16, 24, 36], id: \.self) { Text("\($0)").tag($0) }
                 }
                 .pickerStyle(.segmented)
-            }
-
-            Section {
-                FilmStripHoldControl(
-                    title: "Hold to save and load",
-                    workingTitle: "Saving film",
-                    doneTitle: "Saved",
-                    direction: .feedIn,
-                    holdDuration: 1.3
-                ) {
-                    create()
-                }
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            } footer: {
-                Text("The stock is saved to your custom films and loaded on the meter.")
             }
         }
         .navigationTitle("Custom Film")
         .navigationBarTitleDisplayMode(.inline)
+        .listSectionSpacing(.compact)
+        .toolbarVisibility(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom) {
+            HoldToLoadButton(rollLength: frames) {
+                create()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
     }
 
     private func create() {
-        Haptics.success()
         store.addCustomFilm(FilmStockPreset(name: trimmedName, iso: iso, category: category, isCustom: true))
 
         var next = store.rollState
@@ -703,7 +540,7 @@ private struct CustomFilmScreen: View {
         next.boxIso = iso
         next.category = category
         next.currentFrame = 1
-        next.maxFrames = maxFrames
+        next.maxFrames = frames
         next.isExpired = false
         withAnimation(.snappy) { store.rollState = next }
         onLoaded()
@@ -712,9 +549,8 @@ private struct CustomFilmScreen: View {
 
 // MARK: - Frames
 
-private struct FramesScreen: View {
+struct FramesView: View {
     @ObservedObject var store: FilmLogStore
-    @Binding var shareSheetItem: ShareSheetItem?
 
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -738,14 +574,10 @@ private struct FramesScreen: View {
     var body: some View {
         List {
             ForEach(groups, id: \.key) { group in
-                Section {
+                Section(String(format: "Roll %02d · %@", group.header.rollNumber, shortFilmBadge(name: group.header.filmName, iso: group.header.iso))) {
                     ForEach(group.frames) { frame in
                         NavigationLink {
-                            FrameDetailScreen(
-                                store: store,
-                                frame: frame,
-                                shareSheetItem: $shareSheetItem
-                            )
+                            FrameDetailScreen(store: store, frame: frame)
                         } label: {
                             FrameRow(frame: frame, snapshot: store.loadSnapshotImage(frame.snapshotFileName))
                         }
@@ -757,31 +589,22 @@ private struct FramesScreen: View {
                             }
                         }
                     }
-                } header: {
-                    Text(String(format: "Roll %02d · %@", group.header.rollNumber, shortFilmBadge(name: group.header.filmName, iso: group.header.iso)))
-                } footer: {
-                    Text("\(group.frames.count) logged")
                 }
             }
         }
-        .listStyle(.insetGrouped)
         .overlay {
             if groups.isEmpty {
                 ContentUnavailableView(
                     query.isEmpty ? "No Logged Frames" : "No Matches",
-                    systemImage: query.isEmpty ? "photo.on.rectangle" : "magnifyingglass",
-                    description: Text(query.isEmpty
-                                      ? "Hold the shutter in the viewfinder, then tap the checkmark to log a frame."
-                                      : "Try a different film, frame number or note.")
+                    systemImage: query.isEmpty ? "photo.on.rectangle" : "magnifyingglass"
                 )
             }
         }
         .searchable(text: $query, prompt: "Search frames")
         .navigationTitle("Frames")
-        .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .close) { dismiss() }
             }
         }
     }
@@ -800,33 +623,33 @@ private struct FrameRow: View {
                         .scaledToFill()
                 } else {
                     Image(systemName: "photo")
-                        .font(Geist.text(.body))
+                        .font(.body)
                         .foregroundStyle(.tertiary)
                 }
             }
-            .frame(width: 54, height: 54)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: 40, height: 40)
+            .clipShape(.rect(cornerRadius: 10, style: .continuous))
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading) {
                 Text("Frame \(frame.frameNumber)")
-                    .font(Geist.text(.body, .medium))
+                    .font(.body.weight(.medium))
                     .monospacedDigit()
 
                 Text("\(frame.shutterSpeed) · \(frame.aperture) · ISO \(frame.iso)")
-                    .font(Geist.text(.subheadline))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .monospacedDigit()
 
                 if !frame.note.isEmpty {
                     Text(frame.note)
-                        .font(Geist.text(.footnote))
+                        .font(.footnote)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
 }
@@ -834,7 +657,6 @@ private struct FrameRow: View {
 private struct FrameDetailScreen: View {
     @ObservedObject var store: FilmLogStore
     let frame: LoggedFrame
-    @Binding var shareSheetItem: ShareSheetItem?
 
     @Environment(\.dismiss) private var dismiss
     @State private var note: String = ""
@@ -847,17 +669,18 @@ private struct FrameDetailScreen: View {
         List {
             if let snapshot {
                 Section {
-                    Image(uiImage: snapshot)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 320)
-                        .frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .contentShape(Rectangle())
-                        .onTapGesture { showPhoto = true }
-                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                        .accessibilityLabel("Frame photo")
-                        .accessibilityAddTraits(.isButton)
+                    Button {
+                        showPhoto = true
+                    } label: {
+                        Image(uiImage: snapshot)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 280)
+                            .frame(maxWidth: .infinity)
+                            .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Frame photo")
                 }
             }
 
@@ -870,16 +693,20 @@ private struct FrameDetailScreen: View {
                 LabeledContent("Zone", value: "\(Roman.zone(frame.zone)) (\(frame.zone))")
                 LabeledContent("Metering", value: frame.meterMode.capitalized)
                 if frame.isAutoExposure {
-                    LabeledContent("Mode", value: "Auto exposure")
+                    LabeledContent("Mode", value: "Auto")
                 }
             }
+            .monospacedDigit()
 
             Section("Frame") {
                 LabeledContent("Roll", value: String(format: "%02d", frame.rollNumber))
-                LabeledContent("Frame", value: "\(frame.frameNumber) of \(frame.rollMaxFrames)")
+                    .monospacedDigit()
+                LabeledContent("Frame", value: "\(frame.frameNumber) / \(frame.rollMaxFrames)")
+                    .monospacedDigit()
                 LabeledContent("Film", value: frame.filmName)
                 if frame.isExpiredFilm {
                     LabeledContent("Expired", value: "\(frame.expiredYear)")
+                        .monospacedDigit()
                 }
                 if !frame.cameraName.isEmpty {
                     LabeledContent("Camera", value: frame.cameraName)
@@ -888,55 +715,42 @@ private struct FrameDetailScreen: View {
                     LabeledContent("Lens", value: frame.lensName)
                 }
                 LabeledContent("Logged", value: frame.timestampIso.replacingOccurrences(of: "T", with: " "))
-            }
-
-            if let latitude = frame.latitude, let longitude = frame.longitude {
-                Section("Location") {
-                    LabeledContent("Coordinates", value: String(format: "%.5f, %.5f", latitude, longitude))
+                    .monospacedDigit()
+                if let latitude = frame.latitude, let longitude = frame.longitude {
+                    LabeledContent("Location", value: String(format: "%.5f, %.5f", latitude, longitude))
+                        .monospacedDigit()
                 }
             }
 
             Section("Note") {
-                TextField("Add a note", text: $note, axis: .vertical)
+                TextField("Note", text: $note, axis: .vertical)
                     .lineLimit(1...4)
             }
 
             Section {
-                Button {
-                    Haptics.tap()
-                    let summary = ExifAndXmpWriter.generateRollTextSummary([frame])
-                    if !summary.isEmpty {
-                        shareSheetItem = ShareSheetItem(items: [summary])
-                    }
-                } label: {
-                    Label("Share frame", systemImage: "square.and.arrow.up")
+                ShareLink(item: ExifAndXmpWriter.generateRollTextSummary([frame])) {
+                    Label("Share Frame", systemImage: "square.and.arrow.up")
                 }
 
-                Button(role: .destructive) {
-                    Haptics.press()
+                Button("Delete Frame", role: .destructive) {
                     showDeleteConfirm = true
-                } label: {
-                    Label("Delete frame", systemImage: "trash")
                 }
             }
         }
-        .listStyle(.insetGrouped)
         .navigationTitle("Frame \(frame.frameNumber)")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(.hidden, for: .tabBar)
         .onAppear { note = frame.note }
         .onDisappear {
             if note != frame.note {
                 store.updateFrameNote(frameId: frame.id, note: note)
             }
         }
-        .confirmationDialog("Delete this frame?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+        .confirmationDialog("Delete frame?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 store.deleteFrame(frameId: frame.id)
                 dismiss()
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The photo and exposure record are removed from this device.")
         }
         .fullScreenCover(isPresented: $showPhoto) {
             PhotoViewer(image: snapshot)
@@ -959,13 +773,10 @@ private struct PhotoViewer: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .close) { dismiss() }
                 }
             }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Color.black, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
     }
 }
