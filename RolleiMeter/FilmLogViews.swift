@@ -197,7 +197,7 @@ struct RollView: View {
 
             VStack(alignment: .leading) {
                 Text(gear.hasCamera ? gear.cameraName : "Choose Camera")
-                    .foregroundStyle(gear.hasCamera ? .primary : .tint)
+                    .foregroundStyle(gear.hasCamera ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
                 if let subtitle = cameraSubtitle {
                     Text(subtitle)
                         .font(.subheadline)

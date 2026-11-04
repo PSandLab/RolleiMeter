@@ -38,7 +38,7 @@ struct CameraLensView: View {
 
                         VStack(alignment: .leading) {
                             Text(gear.hasCamera ? gear.cameraName : "Choose Camera")
-                                .foregroundStyle(gear.hasCamera ? .primary : .tint)
+                                .foregroundStyle(gear.hasCamera ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
                             if gear.hasCamera {
                                 Text(hasFixedLens ? "Fixed lens" : formatMountBadge(gear.mount))
                                     .font(.subheadline)
