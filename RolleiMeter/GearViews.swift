@@ -574,12 +574,6 @@ struct CameraDetailView: View {
                 Text("No catalog lens uses the \(formatMountBadge(camera.mount)) mount yet.")
                     .font(Geist.text(.subheadline))
                     .foregroundStyle(.secondary)
-
-                NavigationLink {
-                    CustomGearForm(store: store, onFinish: onFinish, presetKinds: [.lens])
-                } label: {
-                    Label("Enter a custom lens", systemImage: "plus")
-                }
             } else {
                 ForEach(mountLenses) { entry in
                     NavigationLink {
@@ -596,6 +590,14 @@ struct CameraDetailView: View {
         } footer: {
             if !mountLenses.isEmpty {
                 Text("Every lens in the catalog made for this mount.")
+            }
+        }
+
+        Section {
+            NavigationLink {
+                CustomGearForm(store: store, onFinish: onFinish, presetKinds: [.lens])
+            } label: {
+                Label("Enter a custom lens", systemImage: "plus")
             }
         }
     }
