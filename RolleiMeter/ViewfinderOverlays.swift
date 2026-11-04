@@ -20,125 +20,228 @@ struct PeakingOverlay: View {
     }
 }
 
-// MARK: - Unboxed Confirm & Reject Glass Controls
+// MARK: - Hold button
 
 struct HoldControl: View {
     let frozen: Bool
     var frameNumber: Int = 1
     var isSaved: Bool = false
-    let onConfirmLog: () -> Void
-    let onDiscardHold: () -> Void
+    let k: CGFloat
+    let modes: [MeterMode]
+    let meterIndex: Int
+    let onPickMeter: (Int) -> Void
+    let onHold: () -> Void
+    var onConfirmLog: () -> Void = {}
+    var onDiscardHold: () -> Void = {}
+
+    @Namespace private var morphNamespace
+    @Namespace private var meterSlideNamespace
+    @State private var isScrubbingMeter: Bool = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Reject / Reset Hold Button (Glass rounded-rect with clean red icon)
-            Button {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                onDiscardHold()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Color(red: 1.0, green: 0.36, blue: 0.36))
-                    .frame(width: 58, height: 68)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
-                    )
-            }
-            .buttonStyle(PressStyle(scale: 0.94))
-            .accessibilityLabel(frozen ? "Discard reading" : "Hold reading")
+        ZStack {
+            if !frozen {
+                HStack(spacing: 0) {
+                    smoothMeterSelector
+                        .padding(.leading, 14 * k)
 
-            // Confirm / Log Frame Button (Prominent Green Button)
-            Button {
-                guard !isSaved else { return }
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                onConfirmLog()
-            } label: {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(.black)
-                    .frame(width: 88, height: 68)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.24, green: 0.90, blue: 0.44),
-                                Color(red: 0.16, green: 0.78, blue: 0.35)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    )
-                    .shadow(color: Color.green.opacity(0.28), radius: 10, y: 4)
+                    Spacer(minLength: 0)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
             }
-            .buttonStyle(PressStyle(scale: 0.95))
-            .accessibilityLabel("Log frame \(frameNumber)")
+
+            HStack {
+                Spacer(minLength: 0)
+                shutterOrMorphedActions
+            }
+            .padding(.trailing, 7 * k)
+            .padding(.leading, frozen ? 12 * k : 0)
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.78), value: frozen)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isSaved)
+    }
+
+    private var smoothMeterSelector: some View {
+        let rowHeight: CGFloat = 50 * k
+        let totalHeight: CGFloat = rowHeight * CGFloat(max(modes.count, 1))
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(modes.indices, id: \.self) { i in
+                let selected = (i == meterIndex)
+                ZStack(alignment: .leading) {
+                    if selected {
+                        Capsule()
+                            .fill(Palette.accent.opacity(isScrubbingMeter ? 0.24 : 0.16))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Palette.accent.opacity(0.55), lineWidth: 1)
+                            )
+                            .matchedGeometryEffect(id: "meterModePill", in: meterSlideNamespace)
+                    }
+
+                    HStack(spacing: 8 * k) {
+                        Circle()
+                            .fill(selected ? Palette.accent : Palette.faint)
+                            .frame(width: 7 * k, height: 7 * k)
+
+                        Text(modes[i].title)
+                            .font(AppTypography.next(size: 27 * k, weight: selected ? .semibold : .medium))
+                            .foregroundStyle(selected ? Palette.accent : Palette.dim)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 14 * k)
+                }
+                .frame(width: 146 * k, height: rowHeight, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+        }
+        .padding(4 * k)
+        .scaleEffect(isScrubbingMeter ? 1.03 : 1.0)
+        .animation(.snappy(duration: 0.22, extraBounce: 0.0), value: meterIndex)
+        .animation(.snappy(duration: 0.18, extraBounce: 0.0), value: isScrubbingMeter)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isScrubbingMeter {
+                        isScrubbingMeter = true
+                    }
+                    let y = value.location.y - (4 * k)
+                    let rawIdx = Int((y / max(rowHeight, 1)).rounded(.down))
+                    let clamped = min(max(rawIdx, 0), modes.count - 1)
+                    if clamped != meterIndex {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        onPickMeter(clamped)
+                    }
+                }
+                .onEnded { _ in
+                    isScrubbingMeter = false
+                }
+        )
+        .frame(height: totalHeight + 8 * k)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Metering mode")
+        .accessibilityValue(modes[min(max(meterIndex, 0), modes.count - 1)].title)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                let next = min(meterIndex + 1, modes.count - 1)
+                if next != meterIndex { onPickMeter(next) }
+            case .decrement:
+                let prev = max(meterIndex - 1, 0)
+                if prev != meterIndex { onPickMeter(prev) }
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private var shutterOrMorphedActions: some View {
+        GlassEffectContainer(spacing: 14 * k) {
+            morphedButtonsContent()
+        }
+    }
+
+    @ViewBuilder
+    private func morphedButtonsContent() -> some View {
+        if frozen {
+            HStack(spacing: 14 * k) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onDiscardHold()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Palette.bad.opacity(0.24))
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Palette.bad.opacity(0.65), lineWidth: 1.5)
+                            )
+
+                        Image(systemName: "xmark")
+                            .font(.title.weight(.bold))
+                            .foregroundStyle(Palette.bad)
+                    }
+                    .frame(width: 118 * k, height: 118 * k)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.tint(Palette.bad.opacity(0.28)).interactive(), in: Circle())
+                    .glassEffectID("holdDiscard", in: morphNamespace)
+                }
+                .buttonStyle(PressStyle(scale: 0.94))
+                .accessibilityLabel("Discard reading")
+
+                Button {
+                    guard !isSaved else { return }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onConfirmLog()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.black)
+                            .overlay(Circle().strokeBorder(Palette.good.opacity(0.45), lineWidth: 1.5))
+
+                        Circle()
+                            .fill(Palette.good)
+                            .frame(width: 126 * k, height: 126 * k)
+
+                        Image(systemName: "checkmark")
+                            .font(.largeTitle.weight(.black))
+                            .foregroundStyle(Color.black)
+                    }
+                    .frame(width: 162 * k, height: 162 * k)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.tint(Palette.good.opacity(0.35)).interactive(), in: Circle())
+                    .glassEffectID("holdPrimary", in: morphNamespace)
+                }
+                .buttonStyle(PressStyle(scale: 0.95))
+                .accessibilityLabel("Log frame \(frameNumber)")
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else {
+            Button(action: onHold) {
+                ZStack {
+                    Circle()
+                        .fill(Color.black)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 126 * k, height: 126 * k)
+                }
+                .frame(width: 175 * k, height: 175 * k)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: Circle())
+                .glassEffectID("holdPrimary", in: morphNamespace)
+            }
+            .buttonStyle(PressStyle(scale: 0.97))
+            .accessibilityLabel("Hold reading")
         }
     }
 }
 
-// MARK: - Viewfinder HUD Chips
+// MARK: - Viewfinder overlays
 
 struct EVChip: View {
     @ObservedObject var damp: Damper
     let frozen: Bool
     let spot: Bool
-    var onTap: () -> Void = {}
 
     var body: some View {
-        let yellowColor = Color(red: 1.0, green: 0.84, blue: 0.04)
-        let greenColor = Color(red: 0.19, green: 0.82, blue: 0.35)
-
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(frozen ? yellowColor : greenColor)
-                    .frame(width: 6, height: 6)
-
-                Text(frozen ? "HOLD" : "LIVE")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(frozen ? yellowColor : greenColor)
-
-                if spot {
-                    Text("SPOT")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(yellowColor)
-                }
-
-                Text("EV \(String(format: "%.1f", damp.values[0]))")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
+        HStack(spacing: 6) {
+            if frozen {
+                Text("HOLD").foregroundStyle(Palette.accent)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
-            )
+            if spot {
+                Text("SPOT")
+            }
+            Text("EV " + String(format: "%.1f", damp.values[0]))
+                .monospacedDigit()
         }
-        .buttonStyle(.plain)
-        .animation(.spring(response: 0.25), value: frozen)
-        .animation(.spring(response: 0.25), value: spot)
-    }
-}
-
-struct LiDARPeakingBadge: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(Color(red: 1.0, green: 0.27, blue: 0.23))
-                .frame(width: 6, height: 6)
-            Text("LiDAR DEPTH")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
-        )
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(Palette.text)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .glassEffect(.regular, in: .capsule)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
     }
 }
 
@@ -176,16 +279,15 @@ struct FocusMarker: View {
                 FocusPing(tooClose: tooClose).id(pulseID)
             }
             Circle()
-                .stroke(tooClose ? Palette.bad : Color.white.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .frame(width: 36, height: 36)
+                .stroke(tooClose ? Palette.bad : Palette.lensLight.opacity(0.92),
+                        style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+                .frame(width: 26, height: 26)
                 .scaleEffect(tooClose ? 0.86 : 1)
             Circle()
-                .fill(tooClose ? Palette.bad : Color.white)
-                .frame(width: 4, height: 4)
+                .fill(tooClose ? Palette.bad : Palette.lensLight)
+                .frame(width: 2.5, height: 2.5)
         }
-        .shadow(color: .black.opacity(0.35), radius: 4)
-        .frame(width: 38, height: 38)
+        .frame(width: 30, height: 30)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }

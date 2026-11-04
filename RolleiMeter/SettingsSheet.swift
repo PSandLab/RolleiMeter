@@ -4,7 +4,6 @@ import UIKit
 struct SettingsSheet: View {
     @Binding var useDIN: Bool
     @Binding var useFeet: Bool
-    @Binding var showFocusModule: Bool
     @Binding var calibration: Double
     @Binding var armOffset: Double
     let rawDistance: () -> Double?
@@ -44,8 +43,6 @@ struct SettingsSheet: View {
                 }
 
                 Section("Distance") {
-                    Toggle("LiDAR Focus Scale", isOn: $showFocusModule.animation(.spring(response: 0.3, dampingFraction: 0.8)))
-
                     Stepper {
                         LabeledContent("Arm Offset", value: Fmt.distance(armOffset, feet: useFeet))
                             .monospacedDigit()
