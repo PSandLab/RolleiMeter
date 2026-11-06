@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// Proportional instrument typography scaled by the grid factor `k`.
+/// Clean proportional SF Pro instrument typography scaled by `k`.
 enum AppTypography {
     static func next(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         Font.system(size: max(9, size), weight: weight, design: .default)
     }
 
-    static func label(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+    static func label(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
         Font.system(size: max(9, size), weight: weight, design: .default)
     }
 
     static func numeral(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.system(size: max(9, size), weight: weight, design: .rounded).monospacedDigit()
+        Font.system(size: max(9, size), weight: weight, design: .default).monospacedDigit()
     }
 
     static func regular(size: CGFloat) -> Font { next(size: size, weight: .regular) }

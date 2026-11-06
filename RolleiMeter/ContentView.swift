@@ -138,7 +138,38 @@ struct ContentView: View {
                 Palette.background
 
                 ZStack(alignment: .topLeading) {
+                    // 1. Unified Exposure Liquid Glass Deck (Shutter + Aperture)
+                    if p {
+                        ZStack {
+                            Color.clear
+                            Rectangle()
+                                .fill(Color.white.opacity(0.08))
+                                .frame(width: 1)
+                                .padding(.vertical, 22 * k)
+                        }
+                        .liquidGlassCard(k: k)
+                        .allowsHitTesting(false)
+                        .cell(grid, col: 0, row: 7, cols: 6, rows: 2)
+                    }
+
+                    // 2. Unified Film Roll Liquid Glass Card (Frame + Film)
+                    ZStack {
+                        Color.clear
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 1)
+                            .padding(.horizontal, 22 * k)
+                    }
+                    .liquidGlassCard(k: k)
+                    .allowsHitTesting(false)
+                    .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 4)
+
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, speeds: activeShutterSpeeds, k: k)
+                        .background {
+                            if !p {
+                                Color.clear.liquidGlassCard(k: k)
+                            }
+                        }
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FilmPanel(
@@ -182,6 +213,11 @@ struct ContentView: View {
                         onTap: toggleAutoAperture,
                         onHome: returnHomeAperture
                     )
+                    .background {
+                        if !p {
+                            Color.clear.liquidGlassCard(k: k)
+                        }
+                    }
                     .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FocusPanel(
@@ -622,22 +658,7 @@ struct ContentView: View {
                             }
                     )
 
-                // Subtle optical rangefinder framing grid
-                Canvas { ctx, size in
-                    let thirdW = size.width / 3
-                    let thirdH = size.height / 3
-                    var grid = Path()
-                    for i in 1...2 {
-                        let x = thirdW * CGFloat(i)
-                        let y = thirdH * CGFloat(i)
-                        grid.move(to: CGPoint(x: x, y: 12))
-                        grid.addLine(to: CGPoint(x: x, y: size.height - 12))
-                        grid.move(to: CGPoint(x: 12, y: y))
-                        grid.addLine(to: CGPoint(x: size.width - 12, y: y))
-                    }
-                    ctx.stroke(grid, with: .color(.white.opacity(0.07)), lineWidth: 0.75)
-                }
-                .allowsHitTesting(false)
+
 
                 if spotActive {
                     let full = fullFrame(geo.size)
@@ -732,8 +753,8 @@ struct ContentView: View {
             .overlay {
                 ContainerRelativeShape()
                     .strokeBorder(
-                        held ? Palette.accent.opacity(0.85) : Color.white.opacity(0.14),
-                        lineWidth: held ? 2.0 : 1.0
+                        held ? Color.white.opacity(0.32) : Color.white.opacity(0.12),
+                        lineWidth: 1.0
                     )
                     .allowsHitTesting(false)
             }
@@ -744,20 +765,14 @@ struct ContentView: View {
     }
 
     private func topBar(k: CGFloat) -> some View {
-        let btnSize: CGFloat = 64 * k
+        let btnSize: CGFloat = 62 * k
         return HStack(spacing: 10 * k) {
-            HStack(spacing: 9 * k) {
-                Circle()
-                    .fill(Palette.accent)
-                    .frame(width: 8 * k, height: 8 * k)
-
-                Text("ROLLEIMETER")
-                    .font(AppTypography.next(size: 22 * k, weight: .bold))
-                    .tracking(2.8 * k)
-                    .foregroundStyle(Palette.textSub)
-                    .lineLimit(1)
-            }
-            .padding(.leading, 14 * k)
+            Text("ROLLEIMETER")
+                .font(AppTypography.next(size: 21 * k, weight: .semibold))
+                .tracking(3.0 * k)
+                .foregroundStyle(Palette.textDim)
+                .padding(.leading, 6 * k)
+                .lineLimit(1)
 
             Spacer()
 

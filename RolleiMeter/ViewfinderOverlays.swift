@@ -43,8 +43,6 @@ struct HoldControl: View {
             if !frozen {
                 HStack(spacing: 0) {
                     smoothMeterSelector
-                        .padding(.leading, 14 * k)
-
                     Spacer(minLength: 0)
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
@@ -54,17 +52,15 @@ struct HoldControl: View {
                 Spacer(minLength: 0)
                 shutterOrMorphedActions
             }
-            .padding(.trailing, 14 * k)
-            .padding(.leading, frozen ? 14 * k : 0)
+            .padding(.trailing, 4 * k)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .instrumentBay(k: k)
         .animation(.spring(response: 0.34, dampingFraction: 0.78), value: frozen)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isSaved)
     }
 
     private var smoothMeterSelector: some View {
-        let rowHeight: CGFloat = 48 * k
+        let rowHeight: CGFloat = 50 * k
         let totalHeight: CGFloat = rowHeight * CGFloat(max(modes.count, 1))
 
         return VStack(alignment: .leading, spacing: 0) {
@@ -73,40 +69,28 @@ struct HoldControl: View {
                 ZStack(alignment: .leading) {
                     if selected {
                         Capsule()
-                            .fill(Palette.accent.opacity(isScrubbingMeter ? 0.24 : 0.16))
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Palette.accent.opacity(0.65), lineWidth: 1)
-                            )
+                            .fill(Color.white.opacity(isScrubbingMeter ? 0.18 : 0.12))
                             .matchedGeometryEffect(id: "meterModePill", in: meterSlideNamespace)
                     }
 
                     HStack(spacing: 9 * k) {
                         Circle()
                             .fill(selected ? Palette.accent : Palette.faint)
-                            .frame(width: 7.5 * k, height: 7.5 * k)
+                            .frame(width: 7 * k, height: 7 * k)
 
-                        Text(modes[i].title.uppercased())
-                            .font(AppTypography.next(size: 21 * k, weight: selected ? .bold : .semibold))
-                            .tracking(1.2 * k)
+                        Text(modes[i].title)
+                            .font(AppTypography.next(size: 24 * k, weight: selected ? .semibold : .regular))
                             .foregroundStyle(selected ? Palette.text : Palette.textDim)
                             .lineLimit(1)
                     }
                     .padding(.horizontal, 14 * k)
                 }
-                .frame(width: 142 * k, height: rowHeight, alignment: .leading)
+                .frame(width: 144 * k, height: rowHeight, alignment: .leading)
                 .contentShape(Rectangle())
             }
         }
         .padding(5 * k)
-        .background(
-            RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
-                .fill(Palette.panelInset)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-                )
-        )
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22 * k, style: .continuous))
         .scaleEffect(isScrubbingMeter ? 1.03 : 1.0)
         .animation(.snappy(duration: 0.22, extraBounce: 0.0), value: meterIndex)
         .animation(.snappy(duration: 0.18, extraBounce: 0.0), value: isScrubbingMeter)
@@ -147,7 +131,7 @@ struct HoldControl: View {
     }
 
     private var shutterOrMorphedActions: some View {
-        GlassEffectContainer(spacing: 14 * k) {
+        GlassEffectContainer(spacing: 16 * k) {
             morphedButtonsContent()
         }
     }
@@ -155,27 +139,18 @@ struct HoldControl: View {
     @ViewBuilder
     private func morphedButtonsContent() -> some View {
         if frozen {
-            HStack(spacing: 14 * k) {
+            HStack(spacing: 16 * k) {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     onDiscardHold()
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Palette.bad.opacity(0.20))
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Palette.bad.opacity(0.65), lineWidth: 1.5)
-                            )
-
-                        Image(systemName: "xmark")
-                            .font(.system(size: 34 * k, weight: .bold))
-                            .foregroundStyle(Palette.bad)
-                    }
-                    .frame(width: 112 * k, height: 112 * k)
-                    .contentShape(Circle())
-                    .glassEffect(.regular.tint(Palette.bad.opacity(0.24)).interactive(), in: Circle())
-                    .glassEffectID("holdDiscard", in: morphNamespace)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 32 * k, weight: .bold))
+                        .foregroundStyle(Palette.bad)
+                        .frame(width: 114 * k, height: 114 * k)
+                        .contentShape(Circle())
+                        .glassEffect(.regular.tint(Palette.bad.opacity(0.22)).interactive(), in: Circle())
+                        .glassEffectID("holdDiscard", in: morphNamespace)
                 }
                 .buttonStyle(PressStyle(scale: 0.94))
                 .accessibilityLabel("Discard reading")
@@ -187,20 +162,16 @@ struct HoldControl: View {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(Palette.panelInset)
-                            .overlay(Circle().strokeBorder(Palette.good.opacity(0.55), lineWidth: 1.5))
-
-                        Circle()
                             .fill(Palette.good)
                             .frame(width: 118 * k, height: 118 * k)
 
                         Image(systemName: "checkmark")
-                            .font(.system(size: 44 * k, weight: .black))
+                            .font(.system(size: 40 * k, weight: .bold))
                             .foregroundStyle(Palette.accentInk)
                     }
                     .frame(width: 152 * k, height: 152 * k)
                     .contentShape(Circle())
-                    .glassEffect(.regular.tint(Palette.good.opacity(0.32)).interactive(), in: Circle())
+                    .glassEffect(.regular.tint(Palette.good.opacity(0.28)).interactive(), in: Circle())
                     .glassEffectID("holdPrimary", in: morphNamespace)
                 }
                 .buttonStyle(PressStyle(scale: 0.95))
@@ -210,38 +181,15 @@ struct HoldControl: View {
         } else {
             Button(action: onHold) {
                 ZStack {
-                    // Machined outer shutter collar
                     Circle()
-                        .fill(Palette.panelInset)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [Color.white.opacity(0.28), Color.white.opacity(0.06)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 2 * k
-                                )
-                        )
+                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 2 * k)
+                        .frame(width: 146 * k, height: 146 * k)
 
-                    // Inner chrome ring
                     Circle()
-                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                        .frame(width: 136 * k, height: 136 * k)
-
-                    // Tactile shutter release plunger
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.white, Color(red: 0.86, green: 0.88, blue: 0.91)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 120 * k, height: 120 * k)
+                        .fill(Color.white)
+                        .frame(width: 122 * k, height: 122 * k)
                 }
-                .frame(width: 162 * k, height: 162 * k)
+                .frame(width: 166 * k, height: 166 * k)
                 .contentShape(Circle())
                 .glassEffect(.regular.interactive(), in: Circle())
                 .glassEffectID("holdPrimary", in: morphNamespace)
@@ -261,28 +209,22 @@ struct EVChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(frozen ? Palette.accent : (spot ? Palette.good : Palette.textSub))
-                .frame(width: 6, height: 6)
-
             if frozen {
                 Text("HOLD")
-                    .fontWeight(.bold)
+                    .fontWeight(.semibold)
                     .foregroundStyle(Palette.accent)
             }
             if spot {
                 Text("SPOT")
-                    .fontWeight(.bold)
-                    .foregroundStyle(Palette.lensLight)
+                    .fontWeight(.semibold)
             }
             Text("EV " + String(format: "%.1f", damp.values[0]))
                 .monospacedDigit()
-                .fontWeight(.semibold)
         }
-        .font(.caption.weight(.semibold))
+        .font(.caption.weight(.medium))
         .foregroundStyle(Palette.text)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .glassEffect(.regular, in: .capsule)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
@@ -332,7 +274,7 @@ struct FocusMarker: View {
                 .frame(width: 3, height: 3)
         }
         .frame(width: 30, height: 30)
-        .shadow(color: Color.black.opacity(0.75), radius: 2, x: 0, y: 1)
+        .shadow(color: Color.black.opacity(0.65), radius: 2, x: 0, y: 1)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }

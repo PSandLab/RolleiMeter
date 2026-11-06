@@ -7,8 +7,8 @@ struct PanelTitle: View {
 
     var body: some View {
         Text(text)
-            .font(AppTypography.label(20 * k, weight: .semibold))
-            .tracking(3.2 * k)
+            .font(AppTypography.label(18 * k, weight: .semibold))
+            .tracking(2.8 * k)
             .foregroundStyle(color)
             .lineLimit(1)
             .frame(maxWidth: .infinity)
@@ -17,64 +17,35 @@ struct PanelTitle: View {
     }
 }
 
-struct DialIndexPointer: View {
+struct LiquidGlassCardModifier: ViewModifier {
     let k: CGFloat
-    var color: Color = Palette.accent
-
-    var body: some View {
-        Canvas { ctx, size in
-            let midX = size.width / 2
-            var triangle = Path()
-            triangle.move(to: CGPoint(x: midX - 5.5 * k, y: 0))
-            triangle.addLine(to: CGPoint(x: midX + 5.5 * k, y: 0))
-            triangle.addLine(to: CGPoint(x: midX, y: 7.5 * k))
-            triangle.closeSubpath()
-            ctx.fill(triangle, with: .color(color))
-        }
-        .frame(width: 14 * k, height: 8 * k)
-        .allowsHitTesting(false)
-    }
-}
-
-struct InstrumentBayModifier: ViewModifier {
-    let k: CGFloat
-    var accentBorder: Color? = nil
 
     func body(content: Content) -> some View {
-        let radius = 22 * k
+        let radius = 24 * k
         content
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Palette.panelRaised.opacity(0.55), Palette.panel],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    accentBorder ?? Color.white.opacity(0.13),
-                                    (accentBorder ?? Color.white).opacity(0.03)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                }
-            )
-            .clipShape(.rect(cornerRadius: radius, style: .continuous))
+            .glassEffect(.regular, in: .rect(cornerRadius: radius, style: .continuous))
     }
 }
 
 extension View {
-    func instrumentBay(k: CGFloat, accentBorder: Color? = nil) -> some View {
-        modifier(InstrumentBayModifier(k: k, accentBorder: accentBorder))
+    func liquidGlassCard(k: CGFloat) -> some View {
+        modifier(LiquidGlassCardModifier(k: k))
+    }
+
+    /// Soft horizontal optical vignette so wheel numbers fade smoothly before reaching the edges.
+    func wheelEdgeMask() -> some View {
+        mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .black, location: 0.16),
+                    .init(color: .black, location: 0.84),
+                    .init(color: .clear, location: 1.0)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
     }
 }
 

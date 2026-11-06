@@ -24,18 +24,12 @@ struct ShutterPanel: View {
         let currentLabels = labels
         let index = currentLabels.firstIndex(of: r.label) ?? 0
         let tint: Color = r.deviation != nil ? Palette.bad : (r.isSlow ? Palette.slow : Palette.accent)
-        let activeDisplay = r.label.hasSuffix("\"") ? "\(r.label) SEC" : "1/\(r.label) SEC"
-        let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "SLOW · \(activeDisplay)" : activeDisplay)
+        let sub: String = r.deviation.map { Fmt.exposureAmount($0) + " EV" } ?? (r.isSlow ? "slow" : "sec")
 
         ZStack(alignment: .top) {
             ShutterWheel(position: position, labels: currentLabels, tint: tint, sub: sub, k: k)
-
             PanelTitle(text: "SHUTTER", k: k)
-
-            DialIndexPointer(k: k, color: tint)
-                .padding(.top, 46 * k)
         }
-        .instrumentBay(k: k)
         .onAppear { position = Double(index) }
         .onChange(of: index) { _, newIndex in
             withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
@@ -63,59 +57,34 @@ private struct ShutterWheel: View, Animatable {
     var body: some View {
         Canvas { ctx, size in
             let cx = size.width / 2
-            let pitch = 92 * k
+            let pitch = 118 * k
 
-            // Bottom knurled scale ticks that rotate with the drum
-            let tickBaseY = size.height - 14 * k
-            let subSteps = 4
-            let minIdx = max(0, Int(floor(position)) - 3)
-            let maxIdx = min(labels.count - 1, Int(ceil(position)) + 3)
-            if minIdx <= maxIdx {
-                for i in minIdx...maxIdx {
-                    for s in 0..<subSteps {
-                        if i == maxIdx && s > 0 { continue }
-                        let tickPos = Double(i) + Double(s) / Double(subSteps)
-                        let dTick = tickPos - position
-                        let tx = cx + CGFloat(dTick) * pitch
-                        if tx < 12 * k || tx > size.width - 12 * k { continue }
-                        let isMajor = (s == 0)
-                        let tickH: CGFloat = (isMajor ? 9 : 5) * k
-                        let fade = max(0.0, 1.0 - abs(dTick) * 0.45)
-                        var tickPath = Path()
-                        tickPath.move(to: CGPoint(x: tx, y: tickBaseY - tickH))
-                        tickPath.addLine(to: CGPoint(x: tx, y: tickBaseY))
-                        ctx.stroke(
-                            tickPath,
-                            with: .color((isMajor && abs(dTick) < 0.25 ? tint : Palette.textSub).opacity(fade * (isMajor ? 0.55 : 0.25))),
-                            lineWidth: (isMajor ? 1.6 : 1.0) * k
-                        )
-                    }
-                }
-            }
-
-            // Engraved shutter speed numerals
             for i in labels.indices {
                 let d = Double(i) - position
-                let x = cx + CGFloat(d) * pitch
-                if x < -pitch || x > size.width + pitch { continue }
                 let ad = abs(d)
+                if ad > 1.45 { continue }
+                let x = cx + CGFloat(d) * pitch
+                let t = max(0.0, 1.0 - ad)
                 let active = ad < 0.45
                 let color: Color = active ? tint : Palette.textSub
-                let fontSize: CGFloat = (active ? 64 : 42) * k
-                let opacity = active ? 1.0 : max(0.18, 0.68 - 0.32 * ad)
+                let fontSize: CGFloat = (28.0 + 20.0 * t) * k
+                let opacity = active ? 1.0 : max(0.0, 0.42 * (1.0 - (ad - 0.3) / 1.15))
 
-                let number = Text(labels[i])
-                    .font(AppTypography.numeral(size: fontSize, weight: active ? .bold : .medium))
+                let rawLabel = labels[i]
+                let displayStr = rawLabel.hasSuffix("\"") ? rawLabel : (active ? "1/\(rawLabel)" : rawLabel)
+                let number = Text(displayStr)
+                    .font(AppTypography.numeral(size: fontSize, weight: active ? .semibold : .regular))
                     .foregroundColor(color.opacity(opacity))
                 ctx.draw(ctx.resolve(number), at: CGPoint(x: x, y: 102 * k), anchor: .center)
             }
 
-            // Center active subtitle readout
-            let subText = Text(sub)
-                .font(AppTypography.numeral(size: 20 * k, weight: .semibold))
-                .foregroundColor(tint.opacity(0.92))
-            ctx.draw(ctx.resolve(subText), at: CGPoint(x: cx, y: 154 * k), anchor: .center)
+            let subColor = (sub == "sec") ? Palette.textDim : tint
+            let unit = Text(sub)
+                .font(AppTypography.next(size: 18 * k, weight: sub == "sec" ? .medium : .semibold))
+                .foregroundColor(subColor.opacity(0.85))
+            ctx.draw(ctx.resolve(unit), at: CGPoint(x: cx, y: 150 * k), anchor: .center)
         }
+        .wheelEdgeMask()
         .clipped()
         .allowsHitTesting(false)
     }

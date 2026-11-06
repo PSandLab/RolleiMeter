@@ -43,64 +43,31 @@ struct FilmPanel: View {
             PanelTitle(
                 text: hasCam ? cameraBadge.uppercased() : "FILM",
                 k: k,
-                color: hasCam ? Palette.accent : Palette.textDim
+                color: Palette.textDim
             )
-            .padding(.horizontal, 12 * k)
+            .padding(.horizontal, 14 * k)
 
-            // Film box-end holder window
-            HStack(spacing: 12 * k) {
-                if !isUnloaded {
-                    FilmCanisterArtwork(
-                        brand: filmName,
-                        familyName: filmName,
-                        category: "Color",
-                        iso: currentISO,
-                        showLeader: false,
-                        width: 42 * k,
-                        height: 58 * k
+            ZStack {
+                RoundedRectangle(cornerRadius: 16 * k, style: .continuous)
+                    .fill(Palette.accent.opacity(isUnloaded ? 0.12 : 0.16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16 * k, style: .continuous)
+                            .strokeBorder(Palette.accent.opacity(0.35), lineWidth: 1)
                     )
-                } else {
-                    Image(systemName: "film")
-                        .font(.system(size: 28 * k, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
-                }
 
-                VStack(alignment: .leading, spacing: 4 * k) {
-                    Text(readout)
-                        .font(AppTypography.next(size: 32 * k, weight: .bold).monospacedDigit())
-                        .foregroundStyle(isUnloaded ? Palette.accent : Palette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.60)
-                        .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.15), value: readout)
-
-                    Text(isUnloaded ? "TAP TO LOAD ROLL" : (currentISO != boxISO ? "RATED \(speedText) (BOX \(boxISO))" : speedText))
-                        .font(AppTypography.numeral(size: 17 * k, weight: .semibold))
-                        .tracking(1.0 * k)
-                        .foregroundStyle(currentISO != boxISO && !isUnloaded ? Palette.accent : Palette.textSub)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
+                Text(readout)
+                    .font(AppTypography.next(size: 28 * k, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(isUnloaded ? Palette.accent : Palette.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .padding(.horizontal, 14 * k)
+                    .contentTransition(.numericText())
+                    .animation(.smooth(duration: 0.15), value: readout)
             }
             .padding(.horizontal, 16 * k)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
-                    .fill(Palette.panelInset)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
-                            .strokeBorder(
-                                isUnloaded ? Palette.accent.opacity(0.55) : Palette.accent.opacity(0.32),
-                                lineWidth: 1.2
-                            )
-                    )
-            )
-            .padding(.horizontal, 16 * k)
-            .padding(.top, 54 * k)
+            .padding(.top, 52 * k)
             .padding(.bottom, 16 * k)
         }
-        .instrumentBay(k: k, accentBorder: Palette.accent.opacity(0.22))
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()

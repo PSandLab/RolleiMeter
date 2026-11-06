@@ -225,22 +225,11 @@ struct FocusPanel: View {
                     }
                 )
             }
-            .padding(.horizontal, 10 * k)
-            .padding(.vertical, 6 * k)
-            .background(
-                RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
-                    .fill(Palette.panelInset)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-                    )
-            )
-            .padding(.top, 52 * k)
-            .padding(.bottom, 14 * k)
-            .padding(.horizontal, 16 * k)
+            .padding(.top, 50 * k)
+            .padding(.bottom, 12 * k)
+            .padding(.horizontal, 18 * k)
         }
         .overlay(alignment: .topLeading) {
-            let modeTint = manual ? Palette.bad : Palette.good
             Button {
                 if manual {
                     stopHaptic.impactOccurred(intensity: 0.6)
@@ -250,20 +239,10 @@ struct FocusPanel: View {
                 }
             } label: {
                 Text(manual ? "MF" : "AF")
-                    .font(AppTypography.next(size: 17 * k, weight: .bold))
-                    .foregroundStyle(modeTint)
-                    .padding(.horizontal, 9 * k)
-                    .padding(.vertical, 4 * k)
-                    .background(
-                        Capsule()
-                            .fill(modeTint.opacity(0.16))
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(modeTint.opacity(0.55), lineWidth: 1)
-                            )
-                    )
-                    .padding(.top, 12 * k)
-                    .padding(.leading, 14 * k)
+                    .font(AppTypography.next(size: 18 * k, weight: .semibold))
+                    .foregroundStyle(manual ? Palette.bad : Palette.good)
+                    .padding(.top, 15 * k)
+                    .padding(.leading, 18 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -273,18 +252,18 @@ struct FocusPanel: View {
             let displayDistance = subject != nil ? Fmt.distance(subject, feet: feet) : (hasLiDAR ? "∞" : "—")
             Button(action: onUnits) {
                 Text(displayDistance)
-                    .font(AppTypography.numeral(size: 22 * k, weight: .bold))
+                    .font(AppTypography.numeral(size: 18 * k, weight: .semibold))
                     .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.good))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .padding(.top, 14 * k)
-                    .padding(.trailing, 16 * k)
+                    .padding(.top, 15 * k)
+                    .padding(.trailing, 18 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Focus distance, \(displayDistance)")
         }
-        .instrumentBay(k: k)
+        .liquidGlassCard(k: k)
         .onAppear {
             tickHaptic.prepare()
         }

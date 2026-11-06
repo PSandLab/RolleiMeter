@@ -20,60 +20,37 @@ struct FramePanel: View {
             if loggedCount > 0 {
                 HStack {
                     Spacer()
-                    Text("\(loggedCount) LOG")
-                        .font(AppTypography.numeral(size: 16 * k, weight: .bold))
+                    Text("\(loggedCount)")
+                        .font(AppTypography.numeral(size: 17 * k, weight: .semibold))
                         .foregroundStyle(Palette.accent)
-                        .padding(.horizontal, 9 * k)
-                        .padding(.vertical, 4 * k)
-                        .background(
-                            Capsule()
-                                .fill(Palette.accent.opacity(0.15))
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(Palette.accent.opacity(0.45), lineWidth: 1)
-                                )
-                        )
-                        .padding(.top, 12 * k)
-                        .padding(.trailing, 14 * k)
+                        .padding(.top, 15 * k)
+                        .padding(.trailing, 18 * k)
                 }
             }
 
-            // Recessed mechanical counter window
-            ZStack {
-                RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
-                    .fill(Palette.panelInset)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-                    )
-
-                if isUnloaded {
-                    HStack(alignment: .firstTextBaseline, spacing: 8 * k) {
-                        Text("--")
-                            .font(AppTypography.numeral(size: 68 * k, weight: .bold))
-                            .foregroundStyle(Palette.dim)
-                        Text("/ --")
-                            .font(AppTypography.numeral(size: 32 * k, weight: .medium))
-                            .foregroundStyle(Palette.faint)
-                    }
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 8 * k) {
-                        Text(isBonus ? "+\(frame)" : String(format: "%02d", frame))
-                            .font(AppTypography.numeral(size: 74 * k, weight: .bold))
-                            .foregroundStyle(isBonus ? Palette.good : Palette.text)
-                            .contentTransition(.numericText())
-                        Text("/ \(rollLength)")
-                            .font(AppTypography.numeral(size: 32 * k, weight: .semibold))
-                            .foregroundStyle(Palette.textDim)
-                    }
-                    .animation(.smooth(duration: 0.2), value: frame)
+            if isUnloaded {
+                HStack(alignment: .firstTextBaseline, spacing: 6 * k) {
+                    Text("—")
+                        .font(AppTypography.numeral(size: 52 * k, weight: .semibold))
+                        .foregroundStyle(Palette.dim)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 28 * k)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6 * k) {
+                    Text(isBonus ? "+\(frame)" : "\(frame)")
+                        .font(AppTypography.numeral(size: 56 * k, weight: .semibold))
+                        .foregroundStyle(isBonus ? Palette.good : Palette.text)
+                        .contentTransition(.numericText())
+                    Text("/ \(rollLength)")
+                        .font(AppTypography.numeral(size: 28 * k, weight: .regular))
+                        .foregroundStyle(Palette.textDim)
+                }
+                .animation(.smooth(duration: 0.2), value: frame)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 28 * k)
             }
-            .padding(.horizontal, 16 * k)
-            .padding(.top, 54 * k)
-            .padding(.bottom, 16 * k)
         }
-        .instrumentBay(k: k)
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
