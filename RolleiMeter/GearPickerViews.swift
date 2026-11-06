@@ -1,6 +1,7 @@
 import SwiftUI
+import UIKit
 
-// MARK: - Custom Gear Form
+// MARK: - Custom Gear Form (With Fast Tactile Shutter & Aperture Scrubber Rulers)
 
 struct CustomGearForm: View {
     @ObservedObject var store: FilmLogStore
@@ -55,14 +56,14 @@ struct CustomGearForm: View {
             }
 
             Section(kind == .lens ? "Lens" : "Camera") {
-                TextField("Brand", text: $brand)
+                TextField("Brand (e.g. Leica, Nikon)", text: $brand)
                     .textInputAutocapitalization(.words)
 
-                TextField(kind == .lens ? "Model" : "Model", text: $modelName)
+                TextField("Model Name", text: $modelName)
                     .textInputAutocapitalization(.words)
 
                 if kind == .fixedLens {
-                    TextField("Lens", text: $fixedLensName)
+                    TextField("Built-in Lens (e.g. 40mm f/2.8)", text: $fixedLensName)
                         .textInputAutocapitalization(.words)
                 }
 
@@ -75,57 +76,72 @@ struct CustomGearForm: View {
                     }
 
                     if mountSelection == Self.otherMountTag {
-                        TextField("Mount", text: $customMount)
+                        TextField("Custom Mount Name", text: $customMount)
                             .textInputAutocapitalization(.words)
                     }
                 }
             }
 
             if kind != .lens {
-                Section("Shutter") {
-                    Stepper {
-                        LabeledContent("Fastest", value: formatShutterStopLabel(fastestShutterStop))
-                    } onIncrement: {
-                        setFastestShutter(fastestShutterIndex + 1)
-                    } onDecrement: {
-                        setFastestShutter(fastestShutterIndex - 1)
+                Section("Shutter Speed Range") {
+                    AnalogStopRulerScrubber(
+                        title: "Fastest Shutter",
+                        valueLabel: formatShutterStopLabel(fastestShutterStop),
+                        index: fastestShutterIndex,
+                        range: min(slowestShutterIndex + 1, ALL_ANALOG_SHUTTER_STOPS.count - 1)...(ALL_ANALOG_SHUTTER_STOPS.count - 1),
+                        totalCount: ALL_ANALOG_SHUTTER_STOPS.count
+                    ) { newIdx in
+                        setFastestShutter(newIdx)
                     }
 
-                    Stepper {
-                        LabeledContent("Slowest", value: formatShutterStopLabel(slowestShutterStop))
-                    } onIncrement: {
-                        setSlowestShutter(slowestShutterIndex + 1)
-                    } onDecrement: {
-                        setSlowestShutter(slowestShutterIndex - 1)
+                    AnalogStopRulerScrubber(
+                        title: "Slowest Shutter",
+                        valueLabel: formatShutterStopLabel(slowestShutterStop),
+                        index: slowestShutterIndex,
+                        range: 0...max(fastestShutterIndex - 1, 0),
+                        totalCount: ALL_ANALOG_SHUTTER_STOPS.count
+                    ) { newIdx in
+                        setSlowestShutter(newIdx)
                     }
                 }
                 .monospacedDigit()
             }
 
             if kind != .body {
-                Section("Aperture") {
-                    Stepper {
-                        LabeledContent("Widest", value: formatApertureStopLabel(widestApertureStop))
-                    } onIncrement: {
-                        setWidestAperture(widestApertureIndex + 1)
-                    } onDecrement: {
-                        setWidestAperture(widestApertureIndex - 1)
+                Section("Aperture Ring Range") {
+                    AnalogStopRulerScrubber(
+                        title: "Widest (Max) Aperture",
+                        valueLabel: formatApertureStopLabel(widestApertureStop),
+                        index: widestApertureIndex,
+                        range: 0...max(smallestApertureIndex - 1, 0),
+                        totalCount: ALL_ANALOG_APERTURE_STOPS.count
+                    ) { newIdx in
+                        setWidestAperture(newIdx)
                     }
 
-                    Stepper {
-                        LabeledContent("Smallest", value: formatApertureStopLabel(smallestApertureStop))
-                    } onIncrement: {
-                        setSmallestAperture(smallestApertureIndex + 1)
-                    } onDecrement: {
-                        setSmallestAperture(smallestApertureIndex - 1)
+                    AnalogStopRulerScrubber(
+                        title: "Smallest (Min) Aperture",
+                        valueLabel: formatApertureStopLabel(smallestApertureStop),
+                        index: smallestApertureIndex,
+                        range: min(widestApertureIndex + 1, ALL_ANALOG_APERTURE_STOPS.count - 1)...(ALL_ANALOG_APERTURE_STOPS.count - 1),
+                        totalCount: ALL_ANALOG_APERTURE_STOPS.count
+                    ) { newIdx in
+                        setSmallestAperture(newIdx)
                     }
                 }
                 .monospacedDigit()
             }
 
             Section {
-                Button("Add Gear") {
+                Button {
                     addGear()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Label("Mount & Save Custom Gear", systemImage: "checkmark.circle.fill")
+                            .font(.headline)
+                        Spacer()
+                    }
                 }
                 .disabled(!canAdd)
             }
@@ -296,6 +312,84 @@ struct CustomGearForm: View {
     private var cleanFixedLens: String {
         let value = fixedLensName.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? "Fixed lens" : value
+    }
+}
+
+private struct AnalogStopRulerScrubber: View {
+    let title: String
+    let valueLabel: String
+    let index: Int
+    let range: ClosedRange<Int>
+    let totalCount: Int
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.subheadline)
+                Spacer()
+                Text(valueLabel)
+                    .font(.subheadline.weight(.bold).monospacedDigit())
+                    .foregroundStyle(Palette.accent)
+            }
+
+            GeometryReader { geo in
+                let w = max(geo.size.width, 1)
+                let usable = max(w - 20, 1)
+                let frac = CGFloat(index) / CGFloat(max(totalCount - 1, 1))
+
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.secondary.opacity(0.14))
+
+                    Canvas { ctx, size in
+                        let span = size.width - 20
+                        for i in 0..<totalCount {
+                            let f = CGFloat(i) / CGFloat(max(totalCount - 1, 1))
+                            let x = 10 + f * span
+                            let inValidRange = range.contains(i)
+                            let isSelected = (i == index)
+                            let tickH: CGFloat = isSelected ? 20 : (i % 3 == 0 ? 13 : 7)
+                            let topY = (size.height - tickH) * 0.5
+
+                            var p = Path()
+                            p.move(to: CGPoint(x: x, y: topY))
+                            p.addLine(to: CGPoint(x: x, y: topY + tickH))
+                            ctx.stroke(
+                                p,
+                                with: .color(
+                                    isSelected
+                                        ? Palette.accent
+                                        : (inValidRange ? Color.primary.opacity(i % 3 == 0 ? 0.5 : 0.25) : Color.secondary.opacity(0.10))
+                                ),
+                                lineWidth: isSelected ? 2.5 : 1.2
+                            )
+                        }
+                    }
+
+                    Circle()
+                        .fill(Palette.accent)
+                        .frame(width: 14, height: 14)
+                        .offset(x: 10 + frac * usable - 7)
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let ratio = ((value.location.x - 10) / usable).clamped(to: 0...1)
+                            let rawIdx = Int((ratio * CGFloat(totalCount - 1)).rounded())
+                            let clamped = rawIdx.clamped(to: range)
+                            if clamped != index {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                onChange(clamped)
+                            }
+                        }
+                )
+            }
+            .frame(height: 30)
+        }
+        .padding(.vertical, 4)
     }
 }
 
