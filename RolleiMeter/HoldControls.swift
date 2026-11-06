@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 
-// MARK: - Interactive 35mm Film Leader-Pull Chamber
+// MARK: - Interactive 35mm Film Leader-Pull Chamber & Grand Loading Ceremony
 
 struct InteractiveFilmLeaderChamber: View {
     let brand: String
@@ -11,62 +11,71 @@ struct InteractiveFilmLeaderChamber: View {
     let category: String
     let iso: Int
     let rollLength: Int
+    let rollNumber: Int
     let isAlreadyLoaded: Bool
     var onLoadComplete: () -> Void
 
     @State private var pullProgress: CGFloat = 0.0
     @State private var dragY: CGFloat = 0.0
     @State private var isDragging: Bool = false
-    @State private var isWinding: Bool = false
+    @State private var isLatchedHold: Bool = false
+    @State private var heartbeatScale: CGFloat = 1.0
+    @State private var heartbeatTask: Task<Void, Never>? = nil
+
+    // Grand Loading Ceremony States
+    @State private var ceremonyPhase: Int = 0 // 0 = open chamber, 1 = door closed, 2 = winding S->0->1, 3 = locked at 1
+    @State private var doorClosedProgress: CGFloat = 0.0
+    @State private var odometerPosition: Double = -2.0 // -2 = "S", -1 = "00", 0 = "0", 1 = "1"
     @State private var motorWindAngle: Double = 0.0
+    @State private var ceremonyGlow: Double = 0.0
+
     @State private var lastSprocketTick: Int = 0
     @State private var lastSpindleThunk: Int = 0
     @State private var idlePulse: Bool = false
     @State private var canisterSwapPop: CGFloat = 0.0
 
-    private let latchThreshold: CGFloat = 0.84
+    private let latchThreshold: CGFloat = 0.82
 
     var body: some View {
         VStack(spacing: 10) {
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
-                let startX: CGFloat = 76
-                let endX: CGFloat = w - 54
+                let startX: CGFloat = 78
+                let endX: CGFloat = w - 52
                 let travel = max(endX - startX, 1)
                 let tipX = startX + travel * pullProgress
 
-                // Mechanical tension & high-frequency friction shudder
-                let tension = min(max((pullProgress - 0.08) / 0.82, 0.0), 1.0)
-                let frictionJitter = isDragging && tension > 0.35
-                    ? sin(Double(pullProgress * travel) * 0.9) * Double(tension) * 1.6
+                let tension = min(max((pullProgress - 0.06) / 0.82, 0.0), 1.0)
+                let frictionJitter = isDragging && tension > 0.35 && !isLatchedHold
+                    ? sin(Double(pullProgress * travel) * 0.85) * Double(tension) * 1.4
                     : 0.0
                 let spoolDegrees = Double(pullProgress * travel) * 3.8 + motorWindAngle
 
                 ZStack {
                     // 1. Recessed Camera Film-Back Chamber Track
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color(red: 0.04, green: 0.045, blue: 0.055))
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color(red: 0.035, green: 0.038, blue: 0.045))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .strokeBorder(
-                                    isWinding
-                                        ? Palette.good.opacity(0.65)
-                                        : (pullProgress >= latchThreshold ? Palette.accent.opacity(0.75) : Color.white.opacity(0.08)),
-                                    lineWidth: isWinding || pullProgress >= latchThreshold ? 1.5 : 1.0
+                                    ceremonyPhase > 0
+                                        ? Palette.accent.opacity(0.65)
+                                        : (isLatchedHold ? Palette.accent.opacity(0.85) : Color.white.opacity(0.08)),
+                                    lineWidth: isLatchedHold || ceremonyPhase > 0 ? 1.5 : 1.0
                                 )
                         )
 
-                    // 2. Machined Film-Gate Guide Rails & Pressure Plate Grooves
+                    // 2. Machined Film-Gate Guide Rails & Exposure Aperture Window
                     FilmChamberBackdropCanvas(
                         startX: startX,
                         endX: endX,
                         pullProgress: pullProgress,
                         latchThreshold: latchThreshold,
-                        isWinding: isWinding
+                        isWinding: ceremonyPhase > 0
                     )
 
-                    // 3. Unspooling 35mm Celluloid Film Strip, Sprockets & Catenary Bend
+                    // 3. Unspooling 35mm Celluloid Film Strip (Parallel Top/Bottom Bezier Curves)
                     UnspoolingFilmStripCanvas(
                         category: category,
                         startX: startX,
@@ -77,29 +86,31 @@ struct InteractiveFilmLeaderChamber: View {
                         motorWindAngle: motorWindAngle,
                         idlePulse: idlePulse,
                         isDragging: isDragging,
-                        isWinding: isWinding
+                        isLatchedHold: isLatchedHold,
+                        heartbeatScale: heartbeatScale,
+                        isWinding: ceremonyPhase > 0
                     )
 
-                    // 4. Right Side: Mechanical Take-Up Spool & Sprocket Roller
+                    // 4. Right Side: Realistic Cylindrical Take-Up Spool Drum (No floating semicircles)
                     TakeUpSpoolView(
                         pullProgress: pullProgress,
                         latchThreshold: latchThreshold,
                         spoolDegrees: spoolDegrees,
-                        isWinding: isWinding
+                        isLatchedHold: isLatchedHold,
+                        heartbeatScale: heartbeatScale,
+                        isWinding: ceremonyPhase > 0
                     )
                     .position(x: w - 34, y: h * 0.5)
 
-                    // 5. Left Side: Supply Bay + 3D Spinning & Tilting Canister
+                    // 5. Left Side: Supply Well + 3D Spinning & Tilting Canister (No floating semicircle above)
                     ZStack {
-                        // Top-down mechanical spindle rotation telemetry dial
-                        Circle()
-                            .strokeBorder(
-                                Color.white.opacity(0.14 + Double(tension) * 0.25),
-                                style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.black.opacity(0.55))
+                            .frame(width: 62, height: 102)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
                             )
-                            .frame(width: 58, height: 58)
-                            .rotationEffect(.degrees(spoolDegrees))
-                            .offset(y: -26)
 
                         FilmCanisterArtwork(
                             brand: brand,
@@ -110,99 +121,130 @@ struct InteractiveFilmLeaderChamber: View {
                             leaderExtension: 0,
                             spoolRotation: spoolDegrees,
                             tension: tension,
-                            width: 68,
-                            height: 82
+                            width: 66,
+                            height: 86
                         )
-                        .scaleEffect(1.0 + canisterSwapPop * 0.12)
-                        .rotationEffect(.degrees(Double(tension) * 7.5 + frictionJitter), anchor: .bottom)
-                        .offset(x: tension * 5.5, y: CGFloat(frictionJitter * 0.4))
-                        .shadow(color: .black.opacity(0.65), radius: 6, x: 3, y: 3)
+                        .scaleEffect(1.0 + canisterSwapPop * 0.14)
+                        .rotationEffect(.degrees(Double(tension) * 6.5 + frictionJitter), anchor: .bottom)
+                        .offset(x: tension * 5.0, y: CGFloat(frictionJitter * 0.35))
+                        .shadow(color: .black.opacity(0.7), radius: 6, x: 3, y: 3)
                     }
-                    .position(x: 42, y: h * 0.52)
+                    .position(x: 42, y: h * 0.5)
 
-                    // 6. Full-Chamber Drag Gesture Surface
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    guard !isWinding else { return }
-                                    if !isDragging {
-                                        isDragging = true
-                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)
-                                    }
-
-                                    let rawProgress = (value.location.x - startX) / travel
-                                    let clamped = min(max(rawProgress, 0.0), 1.0)
-                                    let yDeflection = max(-24, min(24, value.location.y - h * 0.5))
-
-                                    pullProgress = clamped
-                                    dragY = yDeflection * (1.0 - clamped * 0.45)
-
-                                    // Sprocket-tooth ratchet haptics every 9pt of film pulled
-                                    let distPt = Int(clamped * travel)
-                                    let sprocketStep = distPt / 9
-                                    if sprocketStep != lastSprocketTick {
-                                        let crossedLatch = (lastSprocketTick * 9 < Int(latchThreshold * travel)) && (distPt >= Int(latchThreshold * travel))
-                                        lastSprocketTick = sprocketStep
-                                        if crossedLatch {
-                                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
-                                        } else {
-                                            UISelectionFeedbackGenerator().selectionChanged()
-                                        }
-                                    }
-
-                                    // Spindle revolution thunk every 48pt
-                                    let spindleStep = distPt / 48
-                                    if spindleStep != lastSpindleThunk {
-                                        lastSpindleThunk = spindleStep
-                                        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.55)
-                                    }
-
-                                    // Auto-trigger wind if pulled all the way into the spool core
-                                    if clamped >= 0.96 {
-                                        engageTakeUpSpoolAndWind()
-                                    }
-                                }
-                                .onEnded { _ in
-                                    guard !isWinding else { return }
-                                    isDragging = false
-                                    if pullProgress >= latchThreshold {
-                                        engageTakeUpSpoolAndWind()
-                                    } else {
-                                        // Spring rewind snap-back with reverse spindle spin & vertical whip
-                                        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.6)
-                                        withAnimation(.spring(response: 0.36, dampingFraction: 0.50)) {
-                                            pullProgress = 0.0
-                                            dragY = 0.0
-                                        }
-                                        lastSprocketTick = 0
-                                        lastSpindleThunk = 0
-                                    }
-                                }
+                    // 6. Grand Film Loading Ceremony Overlay (Camera Back Door + Odometer Wind S -> 00 -> 0 -> 1)
+                    if ceremonyPhase > 0 {
+                        GrandFilmLoadingCeremonyView(
+                            brand: brand,
+                            stockFullName: stockFullName,
+                            iso: iso,
+                            rollLength: rollLength,
+                            rollNumber: rollNumber,
+                            ceremonyPhase: ceremonyPhase,
+                            doorClosedProgress: doorClosedProgress,
+                            odometerPosition: odometerPosition,
+                            motorWindAngle: motorWindAngle,
+                            ceremonyGlow: ceremonyGlow
                         )
+                        .transition(.opacity)
+                    }
+
+                    // 7. Interactive Drag Gesture Surface (User stays in 100% control until finger release)
+                    if ceremonyPhase == 0 {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        if !isDragging {
+                                            isDragging = true
+                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.7)
+                                        }
+
+                                        let rawProgress = (value.location.x - startX) / travel
+                                        let clamped = min(max(rawProgress, 0.0), 1.0)
+                                        let maxDeflection = h * 0.24
+                                        let yDeflection = max(-maxDeflection, min(maxDeflection, value.location.y - h * 0.5))
+
+                                        // When inside the latch zone, gently magnetize the tip toward the spool slot
+                                        if clamped >= latchThreshold {
+                                            let magnet = latchThreshold + (clamped - latchThreshold) * 0.45
+                                            pullProgress = min(max(magnet, latchThreshold), 0.94)
+                                            dragY = yDeflection * 0.22
+                                            if !isLatchedHold {
+                                                enterLatchedHoldHeartbeat()
+                                            }
+                                        } else {
+                                            if isLatchedHold {
+                                                exitLatchedHoldHeartbeat()
+                                            }
+                                            pullProgress = clamped
+                                            dragY = yDeflection * (1.0 - clamped * 0.45)
+
+                                            // Sprocket ratchet clicks every 9pt of film pulled
+                                            let distPt = Int(clamped * travel)
+                                            let sprocketStep = distPt / 9
+                                            if sprocketStep != lastSprocketTick {
+                                                lastSprocketTick = sprocketStep
+                                                UISelectionFeedbackGenerator().selectionChanged()
+                                            }
+
+                                            // Spindle revolution thunk every 48pt
+                                            let spindleStep = distPt / 48
+                                            if spindleStep != lastSpindleThunk {
+                                                lastSpindleThunk = spindleStep
+                                                UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.5)
+                                            }
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        isDragging = false
+                                        if pullProgress >= latchThreshold {
+                                            exitLatchedHoldHeartbeat()
+                                            runGrandLoadingCeremony()
+                                        } else {
+                                            exitLatchedHoldHeartbeat()
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.55)
+                                            withAnimation(.spring(response: 0.38, dampingFraction: 0.52)) {
+                                                pullProgress = 0.0
+                                                dragY = 0.0
+                                            }
+                                            lastSprocketTick = 0
+                                            lastSpindleThunk = 0
+                                        }
+                                    }
+                            )
+                    }
                 }
+                .clipShape(.rect(cornerRadius: 20, style: .continuous))
             }
-            .frame(height: 112)
+            .frame(height: 132)
 
             // Bottom status & instruction bar
             HStack {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(isWinding ? Palette.good : (pullProgress >= latchThreshold ? Palette.accent : (isAlreadyLoaded ? Palette.good : Palette.textDim)))
-                        .frame(width: 6, height: 6)
+                        .fill(statusDotColor)
+                        .frame(width: 6.5, height: 6.5)
+                        .scaleEffect(isLatchedHold ? heartbeatScale : 1.0)
 
                     Text(statusText)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isWinding ? Palette.good : (pullProgress >= latchThreshold ? Palette.accent : .secondary))
+                        .foregroundStyle(statusTextColor)
                         .contentTransition(.numericText())
                 }
 
                 Spacer()
 
-                Text("\(stockFullName) · \(rollLength) EXP")
-                    .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if isLatchedHold {
+                    Text("SLIDE LEFT TO CANCEL")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                } else {
+                    Text("\(stockFullName) · \(rollLength) EXP")
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 4)
         }
@@ -211,10 +253,15 @@ struct InteractiveFilmLeaderChamber: View {
                 idlePulse = true
             }
         }
+        .onDisappear {
+            heartbeatTask?.cancel()
+            heartbeatTask = nil
+        }
         .onChange(of: stockFullName) { _, _ in
-            guard !isWinding else { return }
+            guard ceremonyPhase == 0 else { return }
+            exitLatchedHoldHeartbeat()
             canisterSwapPop = 1.0
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.48)) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.48)) {
                 canisterSwapPop = 0.0
                 pullProgress = 0.0
                 dragY = 0.0
@@ -222,47 +269,292 @@ struct InteractiveFilmLeaderChamber: View {
         }
     }
 
-    private var statusText: String {
-        if isWinding {
-            return "WINDING LEADER TO FRAME 1…"
-        }
-        if pullProgress >= latchThreshold {
-            return "RELEASE TO LOCK IN TAKE-UP SPOOL"
-        }
-        if pullProgress > 0.04 {
-            let pct = Int((pullProgress / latchThreshold * 100).rounded()).clamped(to: 1...99)
-            return "PULLING FILM LEADER · \(pct)%"
-        }
-        return isAlreadyLoaded ? "PULL LEADER ACROSS TO RELOAD FRESH ROLL" : "PULL FILM LEADER ACROSS TO LOAD ROLL →"
+    private var statusDotColor: Color {
+        if ceremonyPhase == 3 { return Palette.good }
+        if ceremonyPhase > 0 || isLatchedHold { return Palette.accent }
+        return isAlreadyLoaded ? Palette.good : Palette.textDim
     }
 
-    private func engageTakeUpSpoolAndWind() {
-        guard !isWinding else { return }
-        isWinding = true
-        isDragging = false
-        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
+    private var statusTextColor: Color {
+        if ceremonyPhase == 3 { return Palette.good }
+        if ceremonyPhase > 0 || isLatchedHold { return Palette.accent }
+        return .secondary
+    }
 
-        withAnimation(.spring(response: 0.22, dampingFraction: 0.68)) {
-            pullProgress = 1.0
+    private var statusText: String {
+        switch ceremonyPhase {
+        case 1: return "CLOSING CAMERA BACK & PRESSURE PLATE…"
+        case 2: return "ADVANCING LEADER · S → 00 → 0 → FRAME 1…"
+        case 3: return "ROLL LOADED · LOCKED AT FRAME 1"
+        default:
+            if isLatchedHold {
+                return "SPOOL ENGAGED · RELEASE FINGER TO LOAD"
+            }
+            if pullProgress > 0.04 {
+                let pct = Int((pullProgress / latchThreshold * 100).rounded()).clamped(to: 1...99)
+                return "PULLING 35MM LEADER · \(pct)%"
+            }
+            return isAlreadyLoaded ? "PULL LEADER ACROSS TO LOAD FRESH ROLL" : "PULL FILM LEADER ACROSS TO TAKE-UP SPOOL →"
+        }
+    }
+
+    // MARK: - Gentle Heartbeat While Holding in Spool
+
+    private func enterLatchedHoldHeartbeat() {
+        isLatchedHold = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.85)
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { @MainActor in
+            while !Task.isCancelled && isLatchedHold {
+                withAnimation(.easeInOut(duration: 0.32)) {
+                    heartbeatScale = 1.16
+                }
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.48)
+                try? await Task.sleep(for: .milliseconds(320))
+                if Task.isCancelled || !isLatchedHold { break }
+                withAnimation(.easeInOut(duration: 0.36)) {
+                    heartbeatScale = 1.0
+                }
+                try? await Task.sleep(for: .milliseconds(360))
+            }
+        }
+    }
+
+    private func exitLatchedHoldHeartbeat() {
+        isLatchedHold = false
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        withAnimation(.easeOut(duration: 0.2)) {
+            heartbeatScale = 1.0
+        }
+    }
+
+    // MARK: - 3-Stage Grand Film Loading Ceremony
+
+    private func runGrandLoadingCeremony() {
+        guard ceremonyPhase == 0 else { return }
+        ceremonyPhase = 1
+        odometerPosition = -2.0 // Starts at "S"
+
+        // Snap leader flush into the take-up spool core
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.72)) {
+            pullProgress = 0.94
             dragY = 0.0
         }
 
-        // Rapid motor-drive advance wind (spins both spools +540° and fires ratchet burst)
-        withAnimation(.easeInOut(duration: 0.52)) {
-            motorWindAngle = 540.0
-        }
-
         Task { @MainActor in
-            for _ in 0..<5 {
-                try? await Task.sleep(for: .milliseconds(85))
+            // Stage 1: Close the Camera Back Door over the chamber (0.0s -> 0.55s)
+            try? await Task.sleep(for: .milliseconds(160))
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
+                doorClosedProgress = 1.0
+            }
+            try? await Task.sleep(for: .milliseconds(320))
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 1.0)
+
+            // Stage 2: Two-stroke mechanical film wind (S -> 00 -> 0 -> 1) (0.55s -> 2.05s)
+            ceremonyPhase = 2
+
+            // Stroke 1: Wind from "S" (-2) to "00" (-1) to "0" (0)
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.76)) {
+                odometerPosition = 0.0
+                motorWindAngle = 360.0
+            }
+            for _ in 0..<4 {
+                try? await Task.sleep(for: .milliseconds(95))
                 UISelectionFeedbackGenerator().selectionChanged()
             }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)
+
+            // Brief pause between lever strokes
+            try? await Task.sleep(for: .milliseconds(240))
+
+            // Stroke 2: Wind from "0" (0) to "1" (1) and lock!
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.68)) {
+                odometerPosition = 1.0
+                motorWindAngle = 720.0
+            }
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .milliseconds(90))
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+
+            // Stage 3: Frame 1 Locked & Illuminated Confirmation (2.05s -> 3.0s)
+            try? await Task.sleep(for: .milliseconds(140))
+            ceremonyPhase = 3
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.62)) {
+                ceremonyGlow = 1.0
+            }
+
+            try? await Task.sleep(for: .milliseconds(900))
             onLoadComplete()
-            try? await Task.sleep(for: .milliseconds(250))
-            isWinding = false
+
+            // Reset internal ceremony state after dismissal
+            try? await Task.sleep(for: .milliseconds(300))
+            ceremonyPhase = 0
+            doorClosedProgress = 0.0
+            odometerPosition = -2.0
             motorWindAngle = 0.0
+            ceremonyGlow = 0.0
             pullProgress = 0.0
+        }
+    }
+}
+
+// MARK: - Grand Film Loading Ceremony View (Camera Back Door + Odometer S -> 00 -> 0 -> 1)
+
+private struct GrandFilmLoadingCeremonyView: View {
+    let brand: String
+    let stockFullName: String
+    let iso: Int
+    let rollLength: Int
+    let rollNumber: Int
+    let ceremonyPhase: Int
+    let doorClosedProgress: CGFloat
+    let odometerPosition: Double
+    let motorWindAngle: Double
+    let ceremonyGlow: Double
+
+    var body: some View {
+        ZStack {
+            // Anodized Camera Back Door & Pressure Plate
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.11, green: 0.115, blue: 0.13),
+                            Color(red: 0.06, green: 0.065, blue: 0.075)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(
+                            ceremonyPhase == 3 ? Palette.good.opacity(0.8) : Palette.accent.opacity(0.45),
+                            lineWidth: ceremonyPhase == 3 ? 2.0 : 1.2
+                        )
+                )
+
+            HStack(spacing: 16) {
+                // Left: Classic Yellow-Bordered Film Box Reminder Window on the Camera Back
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(ceremonyPhase == 3 ? Palette.good : Palette.accent)
+                            .frame(width: 7, height: 7)
+                        Text(String(format: "ROLL #%02d", rollNumber))
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .tracking(1.2)
+                            .foregroundStyle(ceremonyPhase == 3 ? Palette.good : Palette.accent)
+                    }
+
+                    Text(stockFullName)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    Text("ISO \(iso) · \(rollLength) EXPOSURES")
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(Palette.textSub)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(red: 0.04, green: 0.04, blue: 0.05))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Palette.accent.opacity(0.65), lineWidth: 1.5)
+                        )
+                )
+
+                // Right: Mechanical Frame Counter Odometer Window (S -> 00 -> 0 -> 1)
+                VStack(spacing: 6) {
+                    Text(ceremonyPhase == 3 ? "READY" : "COUNTER")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(ceremonyPhase == 3 ? Palette.good : Palette.textSub)
+
+                    OdometerDialWindow(
+                        position: odometerPosition,
+                        locked: ceremonyPhase == 3
+                    )
+                    .frame(width: 86, height: 54)
+                }
+            }
+            .padding(.horizontal, 16)
+            .scaleEffect(0.94 + 0.06 * doorClosedProgress)
+            .opacity(Double(doorClosedProgress))
+        }
+        .scaleEffect(y: max(0.05, doorClosedProgress), anchor: .top)
+    }
+}
+
+private struct OdometerDialWindow: View, Animatable {
+    var position: Double // -2 = S, -1 = 00, 0 = 0, 1 = 1
+    let locked: Bool
+
+    var animatableData: Double {
+        get { position }
+        set { position = newValue }
+    }
+
+    private let stops: [(val: Double, label: String)] = [
+        (-2.0, "S"),
+        (-1.0, "00"),
+        (0.0, "0"),
+        (1.0, "1"),
+        (2.0, "2")
+    ]
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(
+                            locked ? Palette.good : Palette.accent.opacity(0.55),
+                            lineWidth: locked ? 2.0 : 1.2
+                        )
+                )
+
+            Canvas { ctx, size in
+                let cx = size.width * 0.5
+                let cy = size.height * 0.54
+                let pitch: CGFloat = 28
+
+                for item in stops {
+                    let d = item.val - position
+                    if abs(d) > 1.6 { continue }
+                    let x = cx + CGFloat(d) * pitch
+                    let ad = abs(d)
+                    let isCenter = ad < 0.45
+                    let color: Color = isCenter
+                        ? (locked ? Palette.good : (item.label == "S" ? Palette.accent : Palette.text))
+                        : Palette.textDim.opacity(max(0.15, 0.65 - 0.35 * ad))
+
+                    let txt = Text(item.label)
+                        .font(.system(size: isCenter ? 26 : 17, weight: isCenter ? .bold : .medium, design: .default).monospacedDigit())
+                        .foregroundColor(color)
+                    ctx.draw(ctx.resolve(txt), at: CGPoint(x: x, y: cy), anchor: .center)
+                }
+
+                // Top index pointer triangle
+                var ptr = Path()
+                ptr.move(to: CGPoint(x: cx - 4, y: 4))
+                ptr.addLine(to: CGPoint(x: cx + 4, y: 4))
+                ptr.addLine(to: CGPoint(x: cx, y: 9))
+                ptr.closeSubpath()
+                ctx.fill(ptr, with: .color(locked ? Palette.good : Palette.accent))
+            }
+            .clipShape(.rect(cornerRadius: 12, style: .continuous))
         }
     }
 }
@@ -277,8 +569,8 @@ private struct FilmChamberBackdropCanvas: View {
     var body: some View {
         Canvas { ctx, size in
             let midY = size.height * 0.5
-            let gateTop = midY - 26
-            let gateBot = midY + 26
+            let gateTop = midY - 28
+            let gateBot = midY + 28
 
             // Upper and lower machined film guide rails
             var rails = Path()
@@ -289,8 +581,8 @@ private struct FilmChamberBackdropCanvas: View {
             ctx.stroke(rails, with: .color(.white.opacity(0.07)), lineWidth: 1.0)
 
             // Film gate exposure aperture window in center of chamber
-            let gateW: CGFloat = 68
-            let gateH: CGFloat = 44
+            let gateW: CGFloat = 72
+            let gateH: CGFloat = 46
             let gateRect = CGRect(x: (startX + endX) * 0.5 - gateW * 0.5, y: midY - gateH * 0.5, width: gateW, height: gateH)
             ctx.fill(Path(roundedRect: gateRect, cornerRadius: 4), with: .color(.black.opacity(0.55)))
             ctx.stroke(Path(roundedRect: gateRect, cornerRadius: 4), with: .color(.white.opacity(0.08)), lineWidth: 1.0)
@@ -298,7 +590,7 @@ private struct FilmChamberBackdropCanvas: View {
             // Guide chevrons inviting the pull gesture
             if pullProgress < 0.15 && !isWinding {
                 for i in 0..<3 {
-                    let cx = startX + 58 + CGFloat(i) * 26
+                    let cx = startX + 60 + CGFloat(i) * 26
                     var chev = Path()
                     chev.move(to: CGPoint(x: cx - 4, y: midY - 6))
                     chev.addLine(to: CGPoint(x: cx + 2, y: midY))
@@ -325,6 +617,8 @@ private struct UnspoolingFilmStripCanvas: View {
     let motorWindAngle: Double
     let idlePulse: Bool
     let isDragging: Bool
+    let isLatchedHold: Bool
+    let heartbeatScale: CGFloat
     let isWinding: Bool
 
     var body: some View {
@@ -334,11 +628,11 @@ private struct UnspoolingFilmStripCanvas: View {
             let midY = size.height * 0.5
             let stripHalfH: CGFloat = 23
             let leaderLen: CGFloat = 34
-            let currentTipX = max(startX + 28, tipX)
+            let currentTipX = max(startX + 30, tipX)
             let bodyEndX = max(startX, currentTipX - leaderLen)
-            let ctrlX = (startX + currentTipX) * 0.5
+            let ctrlX = (startX + bodyEndX) * 0.5
             let ctrlY = midY + dragY * 1.15
-            let tipY = midY + dragY * 0.65
+            let tipY = midY + dragY * 0.72
 
             let emulsionColor: Color = {
                 if cat == "b&w" { return Color(red: 0.28, green: 0.32, blue: 0.38) }
@@ -346,37 +640,45 @@ private struct UnspoolingFilmStripCanvas: View {
                 return Color(red: 0.54, green: 0.30, blue: 0.16)
             }()
 
-            // 1. Curved Catenary Film Strip + Die-Cut Leader Tongue
+            // 1. Parallel Top & Bottom Catenary Bezier Film Strip (Never collapses or disappears on vertical drag)
             var strip = Path()
             strip.move(to: CGPoint(x: startX, y: midY - stripHalfH))
             strip.addQuadCurve(
                 to: CGPoint(x: bodyEndX, y: tipY - stripHalfH),
                 control: CGPoint(x: ctrlX, y: ctrlY - stripHalfH)
             )
-            // Classic 35mm stepped leader tongue taper
+            // Classic 35mm stepped leader tongue taper at the tip
             strip.addQuadCurve(
-                to: CGPoint(x: currentTipX, y: tipY - stripHalfH * 0.42),
+                to: CGPoint(x: currentTipX, y: tipY - stripHalfH * 0.40),
                 control: CGPoint(x: bodyEndX + leaderLen * 0.45, y: tipY - stripHalfH)
             )
             strip.addQuadCurve(
-                to: CGPoint(x: currentTipX, y: tipY + stripHalfH * 0.32),
-                control: CGPoint(x: currentTipX + 5, y: tipY - stripHalfH * 0.05)
+                to: CGPoint(x: currentTipX, y: tipY + stripHalfH * 0.36),
+                control: CGPoint(x: currentTipX + 4, y: tipY)
             )
-            strip.addLine(to: CGPoint(x: startX, y: midY + stripHalfH))
+            strip.addLine(to: CGPoint(x: bodyEndX, y: tipY + stripHalfH))
+            // Parallel bottom Bezier curve back to canister mouth
+            strip.addQuadCurve(
+                to: CGPoint(x: startX, y: midY + stripHalfH),
+                control: CGPoint(x: ctrlX, y: ctrlY + stripHalfH)
+            )
             strip.closeSubpath()
 
-            ctx.fill(strip, with: .color(emulsionColor.opacity(0.94)))
-            ctx.stroke(strip, with: .color(Color.white.opacity(0.18)), lineWidth: 0.8)
+            ctx.fill(strip, with: .color(emulsionColor.opacity(0.95)))
+            ctx.stroke(
+                strip,
+                with: .color(isLatchedHold ? Palette.accent.opacity(0.65) : Color.white.opacity(0.20)),
+                lineWidth: isLatchedHold ? 1.3 : 0.9
+            )
 
             // 2. Unspooling Sprocket Perforations & Exposed Negative Windows (clipped to strip)
             var filmCtx = ctx
             filmCtx.clip(to: strip)
 
-            // Specular celluloid sheen
             filmCtx.fill(
                 strip,
                 with: .linearGradient(
-                    Gradient(colors: [.white.opacity(0.14), .clear, .black.opacity(0.22)]),
+                    Gradient(colors: [.white.opacity(0.15), .clear, .black.opacity(0.24)]),
                     startPoint: CGPoint(x: startX, y: midY - stripHalfH),
                     endPoint: CGPoint(x: startX, y: midY + stripHalfH)
                 )
@@ -392,17 +694,15 @@ private struct UnspoolingFilmStripCanvas: View {
             for i in 0..<holeCount {
                 let hx = currentTipX + windShift - CGFloat(i) * holePitch - 10
                 guard hx >= startX - holeW && hx <= currentTipX - 4 else { continue }
-                let t = min(max((hx - startX) / max(currentTipX - startX, 1), 0), 1)
-                // Quadratic Bezier Y interpolation matching the catenary curve
+                let t = min(max((hx - startX) / max(bodyEndX - startX, 1), 0), 1)
                 let oneMinusT = 1.0 - t
                 let localMidY = oneMinusT * oneMinusT * midY + 2 * oneMinusT * t * ctrlY + t * t * tipY
 
                 let topHole = CGRect(x: hx, y: localMidY - stripHalfH + 3.0, width: holeW, height: holeH)
                 let botHole = CGRect(x: hx, y: localMidY + stripHalfH - 3.0 - holeH, width: holeW, height: holeH)
-                filmCtx.fill(Path(roundedRect: topHole, cornerRadius: 0.9), with: .color(.white.opacity(0.86)))
-                filmCtx.fill(Path(roundedRect: botHole, cornerRadius: 0.9), with: .color(.white.opacity(0.86)))
+                filmCtx.fill(Path(roundedRect: topHole, cornerRadius: 0.9), with: .color(.white.opacity(0.88)))
+                filmCtx.fill(Path(roundedRect: botHole, cornerRadius: 0.9), with: .color(.white.opacity(0.88)))
 
-                // Every 4th perforation, draw a dark negative frame window + amber edge number
                 if i > 2 && i % 4 == 0 && hx - 32 >= startX {
                     let winRect = CGRect(x: hx - 32, y: localMidY - stripHalfH + 9.0, width: 30, height: (stripHalfH - 9.0) * 2)
                     filmCtx.fill(Path(roundedRect: winRect, cornerRadius: 1.5), with: .color(.black.opacity(0.32)))
@@ -412,9 +712,10 @@ private struct UnspoolingFilmStripCanvas: View {
             // 3. Tactile Leader Pull-Tab Handle at the Tip
             if !isWinding {
                 let tabCenter = CGPoint(x: currentTipX - 10, y: tipY)
-                let handleR: CGFloat = isDragging ? 13 : (idlePulse ? 11.5 : 10.0)
-                let glowRect = CGRect(x: tabCenter.x - handleR * 1.4, y: tabCenter.y - handleR * 1.4, width: handleR * 2.8, height: handleR * 2.8)
-                ctx.fill(Path(ellipseIn: glowRect), with: .color(Palette.accent.opacity(isDragging ? 0.35 : (idlePulse ? 0.22 : 0.08))))
+                let baseR: CGFloat = isDragging ? 13.0 : (idlePulse ? 11.5 : 10.2)
+                let handleR = baseR * (isLatchedHold ? heartbeatScale : 1.0)
+                let glowRect = CGRect(x: tabCenter.x - handleR * 1.45, y: tabCenter.y - handleR * 1.45, width: handleR * 2.9, height: handleR * 2.9)
+                ctx.fill(Path(ellipseIn: glowRect), with: .color(Palette.accent.opacity(isLatchedHold ? 0.45 : (isDragging ? 0.32 : 0.14))))
 
                 let tabRect = CGRect(x: tabCenter.x - handleR, y: tabCenter.y - handleR, width: handleR * 2, height: handleR * 2)
                 ctx.fill(Path(ellipseIn: tabRect), with: .color(Palette.accent))
@@ -434,80 +735,99 @@ private struct UnspoolingFilmStripCanvas: View {
     }
 }
 
+// MARK: - Realistic Side-Profile Cylindrical Take-Up Spool Drum (No Floating Semicircles)
+
 private struct TakeUpSpoolView: View {
     let pullProgress: CGFloat
     let latchThreshold: CGFloat
     let spoolDegrees: Double
+    let isLatchedHold: Bool
+    let heartbeatScale: CGFloat
     let isWinding: Bool
 
     var body: some View {
-        let isReady = pullProgress >= latchThreshold || isWinding
-        let ringColor: Color = isWinding ? Palette.good : (isReady ? Palette.accent : Color.white.opacity(0.22))
+        let isReady = pullProgress >= latchThreshold || isLatchedHold || isWinding
+        let ringColor: Color = isWinding ? Palette.good : (isReady ? Palette.accent : Color.white.opacity(0.16))
 
         ZStack {
-            // Outer take-up chamber well
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            // Recessed take-up spool well
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(Color.black.opacity(0.65))
-                .frame(width: 44, height: 84)
+                .frame(width: 46, height: 96)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
                         .strokeBorder(ringColor, lineWidth: isReady ? 1.5 : 1.0)
                 )
 
-            // Rotating top & bottom sprocket gear wheels on the take-up drum
-            VStack(spacing: 38) {
-                Circle()
-                    .strokeBorder(
-                        ringColor,
-                        style: StrokeStyle(lineWidth: 2.2, dash: [2.5, 2.5])
-                    )
-                    .frame(width: 26, height: 26)
-                    .rotationEffect(.degrees(spoolDegrees))
+            // Side-profile cylindrical take-up drum with horizontal knurled sprocket flanges
+            Canvas { ctx, size in
+                let cx = size.width * 0.5
+                let cy = size.height * 0.5
+                let drumW: CGFloat = 24
+                let drumH: CGFloat = 72
+                let drumRect = CGRect(x: cx - drumW * 0.5, y: cy - drumH * 0.5, width: drumW, height: drumH)
+                let drumPath = Path(roundedRect: drumRect, cornerRadius: 4)
 
-                Circle()
-                    .strokeBorder(
-                        ringColor,
-                        style: StrokeStyle(lineWidth: 2.2, dash: [2.5, 2.5])
-                    )
-                    .frame(width: 26, height: 26)
-                    .rotationEffect(.degrees(spoolDegrees))
-            }
-
-            // Take-up spool core cylinder + vertical film catch slot
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.22, green: 0.25, blue: 0.30),
-                            Color(red: 0.42, green: 0.46, blue: 0.54),
-                            Color(red: 0.16, green: 0.18, blue: 0.22)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
+                ctx.fill(
+                    drumPath,
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.16, green: 0.18, blue: 0.22),
+                            Color(red: 0.34, green: 0.38, blue: 0.45),
+                            Color(red: 0.12, green: 0.14, blue: 0.17)
+                        ]),
+                        startPoint: CGPoint(x: drumRect.minX, y: cy),
+                        endPoint: CGPoint(x: drumRect.maxX, y: cy)
                     )
                 )
-                .frame(width: 22, height: 54)
-                .overlay {
-                    Rectangle()
-                        .fill(isReady ? Palette.accent : Color.black.opacity(0.75))
-                        .frame(width: 3, height: 34)
+
+                var drumCtx = ctx
+                drumCtx.clip(to: drumPath)
+
+                // Revolving vertical catch slots & sprocket teeth across the cylinder
+                let rad = spoolDegrees * .pi / 180.0
+                let fluteCount = 6
+                for i in 0..<fluteCount {
+                    let a = rad + Double(i) * (2.0 * .pi / Double(fluteCount))
+                    let sinA = sin(a)
+                    let cosA = cos(a)
+                    guard cosA > 0 else { continue }
+                    let fx = cx + CGFloat(sinA) * (drumW * 0.44)
+                    let slotW = max(1.2, 3.2 * CGFloat(cosA))
+
+                    // Center film-catch slot
+                    let slotRect = CGRect(x: fx - slotW * 0.5, y: cy - 18, width: slotW, height: 36)
+                    drumCtx.fill(
+                        Path(slotRect),
+                        with: .color(
+                            (i == 0 && isReady)
+                                ? Palette.accent.opacity(Double(cosA))
+                                : Color.black.opacity(0.75 * Double(cosA))
+                        )
+                    )
+
+                    // Top & bottom horizontal sprocket gear teeth along the drum collars
+                    let topTooth = CGRect(x: fx - slotW * 0.4, y: drumRect.minY + 3, width: slotW * 0.8, height: 6)
+                    let botTooth = CGRect(x: fx - slotW * 0.4, y: drumRect.maxY - 9, width: slotW * 0.8, height: 6)
+                    let toothColor = isReady ? Palette.accent : Color.white
+                    drumCtx.fill(Path(topTooth), with: .color(toothColor.opacity(0.75 * Double(cosA))))
+                    drumCtx.fill(Path(botTooth), with: .color(toothColor.opacity(0.75 * Double(cosA))))
                 }
 
-            if isWinding {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Palette.good)
-                    .background(Circle().fill(Color.black))
-                    .transition(.scale.combined(with: .opacity))
+                // Top and bottom flat horizontal flange collars
+                let flangeW: CGFloat = 30
+                let topFlange = CGRect(x: cx - flangeW * 0.5, y: drumRect.minY, width: flangeW, height: 3)
+                let botFlange = CGRect(x: cx - flangeW * 0.5, y: drumRect.maxY - 3, width: flangeW, height: 3)
+                ctx.fill(Path(roundedRect: topFlange, cornerRadius: 1.5), with: .color(Color(red: 0.55, green: 0.60, blue: 0.68)))
+                ctx.fill(Path(roundedRect: botFlange, cornerRadius: 1.5), with: .color(Color(red: 0.55, green: 0.60, blue: 0.68)))
             }
+            .frame(width: 46, height: 96)
         }
-        .scaleEffect(isReady ? 1.06 : 1.0)
+        .scaleEffect(isLatchedHold ? heartbeatScale : (isReady ? 1.04 : 1.0))
         .animation(.spring(response: 0.24, dampingFraction: 0.58), value: isReady)
         .allowsHitTesting(false)
     }
 }
-
-import SwiftUI
 
 struct HoldToLoadButton: View {
     let rollLength: Int
