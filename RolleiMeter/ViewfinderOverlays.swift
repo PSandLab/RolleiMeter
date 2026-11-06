@@ -54,15 +54,17 @@ struct HoldControl: View {
                 Spacer(minLength: 0)
                 shutterOrMorphedActions
             }
-            .padding(.trailing, 7 * k)
-            .padding(.leading, frozen ? 12 * k : 0)
+            .padding(.trailing, 14 * k)
+            .padding(.leading, frozen ? 14 * k : 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .instrumentBay(k: k)
         .animation(.spring(response: 0.34, dampingFraction: 0.78), value: frozen)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isSaved)
     }
 
     private var smoothMeterSelector: some View {
-        let rowHeight: CGFloat = 50 * k
+        let rowHeight: CGFloat = 48 * k
         let totalHeight: CGFloat = rowHeight * CGFloat(max(modes.count, 1))
 
         return VStack(alignment: .leading, spacing: 0) {
@@ -74,28 +76,37 @@ struct HoldControl: View {
                             .fill(Palette.accent.opacity(isScrubbingMeter ? 0.24 : 0.16))
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(Palette.accent.opacity(0.55), lineWidth: 1)
+                                    .strokeBorder(Palette.accent.opacity(0.65), lineWidth: 1)
                             )
                             .matchedGeometryEffect(id: "meterModePill", in: meterSlideNamespace)
                     }
 
-                    HStack(spacing: 8 * k) {
+                    HStack(spacing: 9 * k) {
                         Circle()
                             .fill(selected ? Palette.accent : Palette.faint)
-                            .frame(width: 7 * k, height: 7 * k)
+                            .frame(width: 7.5 * k, height: 7.5 * k)
 
-                        Text(modes[i].title)
-                            .font(AppTypography.next(size: 27 * k, weight: selected ? .semibold : .medium))
-                            .foregroundStyle(selected ? Palette.accent : Palette.dim)
+                        Text(modes[i].title.uppercased())
+                            .font(AppTypography.next(size: 21 * k, weight: selected ? .bold : .semibold))
+                            .tracking(1.2 * k)
+                            .foregroundStyle(selected ? Palette.text : Palette.textDim)
                             .lineLimit(1)
                     }
                     .padding(.horizontal, 14 * k)
                 }
-                .frame(width: 146 * k, height: rowHeight, alignment: .leading)
+                .frame(width: 142 * k, height: rowHeight, alignment: .leading)
                 .contentShape(Rectangle())
             }
         }
-        .padding(4 * k)
+        .padding(5 * k)
+        .background(
+            RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
+                .fill(Palette.panelInset)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24 * k, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                )
+        )
         .scaleEffect(isScrubbingMeter ? 1.03 : 1.0)
         .animation(.snappy(duration: 0.22, extraBounce: 0.0), value: meterIndex)
         .animation(.snappy(duration: 0.18, extraBounce: 0.0), value: isScrubbingMeter)
@@ -105,7 +116,7 @@ struct HoldControl: View {
                     if !isScrubbingMeter {
                         isScrubbingMeter = true
                     }
-                    let y = value.location.y - (4 * k)
+                    let y = value.location.y - (5 * k)
                     let rawIdx = Int((y / max(rowHeight, 1)).rounded(.down))
                     let clamped = min(max(rawIdx, 0), modes.count - 1)
                     if clamped != meterIndex {
@@ -117,7 +128,7 @@ struct HoldControl: View {
                     isScrubbingMeter = false
                 }
         )
-        .frame(height: totalHeight + 8 * k)
+        .frame(height: totalHeight + 10 * k)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Metering mode")
         .accessibilityValue(modes[min(max(meterIndex, 0), modes.count - 1)].title)
@@ -151,19 +162,19 @@ struct HoldControl: View {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(Palette.bad.opacity(0.24))
+                            .fill(Palette.bad.opacity(0.20))
                             .overlay(
                                 Circle()
                                     .strokeBorder(Palette.bad.opacity(0.65), lineWidth: 1.5)
                             )
 
                         Image(systemName: "xmark")
-                            .font(.title.weight(.bold))
+                            .font(.system(size: 34 * k, weight: .bold))
                             .foregroundStyle(Palette.bad)
                     }
-                    .frame(width: 118 * k, height: 118 * k)
+                    .frame(width: 112 * k, height: 112 * k)
                     .contentShape(Circle())
-                    .glassEffect(.regular.tint(Palette.bad.opacity(0.28)).interactive(), in: Circle())
+                    .glassEffect(.regular.tint(Palette.bad.opacity(0.24)).interactive(), in: Circle())
                     .glassEffectID("holdDiscard", in: morphNamespace)
                 }
                 .buttonStyle(PressStyle(scale: 0.94))
@@ -176,20 +187,20 @@ struct HoldControl: View {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(Color.black)
-                            .overlay(Circle().strokeBorder(Palette.good.opacity(0.45), lineWidth: 1.5))
+                            .fill(Palette.panelInset)
+                            .overlay(Circle().strokeBorder(Palette.good.opacity(0.55), lineWidth: 1.5))
 
                         Circle()
                             .fill(Palette.good)
-                            .frame(width: 126 * k, height: 126 * k)
+                            .frame(width: 118 * k, height: 118 * k)
 
                         Image(systemName: "checkmark")
-                            .font(.largeTitle.weight(.black))
-                            .foregroundStyle(Color.black)
+                            .font(.system(size: 44 * k, weight: .black))
+                            .foregroundStyle(Palette.accentInk)
                     }
-                    .frame(width: 162 * k, height: 162 * k)
+                    .frame(width: 152 * k, height: 152 * k)
                     .contentShape(Circle())
-                    .glassEffect(.regular.tint(Palette.good.opacity(0.35)).interactive(), in: Circle())
+                    .glassEffect(.regular.tint(Palette.good.opacity(0.32)).interactive(), in: Circle())
                     .glassEffectID("holdPrimary", in: morphNamespace)
                 }
                 .buttonStyle(PressStyle(scale: 0.95))
@@ -199,19 +210,43 @@ struct HoldControl: View {
         } else {
             Button(action: onHold) {
                 ZStack {
+                    // Machined outer shutter collar
                     Circle()
-                        .fill(Color.black)
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+                        .fill(Palette.panelInset)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.28), Color.white.opacity(0.06)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 2 * k
+                                )
+                        )
+
+                    // Inner chrome ring
                     Circle()
-                        .fill(Color.white)
-                        .frame(width: 126 * k, height: 126 * k)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                        .frame(width: 136 * k, height: 136 * k)
+
+                    // Tactile shutter release plunger
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white, Color(red: 0.86, green: 0.88, blue: 0.91)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 120 * k, height: 120 * k)
                 }
-                .frame(width: 175 * k, height: 175 * k)
+                .frame(width: 162 * k, height: 162 * k)
                 .contentShape(Circle())
                 .glassEffect(.regular.interactive(), in: Circle())
                 .glassEffectID("holdPrimary", in: morphNamespace)
             }
-            .buttonStyle(PressStyle(scale: 0.97))
+            .buttonStyle(PressStyle(scale: 0.96))
             .accessibilityLabel("Hold reading")
         }
     }
@@ -226,19 +261,28 @@ struct EVChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            Circle()
+                .fill(frozen ? Palette.accent : (spot ? Palette.good : Palette.textSub))
+                .frame(width: 6, height: 6)
+
             if frozen {
-                Text("HOLD").foregroundStyle(Palette.accent)
+                Text("HOLD")
+                    .fontWeight(.bold)
+                    .foregroundStyle(Palette.accent)
             }
             if spot {
                 Text("SPOT")
+                    .fontWeight(.bold)
+                    .foregroundStyle(Palette.lensLight)
             }
             Text("EV " + String(format: "%.1f", damp.values[0]))
                 .monospacedDigit()
+                .fontWeight(.semibold)
         }
-        .font(.caption2.weight(.medium))
+        .font(.caption.weight(.semibold))
         .foregroundStyle(Palette.text)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
         .glassEffect(.regular, in: .capsule)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: frozen)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: spot)
@@ -254,10 +298,10 @@ private struct FocusPing: View {
 
     var body: some View {
         Circle()
-            .stroke(tooClose ? Palette.bad : Palette.lensLight, lineWidth: 1)
+            .stroke(tooClose ? Palette.bad : Palette.lensLight, lineWidth: 1.2)
             .frame(width: 26, height: 26)
             .scaleEffect(expanded ? 1.7 : 0.5)
-            .opacity(expanded ? 0 : 0.55)
+            .opacity(expanded ? 0 : 0.65)
             .onAppear {
                 if reduceMotion {
                     expanded = true
@@ -279,15 +323,16 @@ struct FocusMarker: View {
                 FocusPing(tooClose: tooClose).id(pulseID)
             }
             Circle()
-                .stroke(tooClose ? Palette.bad : Palette.lensLight.opacity(0.92),
-                        style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+                .stroke(tooClose ? Palette.bad : Palette.lensLight.opacity(0.95),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 .frame(width: 26, height: 26)
                 .scaleEffect(tooClose ? 0.86 : 1)
             Circle()
                 .fill(tooClose ? Palette.bad : Palette.lensLight)
-                .frame(width: 2.5, height: 2.5)
+                .frame(width: 3, height: 3)
         }
         .frame(width: 30, height: 30)
+        .shadow(color: Color.black.opacity(0.75), radius: 2, x: 0, y: 1)
         .animation(.spring(response: 0.28, dampingFraction: 0.64), value: tooClose)
         .allowsHitTesting(false)
     }

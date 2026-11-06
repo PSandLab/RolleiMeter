@@ -228,6 +228,7 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .background(Palette.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
         .dynamicTypeSize(.large)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
@@ -621,17 +622,35 @@ struct ContentView: View {
                             }
                     )
 
+                // Subtle optical rangefinder framing grid
+                Canvas { ctx, size in
+                    let thirdW = size.width / 3
+                    let thirdH = size.height / 3
+                    var grid = Path()
+                    for i in 1...2 {
+                        let x = thirdW * CGFloat(i)
+                        let y = thirdH * CGFloat(i)
+                        grid.move(to: CGPoint(x: x, y: 12))
+                        grid.addLine(to: CGPoint(x: x, y: size.height - 12))
+                        grid.move(to: CGPoint(x: 12, y: y))
+                        grid.addLine(to: CGPoint(x: size.width - 12, y: y))
+                    }
+                    ctx.stroke(grid, with: .color(.white.opacity(0.07)), lineWidth: 0.75)
+                }
+                .allowsHitTesting(false)
+
                 if spotActive {
                     let full = fullFrame(geo.size)
                     let d = spotRadius * 2 * max(full.width, full.height)
                     ZStack {
-                        Circle().fill(Palette.lensLight.opacity(0.05))
+                        Circle().fill(Palette.lensLight.opacity(0.06))
                         SpotReticle()
                             .stroke(Palette.lensLight.opacity(0.95),
-                                    style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
-                        Circle().fill(Palette.lensLight).frame(width: 2.5, height: 2.5)
+                                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                        Circle().fill(Palette.lensLight).frame(width: 3, height: 3)
                     }
                     .frame(width: d, height: d)
+                    .shadow(color: Color.black.opacity(0.75), radius: 2, x: 0, y: 1)
                     .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
                     .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
                     .animation(.interactiveSpring, value: spotRadius)
@@ -640,11 +659,15 @@ struct ContentView: View {
 
                     if let delta = meter.spotDelta {
                         Text(Fmt.stops(delta))
-                            .font(AppTypography.numeral(size: 13, weight: .medium))
+                            .font(AppTypography.numeral(size: 13, weight: .bold))
                             .foregroundStyle(Palette.lensLight)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.black.opacity(0.68), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75))
                             .contentTransition(.numericText())
                             .position(x: spot.x * geo.size.width,
-                                      y: max(14, spot.y * geo.size.height - d / 2 - 14))
+                                      y: max(18, spot.y * geo.size.height - d / 2 - 16))
                             .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
                             .animation(.smooth(duration: 0.15), value: Fmt.stops(delta))
                             .allowsHitTesting(false)
@@ -701,17 +724,18 @@ struct ContentView: View {
 
                 EVChip(damp: evDamp, frozen: (frozenEV != nil && !isResuming), spot: spotActive)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(10)
+                    .padding(12)
                     .allowsHitTesting(false)
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(.rect(cornerRadius: radius, style: .continuous))
             .overlay {
-                if held {
-                    ContainerRelativeShape()
-                        .strokeBorder(Palette.accent.opacity(0.75), lineWidth: 1.5)
-                        .allowsHitTesting(false)
-                }
+                ContainerRelativeShape()
+                    .strokeBorder(
+                        held ? Palette.accent.opacity(0.85) : Color.white.opacity(0.14),
+                        lineWidth: held ? 2.0 : 1.0
+                    )
+                    .allowsHitTesting(false)
             }
             .containerShape(.rect(cornerRadius: radius, style: .continuous))
             .onAppear { previewSize = geo.size }
@@ -720,13 +744,20 @@ struct ContentView: View {
     }
 
     private func topBar(k: CGFloat) -> some View {
-        HStack(spacing: 8 * k) {
-            Text("ROLLEIMETER")
-                .font(AppTypography.next(size: 23 * k, weight: .semibold))
-                .tracking(1.8 * k)
-                .foregroundStyle(Palette.dim)
-                .padding(.leading, 17 * k)
-                .lineLimit(1)
+        let btnSize: CGFloat = 64 * k
+        return HStack(spacing: 10 * k) {
+            HStack(spacing: 9 * k) {
+                Circle()
+                    .fill(Palette.accent)
+                    .frame(width: 8 * k, height: 8 * k)
+
+                Text("ROLLEIMETER")
+                    .font(AppTypography.next(size: 22 * k, weight: .bold))
+                    .tracking(2.8 * k)
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(1)
+            }
+            .padding(.leading, 14 * k)
 
             Spacer()
 
@@ -735,10 +766,10 @@ struct ContentView: View {
                 showEvPopover.toggle()
             } label: {
                 Text(abs(logStore.totalEvComp) >= 0.05 ? formatEvComp(logStore.totalEvComp) : "±EV")
-                    .font(AppTypography.numeral(size: 19 * k, weight: .bold))
+                    .font(AppTypography.numeral(size: 20 * k, weight: .bold))
                     .foregroundStyle(abs(logStore.totalEvComp) >= 0.05 ? Palette.accent : Palette.text)
-                    .padding(.horizontal, 14 * k)
-                    .frame(height: 62 * k)
+                    .padding(.horizontal, 18 * k)
+                    .frame(height: btnSize)
                     .modifier(GlassCapsule())
             }
             .buttonStyle(.plain)
@@ -753,9 +784,9 @@ struct ContentView: View {
                 showFilmLogbook = true
             } label: {
                 Image(systemName: "scanner")
-                    .font(.title2.weight(.medium))
+                    .font(.system(size: 22 * k, weight: .semibold))
                     .foregroundStyle(Palette.text)
-                    .frame(width: 66 * k, height: 66 * k)
+                    .frame(width: btnSize, height: btnSize)
                     .modifier(GlassCircle())
                     .contentShape(Circle())
             }
@@ -767,9 +798,9 @@ struct ContentView: View {
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape")
-                    .font(.title2.weight(.medium))
+                    .font(.system(size: 22 * k, weight: .semibold))
                     .foregroundStyle(Palette.text)
-                    .frame(width: 70 * k, height: 70 * k)
+                    .frame(width: btnSize, height: btnSize)
                     .modifier(GlassCircle())
                     .contentShape(Circle())
             }

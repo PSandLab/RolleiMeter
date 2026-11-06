@@ -33,11 +33,11 @@ struct FocusStripLines: View, Animatable {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let lineMargin: CGFloat = 2 * k
+            let lineMargin: CGFloat = 6 * k
             let linesWidth = max(w - lineMargin * 2, 1)
             let touchX = lineMargin + CGFloat(min(max(focusPosition, 0.0), 1.0)) * linesWidth
             let rippleX = lineMargin + CGFloat(min(max(rippleCenter, 0.0), 1.0)) * linesWidth
-            let baseRibH = h - 22 * k
+            let baseRibH = h - 26 * k
             let zoomRadius = 42 * k
 
             Canvas { ctx, size in
@@ -45,6 +45,7 @@ struct FocusStripLines: View, Animatable {
                     let fraction = CGFloat(i) / CGFloat(totalTicks)
                     let x = lineMargin + fraction * linesWidth
                     let d = abs(x - touchX)
+                    let isMajor = (i % 6 == 0)
 
                     // 1. Gentle macOS dock zoom magnification following finger
                     var boost: CGFloat = 0
@@ -69,44 +70,46 @@ struct FocusStripLines: View, Animatable {
                         }
                     }
 
-                    let lineH = baseRibH + boost
-                    let topY = (h - 22 * k - lineH) / 2
+                    let majorAdjust: CGFloat = isMajor ? 0 : -5 * k
+                    let lineH = max(8 * k, baseRibH + majorAdjust + boost)
+                    let topY = (h - 24 * k - lineH) / 2
                     let botY = topY + lineH
 
                     var path = Path()
                     path.move(to: CGPoint(x: x, y: topY))
                     path.addLine(to: CGPoint(x: x, y: botY))
 
-                    var r: Double = 1.0
-                    var g: Double = 1.0
-                    var b: Double = 1.0
-                    var alpha: Double = 0.85
-                    var lw = max(1.2, 1.8 * k) + (boost > 0 ? 0.6 * k : 0)
+                    var r: Double = 0.72
+                    var g: Double = 0.76
+                    var b: Double = 0.82
+                    var alpha: Double = isMajor ? 0.52 : 0.32
+                    var lw = max(1.1, (isMajor ? 2.0 : 1.5) * k) + (boost > 0 ? 0.6 * k : 0)
 
                     if manual {
-                        // Manual Mode: Lines inside depth-of-field turn RED when resting
                         if scrollProgress < 0.95 {
                             let inDoF = fraction >= (dofNear - 0.015) && fraction <= (dofFar + 0.015)
                             if inDoF {
                                 let restingFactor = 1.0 - scrollProgress
                                 let distToFocus = abs(fraction - focusPosition)
                                 let centerBonus = max(0.0, 1.0 - distToFocus / max(0.05, (dofFar - dofNear) * 0.5))
-                                r = 1.0
-                                g = 1.0 - restingFactor * (1.0 - 0.23)
-                                b = 1.0 - restingFactor * (1.0 - 0.19)
-                                alpha = min(1.0, 0.85 + restingFactor * 0.15)
+                                r = 0.98
+                                g = 0.27 + (1.0 - restingFactor) * 0.5
+                                b = 0.27 + (1.0 - restingFactor) * 0.5
+                                alpha = min(1.0, 0.82 + restingFactor * 0.18)
                                 if centerBonus > 0.6 {
-                                    lw += 0.4 * k
+                                    lw += 0.5 * k
                                 }
                             }
+                        } else if d < zoomRadius {
+                            alpha = 0.88
+                            r = 0.96; g = 0.97; b = 0.99
                         }
                     } else {
-                        // Auto Mode: Green lines reflecting measurement and DoF in real time
                         if isTooClose {
-                            if fraction <= 0.12 {
-                                r = 1.0
+                            if fraction <= 0.14 {
+                                r = 0.97
                                 g = 0.27
-                                b = 0.23
+                                b = 0.27
                                 alpha = 1.0
                             }
                         } else if hasMeasurement {
@@ -114,12 +117,12 @@ struct FocusStripLines: View, Animatable {
                             if inDoF {
                                 let distToFocus = abs(fraction - focusPosition)
                                 let centerBonus = max(0.0, 1.0 - distToFocus / max(0.06, (dofFar - dofNear) * 0.5))
-                                r = 0.19
-                                g = 0.82 + 0.14 * centerBonus
-                                b = 0.35
+                                r = 0.20
+                                g = 0.83 + 0.14 * centerBonus
+                                b = 0.45
                                 alpha = min(1.0, 0.88 + 0.12 * centerBonus)
                                 if centerBonus > 0.5 {
-                                    lw += 0.4 * k
+                                    lw += 0.5 * k
                                 }
                             }
                         }

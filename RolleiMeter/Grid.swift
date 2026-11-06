@@ -3,10 +3,19 @@ import SwiftUI
 // MARK: - 12 × 6 grid
 
 struct LiquidGrid {
-    static let landscapeSize = CGSize(width: 1460, height: 665)   // 12 x 6 cells
-    static let portraitSize = CGSize(width: 706, height: 1498)    // 6 x 13 cells
     private static let colPitch: CGFloat = 126
     private static let rowPitch: CGFloat = 119
+    private static let gapX: CGFloat = 22
+    private static let gapY: CGFloat = 22
+
+    static let landscapeSize = CGSize(
+        width: 12 * colPitch - gapX,
+        height: 6 * rowPitch - gapY
+    )
+    static let portraitSize = CGSize(
+        width: 6 * colPitch - gapX,
+        height: 13 * rowPitch - gapY
+    )
 
     let k: CGFloat
     let portrait: Bool
@@ -17,13 +26,15 @@ struct LiquidGrid {
         portrait = screen.height > screen.width
         if portrait {
             let usableHeight = max(screen.height - insets.top - insets.bottom, 1)
-            k = max(0.2, min(screen.width / (Self.portraitSize.width + 96),
-                             usableHeight / (Self.portraitSize.height + 24)))
+            k = max(0.2, min(screen.width / (Self.portraitSize.width + 64),
+                             usableHeight / (Self.portraitSize.height + 20)))
             yShift = (insets.top - insets.bottom) / 2
         } else {
             let sideInset = max(insets.leading, insets.trailing)
             let usableWidth = max(screen.width - 2 * sideInset, 1)
-            k = max(0.2, min(screen.height / 761, screen.width / 1646, usableWidth / 1460))
+            k = max(0.2, min(screen.height / (Self.landscapeSize.height + 64),
+                             screen.width / (Self.landscapeSize.width + 120),
+                             usableWidth / Self.landscapeSize.width))
             yShift = 0
         }
     }
@@ -37,8 +48,8 @@ struct LiquidGrid {
         CGRect(
             x: CGFloat(col) * Self.colPitch * k,
             y: CGFloat(row) * Self.rowPitch * k,
-            width: (CGFloat(cols) * Self.colPitch - 50) * k,
-            height: (CGFloat(rows) * Self.rowPitch - 49) * k
+            width: (CGFloat(cols) * Self.colPitch - Self.gapX) * k,
+            height: (CGFloat(rows) * Self.rowPitch - Self.gapY) * k
         )
     }
 }

@@ -136,39 +136,35 @@ struct FocusPanel: View {
                     .animation(.easeInOut(duration: 0.22), value: activePosition)
                     .animation(.easeInOut(duration: 0.22), value: currentDoFRange.near)
 
-                    // DoF boundary markers displayed under the lines on HOLD (shutter pressed)
+                    // DoF boundary bracket & markers displayed under the lines on HOLD or manual rest
                     if (isHeld || (manual && !isScrolling)), let markers = dofBoundaryMarkers {
                         let leftX = lineMargin + CGFloat(markers.near.pos) * usableWidth
                         let rightX = lineMargin + CGFloat(markers.far.pos) * usableWidth
-                        let minGap: CGFloat = 34 * k
+                        let minGap: CGFloat = 38 * k
                         let actualGap = max(rightX - leftX, minGap)
                         let midX = (leftX + rightX) / 2
                         let adjLeftX = min(leftX, midX - actualGap / 2)
                         let adjRightX = max(rightX, midX + actualGap / 2)
-                        let markerY = ribH + 11 * k
+                        let markerY = ribH + 9 * k
 
                         ZStack {
-                            VStack(spacing: 2 * k) {
-                                Rectangle()
-                                    .fill(Palette.accent)
-                                    .frame(width: 1.5 * k, height: 4 * k)
-                                Text(markers.near.label)
-                                    .font(AppTypography.numeral(size: 13 * k, weight: .bold))
-                                    .foregroundStyle(Palette.accent)
-                                    .lineLimit(1)
+                            Path { p in
+                                p.move(to: CGPoint(x: leftX, y: ribH - 1 * k))
+                                p.addLine(to: CGPoint(x: rightX, y: ribH - 1 * k))
                             }
-                            .position(x: adjLeftX, y: markerY)
+                            .stroke(Palette.accent.opacity(0.55), lineWidth: 1.5 * k)
 
-                            VStack(spacing: 2 * k) {
-                                Rectangle()
-                                    .fill(Palette.accent)
-                                    .frame(width: 1.5 * k, height: 4 * k)
-                                Text(markers.far.label)
-                                    .font(AppTypography.numeral(size: 13 * k, weight: .bold))
-                                    .foregroundStyle(Palette.accent)
-                                    .lineLimit(1)
-                            }
-                            .position(x: adjRightX, y: markerY)
+                            Text(markers.near.label)
+                                .font(AppTypography.numeral(size: 18 * k, weight: .bold))
+                                .foregroundStyle(Palette.accent)
+                                .lineLimit(1)
+                                .position(x: adjLeftX, y: markerY)
+
+                            Text(markers.far.label)
+                                .font(AppTypography.numeral(size: 18 * k, weight: .bold))
+                                .foregroundStyle(Palette.accent)
+                                .lineLimit(1)
+                                .position(x: adjRightX, y: markerY)
                         }
                         .transition(.opacity.combined(with: .scale(scale: 0.92)))
                         .animation(.easeInOut(duration: 0.22), value: markers.near.pos)
@@ -229,11 +225,22 @@ struct FocusPanel: View {
                     }
                 )
             }
-            .padding(.top, 56 * k)
-            .padding(.bottom, 10 * k)
-            .padding(.horizontal, 14 * k)
+            .padding(.horizontal, 10 * k)
+            .padding(.vertical, 6 * k)
+            .background(
+                RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
+                    .fill(Palette.panelInset)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 15 * k, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                    )
+            )
+            .padding(.top, 52 * k)
+            .padding(.bottom, 14 * k)
+            .padding(.horizontal, 16 * k)
         }
         .overlay(alignment: .topLeading) {
+            let modeTint = manual ? Palette.bad : Palette.good
             Button {
                 if manual {
                     stopHaptic.impactOccurred(intensity: 0.6)
@@ -243,10 +250,20 @@ struct FocusPanel: View {
                 }
             } label: {
                 Text(manual ? "MF" : "AF")
-                    .font(AppTypography.next(size: 19 * k, weight: .bold))
-                    .foregroundStyle(manual ? Palette.bad : Palette.good)
-                    .padding(.top, 17 * k)
-                    .padding(.leading, 18 * k)
+                    .font(AppTypography.next(size: 17 * k, weight: .bold))
+                    .foregroundStyle(modeTint)
+                    .padding(.horizontal, 9 * k)
+                    .padding(.vertical, 4 * k)
+                    .background(
+                        Capsule()
+                            .fill(modeTint.opacity(0.16))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(modeTint.opacity(0.55), lineWidth: 1)
+                            )
+                    )
+                    .padding(.top, 12 * k)
+                    .padding(.leading, 14 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -256,17 +273,18 @@ struct FocusPanel: View {
             let displayDistance = subject != nil ? Fmt.distance(subject, feet: feet) : (hasLiDAR ? "∞" : "—")
             Button(action: onUnits) {
                 Text(displayDistance)
-                    .font(AppTypography.numeral(size: 19 * k, weight: .semibold))
+                    .font(AppTypography.numeral(size: 22 * k, weight: .bold))
                     .foregroundStyle(manual ? Palette.text : (tooClose ? Palette.bad : Palette.good))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .padding(.top, 17 * k)
-                    .padding(.trailing, 18 * k)
+                    .padding(.top, 14 * k)
+                    .padding(.trailing, 16 * k)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Focus distance, \(displayDistance)")
         }
+        .instrumentBay(k: k)
         .onAppear {
             tickHaptic.prepare()
         }
