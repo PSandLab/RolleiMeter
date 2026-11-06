@@ -38,6 +38,7 @@ final class CameraMeter: NSObject, ObservableObject,
     private var lensNow: Float = 0.5
     private static let phoneFocalMM = 6.8
     private var phoneMinFocusMM = 200.0
+    private var usesLiDAR = false
 
     // Resume sync & warm-up
     private var resumeFrameCount = 0
@@ -59,7 +60,7 @@ final class CameraMeter: NSObject, ObservableObject,
         kernel vec4 dofMask(__sample depthVal, float nearDist, float farDist) {
             float d = depthVal.r;
             if (d > 0.1 && d >= nearDist && d <= farDist) {
-                return vec4(1.0, 0.12, 0.12, 0.45);
+                return vec4(0.45, 0.054, 0.054, 0.45);
             }
             return vec4(0.0, 0.0, 0.0, 0.0);
         }
@@ -178,6 +179,7 @@ final class CameraMeter: NSObject, ObservableObject,
 
     func setConfig(mode: MeterMode, spot: CGPoint, radius: CGFloat, focus: CGPoint, rotation: ViewRotation) {
         lock.lock()
+        let modeChanged = (self.mode != mode)
         self.previewRotation = rotation
         self.mode = mode
         self.spot = spot
@@ -186,9 +188,15 @@ final class CameraMeter: NSObject, ObservableObject,
         self.deltaSmoothed = nil
         self.steadyEV = nil
         self.steadyDelta = nil
+        if modeChanged { self.lastBiasUpdate = 0 }
         if focus != self.focus { self.distSmoothed = nil }
         self.focus = focus
         lock.unlock()
+
+        dofLock.lock()
+        let active = dofActive
+        dofLock.unlock()
+        if active {} // Keeps dofLock ordering clean
     }
 
     func start() {
@@ -229,6 +237,12 @@ final class CameraMeter: NSObject, ObservableObject,
             self.lock.lock()
             self.resumeFrameCount = 0
             self.onResumeReady = onReady
+            self.smoothed = nil
+            self.deltaSmoothed = nil
+            self.steadyEV = nil
+            self.steadyDelta = nil
+            self.distSmoothed = nil
+            self.lastBiasUpdate = 0
             self.lock.unlock()
 
             if !self.session.isRunning {
@@ -355,12 +369,15 @@ final class CameraMeter: NSObject, ObservableObject,
     /// Sets the physical depth slice (in metres) to shade red over the viewfinder.
     /// Operates on the frozen LiDAR screenshot when HOLD is active.
     func setDoFRange(near: Double, far: Double, active: Bool) {
+        lock.lock()
+        let rotation = previewRotation
+        lock.unlock()
+
         dofLock.lock()
         dofNear = near
         dofFar = far
         dofActive = active
         let pb = frozenDepthPixelBuffer ?? latestDepthPixelBuffer
-        let rotation = previewRotation
         dofLock.unlock()
 
         if !active {
@@ -418,8 +435,10 @@ final class CameraMeter: NSObject, ObservableObject,
             configured = buildSession(lidar: true) || buildSession(lidar: false)
             if configured, let dev = device {
                 tune(dev)
+                lock.lock()
                 currentBias = 0
                 lastBiasUpdate = 0
+                lock.unlock()
                 setBias(0)
             }
         }
@@ -504,6 +523,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let minFocus = Double(dev.minimumFocusDistance)
         lock.lock()
         if minFocus > 0 { phoneMinFocusMM = minFocus }
+        usesLiDAR = lidar
         lock.unlock()
         DispatchQueue.main.async {
             self.hasLiDAR = lidar
@@ -537,20 +557,61 @@ final class CameraMeter: NSObject, ObservableObject,
         }
     }
 
-    private func steerExposure(refY: Double) {
+    private func steerExposure(refY: Double, matrixY: Double, mode: MeterMode, dev: AVCaptureDevice) {
         let now = CACurrentMediaTime()
+        lock.lock()
         let isFirstCorrection = lastBiasUpdate == 0
-        guard now - lastBiasUpdate > (isFirstCorrection ? 0 : 0.15) else { return }
-        lastBiasUpdate = now
+        guard now - lastBiasUpdate > (isFirstCorrection ? 0 : 0.15) else {
+            lock.unlock()
+            return
+        }
+        let curBias = currentBias
+        lock.unlock()
 
-        let err = log2(refY / 0.18)
+        let err: Double
+        if mode == .spot {
+            let safeMat = max(matrixY, 0.0005)
+            let safeSpot = max(refY, 0.0005)
+            let ratio = safeSpot / safeMat
+            var targetMatY = 0.18
+            if 0.18 * ratio < 0.025 {
+                // Dark spot: gently lift exposure, but never push the room past 0.42 (+1.22 EV)
+                targetMatY = min(0.025 / ratio, 0.42)
+            } else if 0.18 * ratio > 0.55 {
+                // Bright spot: gently pull down exposure so spot doesn't clip, floored at 0.035
+                targetMatY = max(0.55 / ratio, 0.035)
+            }
+            err = log2(safeMat / targetMatY)
+        } else {
+            err = log2(max(refY, 0.0005) / 0.18)
+        }
+
         guard abs(err) > 0.1 else { return }
-        let gain: Float = isFirstCorrection ? 0.9 : 0.35
-        let maxStep: Float = isFirstCorrection ? 4 : 1.25
+
+        // Anti-windup: if the sensor is already at its physical exposure limit and can't achieve
+        // the current target bias, don't wind currentBias further in that saturated direction.
+        let offset = dev.exposureTargetOffset
+        if (err < 0 && offset < -0.5) || (err > 0 && offset > 0.5) {
+            return
+        }
+
+        let gain: Float = isFirstCorrection ? 0.85 : 0.35
+        let maxStep: Float = isFirstCorrection ? 2.5 : 1.0
         let step = min(max(Float(err) * gain, -maxStep), maxStep)
-        let next = min(max(currentBias - step, -6), 6)
-        guard abs(next - currentBias) > 0.02 else { return }
+
+        let minLimit = max(dev.minExposureTargetBias, -3.5)
+        let maxLimit = min(dev.maxExposureTargetBias, mode == .spot ? 1.5 : 2.5)
+        let next = min(max(curBias - step, minLimit), maxLimit)
+
+        lock.lock()
+        lastBiasUpdate = now
+        guard abs(next - currentBias) > 0.02 else {
+            lock.unlock()
+            return
+        }
         currentBias = next
+        lock.unlock()
+
         setBias(next)
     }
 
@@ -566,6 +627,7 @@ final class CameraMeter: NSObject, ObservableObject,
 
         lock.lock()
         let pt = focus
+        let rotationNow = previewRotation
         lock.unlock()
 
         let r = 0.03
@@ -579,7 +641,6 @@ final class CameraMeter: NSObject, ObservableObject,
         let renderNow = dofActive
         let curNear = dofNear
         let curFar = dofFar
-        let rotationNow = previewRotation
         dofLock.unlock()
 
         if renderNow {
@@ -607,7 +668,7 @@ final class CameraMeter: NSObject, ObservableObject,
                 let y = min(max(Int((sy + v * r) * Double(h)), 0), h - 1)
                 let row = base.advanced(by: y * bpr).assumingMemoryBound(to: Float32.self)
                 let d = Double(row[x])
-                if d.isFinite, d > 0.1, d < 12 { values.append(d) }
+                if d.isFinite, d > 0.1, d < 5.0 { values.append(d) }
             }
         }
 
@@ -684,7 +745,7 @@ final class CameraMeter: NSObject, ObservableObject,
                 let y = min(max(Int((sy + v * r) * Double(h)), 0), h - 1)
                 let row = base.advanced(by: y * bpr).assumingMemoryBound(to: Float32.self)
                 let d = Double(row[x])
-                if d.isFinite, d > 0.1, d < 8.5 { values.append(d) }
+                if d.isFinite, d > 0.1, d < 5.0 { values.append(d) }
             }
         }
         if values.count >= 3 {
@@ -725,6 +786,7 @@ final class CameraMeter: NSObject, ObservableObject,
         let m = mode
         let sp = spot
         let rad = spotRadius
+        let isLiDAR = usesLiDAR
         lock.unlock()
 
         if let readyCallback = readyCallback {
@@ -733,7 +795,7 @@ final class CameraMeter: NSObject, ObservableObject,
             }
         }
 
-        if !hasLiDAR {
+        if !isLiDAR {
             let now = CACurrentMediaTime()
             if now - lastDepthPublish > 0.15 {
                 lastDepthPublish = now
@@ -801,6 +863,7 @@ final class CameraMeter: NSObject, ObservableObject,
         }
 
         let yRaw: Double
+        let yMatrix: Double
         var deltaNow: Double?
 
         switch m {
@@ -817,13 +880,15 @@ final class CameraMeter: NSObject, ObservableObject,
                 count += 1
             }
             yRaw = count > 0 ? sum / count : 0.18
-            deltaNow = log2(max(yRaw, 0.0005) / max(matrixSample(needPoints: false), 0.0005))
+            yMatrix = matrixSample(needPoints: false)
+            deltaNow = log2(max(yRaw, 0.0005) / max(yMatrix, 0.0005))
 
         case .matrix:
-            yRaw = matrixSample(needPoints: false)
+            yMatrix = matrixSample(needPoints: false)
+            yRaw = yMatrix
 
         case .highlight:
-            let yMatrix = matrixSample(needPoints: true)
+            yMatrix = matrixSample(needPoints: true)
             let n = offsets.count
             let p98 = CameraMeter.kthSmallest(scratch, count: n, k: Int(Double(n - 1) * 0.98))
             yRaw = max(yMatrix, p98 / CameraMeter.highlightDivisor)
@@ -831,7 +896,7 @@ final class CameraMeter: NSObject, ObservableObject,
 
         let yRef = max(yRaw, 0.0005)
         let ev = evCam + log2(yRef / 0.18)
-        steerExposure(refY: yRef)
+        steerExposure(refY: yRef, matrixY: yMatrix, mode: m, dev: dev)
 
         lock.lock()
         if let s = smoothed, abs(ev - s) < 1.0 {
