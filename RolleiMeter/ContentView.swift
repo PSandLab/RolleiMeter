@@ -628,33 +628,60 @@ struct ContentView: View {
                     let full = fullFrame(geo.size)
                     let d = spotRadius * 2 * max(full.width, full.height)
                     ZStack {
-                        Circle().fill(Palette.lensLight.opacity(0.06))
+                        Circle().fill(Palette.lensLight.opacity(spotGestureLive ? 0.11 : 0.05))
+
+                        // Sub-animation: Inner dashed degree ring
+                        Circle()
+                            .stroke(
+                                Palette.accent.opacity(spotGestureLive ? 0.75 : 0.40),
+                                style: StrokeStyle(lineWidth: 1.0, dash: [3, 4])
+                            )
+                            .padding(5)
+                            .rotationEffect(.degrees(Double(spot.x + spot.y) * 180.0))
+
                         SpotReticle()
                             .stroke(Palette.lensLight.opacity(0.95),
                                     style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                        Circle().fill(Palette.lensLight).frame(width: 3, height: 3)
+
+                        // 4 Cardinal optical crosshair notches
+                        ForEach(0..<4, id: \.self) { i in
+                            Rectangle()
+                                .fill(Palette.lensLight.opacity(0.9))
+                                .frame(width: 1.4, height: spotGestureLive ? 7 : 5)
+                                .offset(y: -d / 2 + 2)
+                                .rotationEffect(.degrees(Double(i) * 90.0))
+                        }
+
+                        Circle()
+                            .fill(Palette.accent)
+                            .frame(width: 3.5, height: 3.5)
+                            .scaleEffect(spotGestureLive ? 1.35 : 1.0)
                     }
                     .frame(width: d, height: d)
+                    .scaleEffect(spotGestureLive ? 1.08 : 1.0)
                     .shadow(color: Color.black.opacity(0.75), radius: 2, x: 0, y: 1)
                     .position(x: spot.x * geo.size.width, y: spot.y * geo.size.height)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
-                    .animation(.interactiveSpring, value: spotRadius)
-                    .transition(.scale(scale: 1.6).combined(with: .opacity))
+                    .animation(.spring(response: 0.30, dampingFraction: 0.62), value: spot)
+                    .animation(.spring(response: 0.24, dampingFraction: 0.58), value: spotGestureLive)
+                    .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.65), value: spotRadius)
+                    .transition(.scale(scale: 1.65).combined(with: .opacity))
                     .allowsHitTesting(false)
 
                     if let delta = meter.spotDelta {
                         Text(Fmt.stops(delta))
                             .font(AppTypography.numeral(size: 13, weight: .bold))
-                            .foregroundStyle(Palette.lensLight)
+                            .foregroundStyle(abs(delta) < 0.15 ? Palette.lensLight : Palette.accent)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.68), in: Capsule())
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75))
+                            .background(Color.black.opacity(0.72), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.35), lineWidth: 0.75))
                             .contentTransition(.numericText())
+                            .scaleEffect(spotGestureLive ? 1.10 : 1.0)
                             .position(x: spot.x * geo.size.width,
                                       y: max(18, spot.y * geo.size.height - d / 2 - 16))
-                            .animation(.spring(response: 0.4, dampingFraction: 0.72), value: spot)
-                            .animation(.smooth(duration: 0.15), value: Fmt.stops(delta))
+                            .animation(.spring(response: 0.30, dampingFraction: 0.62), value: spot)
+                            .animation(.spring(response: 0.24, dampingFraction: 0.58), value: spotGestureLive)
+                            .animation(.spring(response: 0.24, dampingFraction: 0.65), value: Fmt.stops(delta))
                             .allowsHitTesting(false)
                     }
                 }

@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Film speed (Solid Yellow Card with Dark Cutout matching Concept Render)
+// MARK: - Film speed (Solid Yellow Card + 3D Rubber-Band Cutout Kinematics)
 
 struct FilmPanel: View {
     @Binding var isoIndex: Int
@@ -14,6 +14,9 @@ struct FilmPanel: View {
     let onTap: () -> Void
 
     @State private var dragBase: Int?
+    @State private var dragOffset: CGFloat = 0
+    @State private var isoPulse: Double = 0
+    @State private var cardPressed: Bool = false
 
     private var safeIndex: Int { min(max(isoIndex, 0), ISOScale.values.count - 1) }
     private var currentISO: Int { ISOScale.values[safeIndex] }
@@ -24,7 +27,6 @@ struct FilmPanel: View {
     }
 
     private var cleanStockName: String {
-        // Strip trailing ISO digits from shortFilmBadge if present so we can format "Portra • ISO 400"
         let stripped = filmName.replacingOccurrences(
             of: "\\s+\(boxISO)$",
             with: "",
@@ -42,6 +44,7 @@ struct FilmPanel: View {
 
     var body: some View {
         let hasCam = !cameraBadge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isPullOrPush = !isUnloaded && currentISO != boxISO
 
         ZStack(alignment: .top) {
             Color.clear
@@ -53,52 +56,96 @@ struct FilmPanel: View {
                 color: Palette.accentInk
             )
             .padding(.horizontal, 14 * k)
+            .scaleEffect(1.0 + 0.03 * isoPulse)
 
-            Color.clear
-                .background(Palette.accentInk, in: .rect(cornerRadius: 14 * k, style: .continuous))
-                .overlay {
-                    Text(readout)
-                        .font(AppTypography.next(size: 27 * k, weight: .medium).monospacedDigit())
-                        .foregroundStyle(isUnloaded ? Palette.accent : Palette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                        .padding(.horizontal, 14 * k)
-                        .contentTransition(.numericText())
-                        .animation(.smooth(duration: 0.15), value: readout)
-                }
-                .padding(.horizontal, 16 * k)
-                .padding(.top, 60 * k)
-                .padding(.bottom, 16 * k)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                    .fill(Palette.accentInk)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
+                            .strokeBorder(
+                                Palette.accent.opacity(isPullOrPush ? (0.45 + 0.45 * isoPulse) : (0.35 * isoPulse)),
+                                lineWidth: (1.0 + 1.2 * isoPulse) * k
+                            )
+                    )
+
+                Text(readout)
+                    .font(AppTypography.next(size: 27 * k, weight: .medium).monospacedDigit())
+                    .foregroundStyle(isUnloaded || isPullOrPush ? Palette.accent : Palette.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .padding(.horizontal, 14 * k)
+                    .scaleEffect(1.0 + 0.08 * isoPulse)
+                    .offset(x: dragOffset * 0.35)
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.24, dampingFraction: 0.62), value: readout)
+            }
+            .offset(x: dragOffset)
+            .rotation3DEffect(
+                .degrees(Double(dragOffset / max(1, k)) * 0.45),
+                axis: (x: 0, y: 1, z: 0),
+                perspective: 0.6
+            )
+            .padding(.horizontal, 16 * k)
+            .padding(.top, 60 * k)
+            .padding(.bottom, 16 * k)
         }
+        .scaleEffect(cardPressed ? 0.96 : 1.0)
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.spring(response: 0.16, dampingFraction: 0.5)) { cardPressed = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.52)) { cardPressed = false }
+            }
             onTap()
         }
         .onLongPressGesture(minimumDuration: 0.5) {
             guard let box = ISOScale.values.firstIndex(of: boxISO), isoIndex != box else { return }
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
-            isoIndex = box
+            triggerISOPulse(strength: 1.3)
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) {
+                isoIndex = box
+            }
         }
         .gesture(
-            DragGesture(minimumDistance: 8)
+            DragGesture(minimumDistance: 6)
                 .onChanged { value in
                     if dragBase == nil { dragBase = safeIndex }
-                    let steps = Int((value.translation.width / (26 * k)).rounded())
+                    // Rubber-band displacement of the inner cutout
+                    let rawDrag = value.translation.width
+                    withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.7)) {
+                        dragOffset = max(-14 * k, min(14 * k, rawDrag * 0.18))
+                    }
+
+                    let steps = Int((rawDrag / (26 * k)).rounded())
                     let target = min(max((dragBase ?? safeIndex) + steps, 0), ISOScale.values.count - 1)
                     guard target != isoIndex else { return }
                     isoIndex = target
+                    triggerISOPulse(strength: ISOScale.values[target] == boxISO ? 1.25 : 0.85)
                     if ISOScale.values[target] == boxISO {
                         UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.8)
                     } else {
                         UISelectionFeedbackGenerator().selectionChanged()
                     }
                 }
-                .onEnded { _ in dragBase = nil }
+                .onEnded { _ in
+                    dragBase = nil
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.52)) {
+                        dragOffset = 0
+                    }
+                }
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Film")
         .accessibilityValue(readout)
         .accessibilityHint("Tap to choose film, drag horizontally to rate ISO")
+    }
+
+    private func triggerISOPulse(strength: Double) {
+        isoPulse = strength
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.45)) {
+            isoPulse = 0.0
+        }
     }
 }

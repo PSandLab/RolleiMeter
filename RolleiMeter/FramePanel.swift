@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Frame counter (horizontal tape strip matching concept render)
+// MARK: - Frame counter (3D cylindrical tape + scrolling 35mm sprocket perforations)
 
 struct FramePanel: View {
     let frame: Int
@@ -11,24 +11,38 @@ struct FramePanel: View {
     let k: CGFloat
     let onTap: () -> Void
 
+    @State private var advancePulse: Double = 0.0
+
     var body: some View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FRAME", k: k)
+                .scaleEffect(1.0 + 0.03 * advancePulse)
 
             FrameTapeStrip(
                 position: Double(frame),
+                advancePulse: advancePulse,
                 rollLength: rollLength,
                 isUnloaded: isUnloaded,
                 k: k
             )
         }
-        .mattePanel(k: k)
+        .mattePanel(k: k, glowColor: Palette.text, glowIntensity: advancePulse * 0.7)
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
+            advancePulse = 0.7
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.45)) {
+                advancePulse = 0.0
+            }
             onTap()
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: frame)
+        .onChange(of: frame) { _, _ in
+            advancePulse = 1.0
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.44)) {
+                advancePulse = 0.0
+            }
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.64), value: frame)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isUnloaded ? "No film roll loaded" : "Frame \(frame) of \(rollLength)")
     }
@@ -36,20 +50,45 @@ struct FramePanel: View {
 
 private struct FrameTapeStrip: View, Animatable {
     var position: Double
+    var advancePulse: Double
     let rollLength: Int
     let isUnloaded: Bool
     let k: CGFloat
 
-    var animatableData: Double {
-        get { position }
-        set { position = newValue }
+    var animatableData: AnimatablePair<Double, Double> {
+        get { .init(position, advancePulse) }
+        set {
+            position = newValue.first
+            advancePulse = newValue.second
+        }
     }
 
     var body: some View {
         Canvas { ctx, size in
             let cx = size.width / 2
             let pitch = size.width * 0.24
-            let yPos = 114 * k
+            let yPos = 112 * k
+
+            // Sub-animation: Scrolling 35mm film sprocket holes along bottom edge
+            let sprocketsPerFrame = 6
+            let sprocketPitch = pitch / CGFloat(sprocketsPerFrame)
+            let phase = (position * Double(sprocketsPerFrame)).truncatingRemainder(dividingBy: 1.0)
+            let holeW: CGFloat = 7.5 * k
+            let holeH: CGFloat = 4.5 * k
+            let holeY: CGFloat = size.height - 13 * k
+            let visibleHoles = Int(ceil(size.width / max(1, sprocketPitch))) + 4
+
+            for hIdx in -visibleHoles/2 ... visibleHoles/2 {
+                let hx = cx + (CGFloat(hIdx) - CGFloat(phase)) * sprocketPitch - holeW / 2
+                let distFromCenter = abs((hx + holeW / 2) - cx) / (size.width * 0.5)
+                if distFromCenter > 1.05 { continue }
+                let fade = max(0.0, 1.0 - pow(distFromCenter, 1.6))
+                let holeRect = CGRect(x: hx, y: holeY, width: holeW, height: holeH)
+                ctx.fill(
+                    Path(roundedRect: holeRect, cornerRadius: 1.2 * k),
+                    with: .color(Color.white.opacity((0.14 + 0.14 * advancePulse) * Double(fade)))
+                )
+            }
 
             if isUnloaded {
                 let dash = Text("—")
@@ -59,6 +98,7 @@ private struct FrameTapeStrip: View, Animatable {
                 return
             }
 
+            // Macro + Micro: Cylindrical frame tape with advance pop
             let centerFrame = Int(position.rounded())
             for offset in -3...3 {
                 let candidate = centerFrame + offset
@@ -69,14 +109,23 @@ private struct FrameTapeStrip: View, Animatable {
                 let ad = abs(d)
                 let active = ad < 0.45
                 let isBonus = candidate > rollLength
+
+                let proximity = max(0.0, 1.0 - ad * 1.4)
+                let popScale = CGFloat(1.0 + proximity * (0.10 + 0.18 * advancePulse))
+                let depthScale = CGFloat(max(0.72, 1.0 - 0.10 * ad)) * popScale
+                let barrelDrop = CGFloat(ad * ad) * 2.5 * k
+
                 let color: Color = active
                     ? (isBonus ? Palette.good : Palette.text)
-                    : Palette.textSub.opacity(max(0.28, 0.72 - 0.22 * ad))
+                    : Palette.textSub.opacity(max(0.24, 0.72 - 0.22 * ad))
 
+                var numCtx = ctx
+                numCtx.translateBy(x: x, y: yPos + barrelDrop)
+                numCtx.scaleBy(x: depthScale, y: depthScale)
                 let label = Text("\(candidate)")
                     .font(AppTypography.numeral(size: 38 * k, weight: active ? .semibold : .regular))
                     .foregroundColor(color)
-                ctx.draw(ctx.resolve(label), at: CGPoint(x: x, y: yPos), anchor: .center)
+                numCtx.draw(numCtx.resolve(label), at: .zero, anchor: .center)
             }
         }
         .clipped()
