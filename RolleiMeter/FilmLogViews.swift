@@ -57,7 +57,7 @@ struct FilmLogbookSheet: View {
     }
 }
 
-// MARK: - Screen 1: Film Log (Roll tab)
+// MARK: - Screen 1: Unified Interactive Film Chamber & Canister Rack (Roll tab)
 
 struct RollView: View {
     @ObservedObject var store: FilmLogStore
@@ -65,8 +65,50 @@ struct RollView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var stagedFamily: FilmFamily = BUILTIN_FILM_FAMILIES[0]
+    @State private var stagedVariantID: String = ""
+    @State private var stagedCustomStock: FilmStockPreset? = nil
+    @State private var stagedFrames: Int = 36
+    @State private var stagedExpired: Bool = false
+    @State private var stagedExpiredYears: Int = 10
+    @State private var selectedCategory: String = "Color"
+    @State private var query: String = ""
+    @State private var didInitializeStage: Bool = false
+
+    private let categories = ["Color", "B&W", "Slide", "Custom"]
+
     private var roll: FilmRollState { store.rollState }
     private var gear: ActiveGearProfile { store.activeGear }
+
+    private var stagedVariant: FilmVariant {
+        stagedFamily.variants.first { $0.id == stagedVariantID } ?? stagedFamily.variants[0]
+    }
+
+    private var activeStagedName: String {
+        stagedCustomStock?.name ?? stagedVariant.fullName
+    }
+
+    private var activeStagedISO: Int {
+        stagedCustomStock?.iso ?? stagedVariant.iso
+    }
+
+    private var activeStagedCategory: String {
+        stagedCustomStock?.category ?? stagedFamily.category
+    }
+
+    private var activeStagedBrand: String {
+        stagedCustomStock?.name ?? stagedFamily.brand
+    }
+
+    private var activeStagedFamilyName: String {
+        stagedCustomStock?.name ?? stagedFamily.familyName
+    }
+
+    private var isStagedAlreadyLoaded: Bool {
+        !roll.isUnloaded
+            && roll.filmName.caseInsensitiveCompare(activeStagedName) == .orderedSame
+            && roll.boxIso == activeStagedISO
+    }
 
     private var rollFrames: [LoggedFrame] {
         store.loggedFrames.filter {
@@ -75,7 +117,6 @@ struct RollView: View {
     }
 
     private var logged: Int { rollFrames.count }
-    private var total: Int { roll.maxFrames }
 
     private var activeCameraBrand: String? {
         guard gear.hasCamera, !gear.cameraId.isEmpty else { return nil }
@@ -93,35 +134,227 @@ struct RollView: View {
         ExifAndXmpWriter.generateRollTextSummary(rollFrames)
     }
 
+    private var filteredFamilies: [FilmFamily] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pool = trimmed.isEmpty
+            ? BUILTIN_FILM_FAMILIES
+            : BUILTIN_FILM_FAMILIES.filter { family in
+                fuzzyMatchScore(query: trimmed, target: "\(family.brand) \(family.familyName) \(family.category)") > 0
+                    || family.variants.contains { variant in
+                        fuzzyMatchScore(query: trimmed, target: "\(variant.fullName) \(variant.iso)") > 0
+                    }
+            }
+        guard trimmed.isEmpty, selectedCategory != "Custom" else { return pool }
+        return pool.filter { $0.category == selectedCategory }
+    }
+
     var body: some View {
-        List {
-            Section {
-                NavigationLink(value: FilmRoute.library) {
-                    Label {
-                        filmRowText
-                    } icon: {
-                        FilmCanisterArtwork(
-                            brand: roll.isUnloaded ? "Kodak" : roll.filmName,
-                            familyName: roll.isUnloaded ? "Portra" : roll.filmName,
-                            category: roll.category,
-                            iso: roll.boxIso,
-                            width: 28,
-                            height: 28
-                        )
-                        .frame(width: 28, height: 28)
+        ScrollViewReader { proxy in
+            List {
+                // 1. Interactive 35mm Leader-Pull Loading Chamber
+                Section {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(activeStagedName)
+                                    .font(.headline)
+                                Text("ISO \(activeStagedISO) · \(activeStagedCategory)")
+                                    .font(.caption.weight(.medium).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            if isStagedAlreadyLoaded {
+                                Label("Frame \(roll.currentFrame)/\(roll.maxFrames)", systemImage: "checkmark.circle.fill")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(Palette.good)
+                            }
+                        }
+
+                        // Inline ISO Variant Pills (when the staged family has multiple speeds)
+                        if stagedCustomStock == nil && stagedFamily.variants.count > 1 {
+                            Picker("ISO Speed", selection: $stagedVariantID) {
+                                ForEach(stagedFamily.variants) { option in
+                                    Text(option.label).tag(option.id)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: stagedVariantID) { _, _ in
+                                Haptics.tap()
+                            }
+                        }
+
+                        // The Mechanical Leader-Pull Chamber
+                        InteractiveFilmLeaderChamber(
+                            brand: activeStagedBrand,
+                            familyName: activeStagedFamilyName,
+                            stockFullName: shortFilmBadge(name: activeStagedName, iso: activeStagedISO),
+                            category: activeStagedCategory,
+                            iso: activeStagedISO,
+                            rollLength: stagedFrames,
+                            isAlreadyLoaded: isStagedAlreadyLoaded
+                        ) {
+                            commitLoadedFilm()
+                        }
+
+                        // Inline Roll Length & Expired Controls
+                        HStack(spacing: 10) {
+                            Picker("Exposures", selection: $stagedFrames) {
+                                ForEach([12, 16, 24, 36], id: \.self) { count in
+                                    Text("\(count)").tag(count)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            Button {
+                                Haptics.tap()
+                                withAnimation(.spring(response: 0.26, dampingFraction: 0.7)) {
+                                    stagedExpired.toggle()
+                                }
+                            } label: {
+                                Label(stagedExpired ? "+\( stagedExpiredYears / 10 ) EV" : "Exp", systemImage: stagedExpired ? "clock.badge.exclamationmark.fill" : "clock")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        Capsule()
+                                            .fill(stagedExpired ? Palette.accent.opacity(0.22) : Color.secondary.opacity(0.14))
+                                    )
+                                    .foregroundStyle(stagedExpired ? Palette.accent : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if stagedExpired {
+                            Stepper(
+                                "Expired \(stagedExpiredYears) yr (+\(String(format: "%.1f", (Double(stagedExpiredYears) / 10.0 * 3.0).rounded() / 3.0)) EV)",
+                                value: $stagedExpiredYears,
+                                in: 1...50
+                            )
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .id("chamberTop")
+                } header: {
+                    Text("Film Loading Chamber")
+                }
+
+                // 2. Active Camera & Lens Row
+                Section {
+                    NavigationLink(value: FilmRoute.gear) {
+                        cameraRow
                     }
                 }
 
-                NavigationLink(value: FilmRoute.gear) {
-                    cameraRow
+                // 3. Direct Canister Rack (Tap any canister to stage it in the Chamber)
+                Section {
+                    Picker("Category", selection: $selectedCategory) {
+                        ForEach(categories, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if selectedCategory == "Custom" && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ForEach(store.customFilms) { stock in
+                            Button {
+                                Haptics.press()
+                                withAnimation(.spring(response: 0.30, dampingFraction: 0.68)) {
+                                    stagedCustomStock = stock
+                                    proxy.scrollTo("chamberTop", anchor: .top)
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    FilmCanisterArtwork(
+                                        brand: stock.name,
+                                        familyName: stock.name,
+                                        category: stock.category,
+                                        iso: stock.iso,
+                                        width: 42,
+                                        height: 40
+                                    )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(stock.name)
+                                            .foregroundStyle(.primary)
+                                        Text("ISO \(stock.iso) · \(stock.category)")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if stagedCustomStock?.id == stock.id {
+                                        Text("IN CHAMBER")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(Palette.accent)
+                                    }
+                                }
+                            }
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    store.deleteCustomFilm(stock)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+
+                        NavigationLink(value: FilmRoute.customFilm) {
+                            Label("Add Custom Film", systemImage: "plus")
+                        }
+                    } else {
+                        ForEach(filteredFamilies) { family in
+                            let isStaged = (stagedCustomStock == nil && stagedFamily.id == family.id)
+                            Button {
+                                Haptics.press()
+                                withAnimation(.spring(response: 0.30, dampingFraction: 0.68)) {
+                                    stagedCustomStock = nil
+                                    stagedFamily = family
+                                    stagedVariantID = family.variants[0].id
+                                    proxy.scrollTo("chamberTop", anchor: .top)
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    FilmCanisterArtwork(
+                                        brand: family.brand,
+                                        familyName: family.familyName,
+                                        category: family.category,
+                                        iso: family.variants.first?.iso ?? 400,
+                                        width: 42,
+                                        height: 40
+                                    )
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(family.brand) \(family.familyName)")
+                                            .font(.body.weight(isStaged ? .semibold : .regular))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+
+                                        Text(family.variants.map(\.label).joined(separator: " · "))
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer()
+
+                                    if isStaged {
+                                        Text("IN CHAMBER")
+                                            .font(.caption2.weight(.bold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Palette.accent.opacity(0.18), in: Capsule())
+                                            .foregroundStyle(Palette.accent)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Select Canister for Chamber")
                 }
             }
-
-            Section {
-                LabeledContent("Frames", value: "\(logged) / \(total)")
-                    .monospacedDigit()
-            }
         }
+        .searchable(text: $query, prompt: "Search film canisters")
         .navigationDestination(for: FilmRoute.self) { route in
             switch route {
             case .library:
@@ -138,7 +371,8 @@ struct RollView: View {
                 CameraLensView(store: store, onFinish: popToRoll)
             }
         }
-        .navigationTitle("Film Log")
+        .navigationTitle("Film Chamber")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -167,32 +401,18 @@ struct RollView: View {
         }
         .onAppear {
             LocationCache.shared.refreshIfAuthorized()
-        }
-    }
-
-    @ViewBuilder
-    private var filmRowText: some View {
-        if roll.isUnloaded {
-            Text("Choose Film")
-                .foregroundStyle(.tint)
-        } else {
-            VStack(alignment: .leading) {
-                Text(shortFilmBadge(name: roll.filmName, iso: roll.boxIso))
-                Text("\(roll.maxFrames) exp" + (roll.isExpired ? " · Expired" : ""))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            syncStagedWithLoadedRollIfNeeded()
         }
     }
 
     private var cameraRow: some View {
         HStack(spacing: 12) {
             if let brand = activeCameraBrand {
-                CameraBrandLogo(brand: brand, size: 40)
+                CameraBrandLogo(brand: brand, size: 38)
             } else {
                 Image(systemName: "camera")
                     .foregroundStyle(.secondary)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 38, height: 38)
             }
 
             VStack(alignment: .leading) {
@@ -214,6 +434,59 @@ struct RollView: View {
             return "Fixed lens"
         }
         return formatMountBadge(gear.mount)
+    }
+
+    private func syncStagedWithLoadedRollIfNeeded() {
+        guard !didInitializeStage else { return }
+        didInitializeStage = true
+        stagedFrames = roll.maxFrames
+        stagedExpired = roll.isExpired
+        stagedExpiredYears = roll.yearsExpired
+
+        guard !roll.isUnloaded else {
+            stagedFamily = BUILTIN_FILM_FAMILIES[0]
+            stagedVariantID = BUILTIN_FILM_FAMILIES[0].variants[0].id
+            return
+        }
+
+        for family in BUILTIN_FILM_FAMILIES {
+            if let match = family.variants.first(where: {
+                $0.fullName.caseInsensitiveCompare(roll.filmName) == .orderedSame && $0.iso == roll.boxIso
+            }) {
+                stagedFamily = family
+                stagedVariantID = match.id
+                selectedCategory = family.category
+                return
+            }
+        }
+
+        if let customMatch = store.customFilms.first(where: {
+            $0.name.caseInsensitiveCompare(roll.filmName) == .orderedSame && $0.iso == roll.boxIso
+        }) {
+            stagedCustomStock = customMatch
+            selectedCategory = "Custom"
+        } else {
+            stagedFamily = BUILTIN_FILM_FAMILIES[0]
+            stagedVariantID = BUILTIN_FILM_FAMILIES[0].variants[0].id
+        }
+    }
+
+    private func commitLoadedFilm() {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        var next = store.rollState
+        if !next.isUnloaded { next.rollNumber += 1 }
+        next.filmName = activeStagedName
+        next.boxIso = activeStagedISO
+        next.category = activeStagedCategory
+        next.currentFrame = 1
+        next.maxFrames = stagedFrames
+        next.isExpired = stagedExpired
+        next.expiredYear = stagedExpired ? currentYear - stagedExpiredYears : currentYear
+        next.autoApplyExpiredComp = true
+        withAnimation(.snappy) {
+            store.rollState = next
+        }
+        dismiss()
     }
 
     private func popToRoll() {

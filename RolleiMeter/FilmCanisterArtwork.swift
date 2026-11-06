@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - 35mm Film Canister Vector Artwork (1:1 Port of Android FilmCanisterArtwork)
+// MARK: - 35mm Film Canister Vector Artwork (With Spinning Spindle & Tension Physics)
 
 struct FilmCanisterArtwork: View {
     let brand: String
@@ -9,6 +9,8 @@ struct FilmCanisterArtwork: View {
     var iso: Int = 400
     var showLeader: Bool = true
     var leaderExtension: CGFloat = 1.0
+    var spoolRotation: Double = 0.0
+    var tension: CGFloat = 0.0
     var width: CGFloat = 46
     var height: CGFloat = 42
 
@@ -21,8 +23,9 @@ struct FilmCanisterArtwork: View {
             let w = size.width
             let h = size.height
             let ext = showLeader ? min(max(leaderExtension, 0.0), 1.0) : 0.0
+            let clampedTension = min(max(tension, 0.0), 1.0)
 
-            // 1. Curved 35mm film leader strip + white sprocket holes
+            // 1. Curved 35mm film leader strip + white sprocket holes (when static leader is shown)
             if ext > 0.02 {
                 let leaderColor: Color = {
                     if cat == "b&w" { return Color(red: 0.294, green: 0.333, blue: 0.388) }
@@ -67,22 +70,74 @@ struct FilmCanisterArtwork: View {
                 }
             }
 
-            // 2. Top silver spool spindle + specular highlight
-            let spoolRect = CGRect(x: w * 0.19, y: h * 0.02, width: w * 0.24, height: h * 0.13)
+            // 2. Top silver spool spindle with rotating drive flutes & top gear teeth
+            let cylLeft = w * (showLeader ? 0.05 : 0.14)
+            let cylTop = h * 0.15
+            let cylW = w * (showLeader ? 0.52 : 0.72)
+            let cylH = h * 0.77
+
+            let spoolW = cylW * 0.48
+            let spoolLeft = cylLeft + (cylW - spoolW) * 0.5
+            let spoolTop = h * 0.02
+            let spoolH = h * 0.14
+            let spoolRect = CGRect(x: spoolLeft, y: spoolTop, width: spoolW, height: spoolH)
+            let spoolPath = Path(roundedRect: spoolRect, cornerRadius: w * 0.04)
+
+            ctx.fill(spoolPath, with: .color(Color(red: 0.52, green: 0.58, blue: 0.66)))
+
+            var spoolCtx = ctx
+            spoolCtx.clip(to: spoolPath)
+
+            // Revolving vertical drive flutes & specular highlight driven by spoolRotation
+            let fluteCount = 6
+            let radPhase = spoolRotation * .pi / 180.0
+            for idx in 0..<fluteCount {
+                let angle = radPhase + Double(idx) * (2.0 * .pi / Double(fluteCount))
+                let sinA = sin(angle)
+                let cosA = cos(angle)
+                guard cosA > -0.2 else { continue }
+                let fx = spoolLeft + spoolW * 0.5 + CGFloat(sinA) * (spoolW * 0.46)
+                let fluteW = max(1.0, spoolW * 0.13 * CGFloat(max(0.2, cosA)))
+                let fluteRect = CGRect(x: fx - fluteW * 0.5, y: spoolTop + spoolH * 0.12, width: fluteW, height: spoolH * 0.78)
+                let isHighlight = idx % 2 == 0
+                spoolCtx.fill(
+                    Path(fluteRect),
+                    with: .color(
+                        isHighlight
+                            ? Color.white.opacity(0.45 * Double(max(0, cosA)))
+                            : Color(red: 0.18, green: 0.22, blue: 0.28).opacity(0.65 * Double(max(0, cosA)))
+                    )
+                )
+            }
+
+            // Top spindle collar ring
+            let collarRect = CGRect(x: spoolLeft - w * 0.015, y: spoolTop, width: spoolW + w * 0.03, height: spoolH * 0.26)
             ctx.fill(
-                Path(roundedRect: spoolRect, cornerRadius: w * 0.04),
-                with: .color(Color(red: 0.580, green: 0.639, blue: 0.722))
-            )
-            ctx.fill(
-                Path(CGRect(x: w * 0.25, y: h * 0.04, width: w * 0.06, height: h * 0.09)),
-                with: .color(Color(red: 0.796, green: 0.835, blue: 0.882))
+                Path(roundedRect: collarRect, cornerRadius: w * 0.02),
+                with: .color(Color(red: 0.76, green: 0.81, blue: 0.87))
             )
 
-            // 3. Cylindrical canister body
-            let cylLeft = w * 0.05
-            let cylTop = h * 0.14
-            let cylW = w * 0.52
-            let cylH = h * 0.78
+            // 3. Velvet Light-Trap Lip on the right side of the canister
+            let lipW = w * 0.075
+            let lipRect = CGRect(
+                x: cylLeft + cylW - lipW * 0.35 + clampedTension * w * 0.015,
+                y: cylTop + cylH * 0.08,
+                width: lipW,
+                height: cylH * 0.84
+            )
+            ctx.fill(
+                Path(roundedRect: lipRect, cornerRadius: w * 0.02),
+                with: .color(Color(red: 0.08, green: 0.09, blue: 0.11))
+            )
+            if clampedTension > 0.02 {
+                ctx.stroke(
+                    Path(roundedRect: lipRect, cornerRadius: w * 0.02),
+                    with: .color(Palette.accent.opacity(Double(clampedTension) * 0.65)),
+                    lineWidth: 1.0
+                )
+            }
+
+            // 4. Cylindrical canister body
             let cylRect = CGRect(x: cylLeft, y: cylTop, width: cylW, height: cylH)
             let cylRRect = Path(roundedRect: cylRect, cornerRadius: w * 0.06)
 
@@ -349,7 +404,7 @@ struct FilmCanisterArtwork: View {
                 )
             }
 
-            // 4. Conductive DX foil squares + diagonal metallic sheen
+            // 5. Conductive DX foil squares + dynamic metallic sheen
             let dxW = cylW * 0.19
             let dxH = cylH * 0.13
             let dxTop = cylTop + cylH * 0.76
@@ -362,28 +417,29 @@ struct FilmCanisterArtwork: View {
             ctx.fill(
                 Path(CGRect(x: dxBlockLeft, y: dxTop, width: dxBlockW, height: dxH)),
                 with: .linearGradient(
-                    Gradient(colors: [.clear, .white.opacity(0.42), .clear]),
+                    Gradient(colors: [.clear, .white.opacity(0.42 + Double(clampedTension) * 0.25), .clear]),
                     startPoint: CGPoint(x: dxBlockLeft, y: dxTop + dxH),
                     endPoint: CGPoint(x: dxBlockLeft + dxBlockW, y: dxTop)
                 )
             )
 
-            // 5. Crimped top and bottom end caps
+            // 6. Crimped top and bottom end caps
             let capH = h * 0.08
             let topCapRect = CGRect(x: cylLeft - w * 0.02, y: cylTop, width: cylW + w * 0.04, height: capH)
             let botCapRect = CGRect(x: cylLeft - w * 0.02, y: cylTop + cylH - capH, width: cylW + w * 0.04, height: capH)
             ctx.fill(Path(roundedRect: topCapRect, cornerRadius: w * 0.04), with: .color(Color(red: 0.118, green: 0.161, blue: 0.231)))
             ctx.fill(Path(roundedRect: botCapRect, cornerRadius: w * 0.04), with: .color(Color(red: 0.118, green: 0.161, blue: 0.231)))
 
-            // 6. 3D cylindrical horizontal shading
+            // 7. 3D cylindrical horizontal shading (shifts specular highlight slightly with spoolRotation)
+            let specShift = CGFloat(sin(radPhase) * 0.04)
             ctx.fill(
                 cylRRect,
                 with: .linearGradient(
                     Gradient(stops: [
                         .init(color: .clear, location: 0.0),
-                        .init(color: .white.opacity(0.20), location: 0.22),
-                        .init(color: .clear, location: 0.50),
-                        .init(color: .black.opacity(0.28), location: 0.92),
+                        .init(color: .white.opacity(0.22 + Double(clampedTension) * 0.08), location: min(max(0.22 + specShift, 0.12), 0.35)),
+                        .init(color: .clear, location: 0.52),
+                        .init(color: .black.opacity(0.30), location: 0.92),
                         .init(color: .clear, location: 1.0)
                     ]),
                     startPoint: CGPoint(x: cylLeft, y: 0),
@@ -391,7 +447,7 @@ struct FilmCanisterArtwork: View {
                 )
             )
 
-            // 7. Specular metal rim on each end cap
+            // 8. Specular metal rim on each end cap
             let rimShading = GraphicsContext.Shading.linearGradient(
                 Gradient(colors: [.clear, .white.opacity(0.55), .clear]),
                 startPoint: CGPoint(x: cylLeft, y: 0),
