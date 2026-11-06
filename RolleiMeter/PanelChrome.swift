@@ -3,49 +3,34 @@ import SwiftUI
 struct PanelTitle: View {
     let text: String
     let k: CGFloat
-    var color: Color = Palette.textDim
+    var color: Color = Palette.text
 
     var body: some View {
         Text(text)
-            .font(AppTypography.label(18 * k, weight: .semibold))
-            .tracking(2.8 * k)
+            .font(AppTypography.label(21 * k, weight: .regular))
+            .tracking(1.8 * k)
             .foregroundStyle(color)
             .lineLimit(1)
             .frame(maxWidth: .infinity)
-            .padding(.top, 16 * k)
+            .padding(.top, 18 * k)
             .accessibilityAddTraits(.isHeader)
     }
 }
 
-struct LiquidGlassCardModifier: ViewModifier {
+struct MattePanelModifier: ViewModifier {
     let k: CGFloat
 
     func body(content: Content) -> some View {
-        let radius = 24 * k
+        let radius = 22 * k
         content
-            .glassEffect(.regular, in: .rect(cornerRadius: radius, style: .continuous))
+            .background(Palette.panel, in: .rect(cornerRadius: radius, style: .continuous))
+            .clipShape(.rect(cornerRadius: radius, style: .continuous))
     }
 }
 
 extension View {
-    func liquidGlassCard(k: CGFloat) -> some View {
-        modifier(LiquidGlassCardModifier(k: k))
-    }
-
-    /// Soft horizontal optical vignette so wheel numbers fade smoothly before reaching the edges.
-    func wheelEdgeMask() -> some View {
-        mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.0),
-                    .init(color: .black, location: 0.16),
-                    .init(color: .black, location: 0.84),
-                    .init(color: .clear, location: 1.0)
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        )
+    func mattePanel(k: CGFloat) -> some View {
+        modifier(MattePanelModifier(k: k))
     }
 }
 

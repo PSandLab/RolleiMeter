@@ -28,11 +28,11 @@ struct AperturePanel: View {
 
     private var stopCount: Int { max(1, stops.count) }
     private var nearest: Int { min(max(Int(position.rounded()), 0), stopCount - 1) }
-    private var pitch: CGFloat { 108 * k }
+    private var pitch: CGFloat { 96 * k }
 
     private var lampColor: Color {
         switch lamp {
-        case .off: return Palette.text
+        case .off: return Palette.accent
         case .good: return Palette.good
         case .slow: return Palette.slow
         case .bad: return Palette.bad
@@ -40,7 +40,7 @@ struct AperturePanel: View {
     }
 
     var body: some View {
-        let activeTint = auto ? lampColor : Palette.text
+        let activeTint = auto ? lampColor : Palette.accent
 
         ZStack(alignment: .top) {
             ApertureWheel(
@@ -55,14 +55,15 @@ struct AperturePanel: View {
         .overlay(alignment: .topTrailing) {
             if auto {
                 Text("A")
-                    .font(AppTypography.next(size: 18 * k, weight: .bold))
+                    .font(AppTypography.next(size: 19 * k, weight: .semibold))
                     .foregroundStyle(lampColor)
-                    .padding(.top, 15 * k)
-                    .padding(.trailing, 18 * k)
+                    .padding(.top, 18 * k)
+                    .padding(.trailing, 20 * k)
                     .transition(.opacity)
                     .allowsHitTesting(false)
             }
         }
+        .mattePanel(k: k)
         .contentShape(Rectangle())
         .gesture(dragGesture)
         .onAppear {
@@ -167,34 +168,26 @@ private struct ApertureWheel: View, Animatable {
     var body: some View {
         Canvas { ctx, size in
             let cx = size.width / 2
-            let pitch = 108 * k
-
+            let pitch = size.width * 0.34
             for i in labels.indices {
                 let d = Double(i) - position
-                let ad = abs(d)
-                if ad > 1.45 { continue }
                 let x = cx + CGFloat(d) * pitch
-                let t = max(0.0, 1.0 - ad)
-                let selected = ad < 0.45
-                let color: Color = selected ? tint : Palette.textSub
-                let fontSize: CGFloat = (28.0 + 20.0 * t) * k
-                let opacity = selected ? 1.0 : max(0.0, 0.42 * (1.0 - (ad - 0.3) / 1.15))
+                if x < -pitch || x > size.width + pitch { continue }
+                let ad = abs(d)
+                let selected = ad < 0.5
+                let color: Color = selected ? tint : Palette.textSub.opacity(max(0.35, 0.85 - 0.35 * ad))
 
-                let displayStr = selected ? "f/\(labels[i])" : labels[i]
-                let text = Text(displayStr)
-                    .font(AppTypography.numeral(size: fontSize, weight: selected ? .semibold : .regular))
-                    .foregroundColor(color.opacity(opacity))
-                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: 102 * k), anchor: .center)
+                let text = Text(labels[i])
+                    .font(AppTypography.numeral(size: 38 * k, weight: .medium))
+                    .foregroundColor(color)
+                ctx.draw(ctx.resolve(text), at: CGPoint(x: x, y: 104 * k), anchor: .center)
+
+                let unit = Text(selected && auto ? "auto" : "f/")
+                    .font(AppTypography.next(size: 22 * k, weight: .regular))
+                    .foregroundColor(color)
+                ctx.draw(ctx.resolve(unit), at: CGPoint(x: x, y: 144 * k), anchor: .center)
             }
-
-            let subLabel = auto ? "auto" : "f-stop"
-            let subColor = auto ? tint : Palette.textDim
-            let subText = Text(subLabel)
-                .font(AppTypography.next(size: 18 * k, weight: auto ? .semibold : .medium))
-                .foregroundColor(subColor.opacity(0.85))
-            ctx.draw(ctx.resolve(subText), at: CGPoint(x: cx, y: 150 * k), anchor: .center)
         }
-        .wheelEdgeMask()
         .clipped()
         .allowsHitTesting(false)
     }

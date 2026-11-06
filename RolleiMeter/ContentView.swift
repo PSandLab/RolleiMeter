@@ -4,13 +4,13 @@ import AudioToolbox
 
 private struct GlassCircle: ViewModifier {
     func body(content: Content) -> some View {
-        content.glassEffect(.regular.interactive(), in: Circle())
+        content.background(Palette.panel, in: Circle())
     }
 }
 
 private struct GlassCapsule: ViewModifier {
     func body(content: Content) -> some View {
-        content.glassEffect(.regular.interactive(), in: Capsule())
+        content.background(Palette.panel, in: Capsule())
     }
 }
 
@@ -138,38 +138,7 @@ struct ContentView: View {
                 Palette.background
 
                 ZStack(alignment: .topLeading) {
-                    // 1. Unified Exposure Liquid Glass Deck (Shutter + Aperture)
-                    if p {
-                        ZStack {
-                            Color.clear
-                            Rectangle()
-                                .fill(Color.white.opacity(0.08))
-                                .frame(width: 1)
-                                .padding(.vertical, 22 * k)
-                        }
-                        .liquidGlassCard(k: k)
-                        .allowsHitTesting(false)
-                        .cell(grid, col: 0, row: 7, cols: 6, rows: 2)
-                    }
-
-                    // 2. Unified Film Roll Liquid Glass Card (Frame + Film)
-                    ZStack {
-                        Color.clear
-                        Rectangle()
-                            .fill(Color.white.opacity(0.08))
-                            .frame(height: 1)
-                            .padding(.horizontal, 22 * k)
-                    }
-                    .liquidGlassCard(k: k)
-                    .allowsHitTesting(false)
-                    .cell(grid, col: 0, row: p ? 9 : 2, cols: 3, rows: 4)
-
                     ShutterPanel(damp: evDamp, iso: iso, comp: comp, aperture: resolvedAperture, speeds: activeShutterSpeeds, k: k)
-                        .background {
-                            if !p {
-                                Color.clear.liquidGlassCard(k: k)
-                            }
-                        }
                         .cell(grid, col: 0, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FilmPanel(
@@ -213,11 +182,6 @@ struct ContentView: View {
                         onTap: toggleAutoAperture,
                         onHome: returnHomeAperture
                     )
-                    .background {
-                        if !p {
-                            Color.clear.liquidGlassCard(k: k)
-                        }
-                    }
                     .cell(grid, col: p ? 3 : 9, row: p ? 7 : 0, cols: 3, rows: 2)
 
                     FocusPanel(
@@ -751,12 +715,11 @@ struct ContentView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .clipShape(.rect(cornerRadius: radius, style: .continuous))
             .overlay {
-                ContainerRelativeShape()
-                    .strokeBorder(
-                        held ? Color.white.opacity(0.32) : Color.white.opacity(0.12),
-                        lineWidth: 1.0
-                    )
-                    .allowsHitTesting(false)
+                if held {
+                    ContainerRelativeShape()
+                        .strokeBorder(Palette.accent.opacity(0.75), lineWidth: 1.5)
+                        .allowsHitTesting(false)
+                }
             }
             .containerShape(.rect(cornerRadius: radius, style: .continuous))
             .onAppear { previewSize = geo.size }

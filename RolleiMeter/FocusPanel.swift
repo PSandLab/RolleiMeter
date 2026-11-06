@@ -263,7 +263,7 @@ struct FocusPanel: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Focus distance, \(displayDistance)")
         }
-        .liquidGlassCard(k: k)
+        .mattePanel(k: k)
         .onAppear {
             tickHaptic.prepare()
         }

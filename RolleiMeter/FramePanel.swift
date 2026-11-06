@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Frame counter
+// MARK: - Frame counter (horizontal tape strip matching concept render)
 
 struct FramePanel: View {
     let frame: Int
@@ -11,52 +11,75 @@ struct FramePanel: View {
     let k: CGFloat
     let onTap: () -> Void
 
-    private var isBonus: Bool { !isUnloaded && frame > rollLength }
-
     var body: some View {
         ZStack(alignment: .top) {
             PanelTitle(text: "FRAME", k: k)
 
-            if loggedCount > 0 {
-                HStack {
-                    Spacer()
-                    Text("\(loggedCount)")
-                        .font(AppTypography.numeral(size: 17 * k, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
-                        .padding(.top, 15 * k)
-                        .padding(.trailing, 18 * k)
-                }
-            }
-
-            if isUnloaded {
-                HStack(alignment: .firstTextBaseline, spacing: 6 * k) {
-                    Text("—")
-                        .font(AppTypography.numeral(size: 52 * k, weight: .semibold))
-                        .foregroundStyle(Palette.dim)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 28 * k)
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 6 * k) {
-                    Text(isBonus ? "+\(frame)" : "\(frame)")
-                        .font(AppTypography.numeral(size: 56 * k, weight: .semibold))
-                        .foregroundStyle(isBonus ? Palette.good : Palette.text)
-                        .contentTransition(.numericText())
-                    Text("/ \(rollLength)")
-                        .font(AppTypography.numeral(size: 28 * k, weight: .regular))
-                        .foregroundStyle(Palette.textDim)
-                }
-                .animation(.smooth(duration: 0.2), value: frame)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 28 * k)
-            }
+            FrameTapeStrip(
+                position: Double(frame),
+                rollLength: rollLength,
+                isUnloaded: isUnloaded,
+                k: k
+            )
         }
+        .mattePanel(k: k)
         .contentShape(Rectangle())
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
             onTap()
         }
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: frame)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isUnloaded ? "No film roll loaded" : "Frame \(frame) of \(rollLength)")
+    }
+}
+
+private struct FrameTapeStrip: View, Animatable {
+    var position: Double
+    let rollLength: Int
+    let isUnloaded: Bool
+    let k: CGFloat
+
+    var animatableData: Double {
+        get { position }
+        set { position = newValue }
+    }
+
+    var body: some View {
+        Canvas { ctx, size in
+            let cx = size.width / 2
+            let pitch = size.width * 0.24
+            let yPos = 114 * k
+
+            if isUnloaded {
+                let dash = Text("—")
+                    .font(AppTypography.numeral(size: 38 * k, weight: .medium))
+                    .foregroundColor(Palette.dim)
+                ctx.draw(ctx.resolve(dash), at: CGPoint(x: cx, y: yPos), anchor: .center)
+                return
+            }
+
+            let centerFrame = Int(position.rounded())
+            for offset in -3...3 {
+                let candidate = centerFrame + offset
+                if candidate < 1 { continue }
+                let d = Double(candidate) - position
+                let x = cx + CGFloat(d) * pitch
+                if x < -pitch || x > size.width + pitch { continue }
+                let ad = abs(d)
+                let active = ad < 0.45
+                let isBonus = candidate > rollLength
+                let color: Color = active
+                    ? (isBonus ? Palette.good : Palette.text)
+                    : Palette.textSub.opacity(max(0.28, 0.72 - 0.22 * ad))
+
+                let label = Text("\(candidate)")
+                    .font(AppTypography.numeral(size: 38 * k, weight: active ? .semibold : .regular))
+                    .foregroundColor(color)
+                ctx.draw(ctx.resolve(label), at: CGPoint(x: x, y: yPos), anchor: .center)
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
     }
 }
