@@ -178,6 +178,58 @@ final class FilmLogStore: ObservableObject {
         manualEvComp + expiredEvComp
     }
 
+    // MARK: - Authoritative Film Roll Loading
+
+    @discardableResult
+    func loadFilm(
+        filmName: String,
+        boxISO: Int,
+        category: String,
+        maxFrames: Int,
+        isExpired: Bool,
+        yearsExpired: Int?
+    ) -> Bool {
+        let cleanName = filmName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+
+        guard !cleanName.isEmpty else {
+            return false
+        }
+
+        guard boxISO > 0 else {
+            return false
+        }
+
+        guard ROLL_LENGTH_OPTIONS.contains(maxFrames) else {
+            return false
+        }
+
+        let currentYear = Calendar.current.component(.year, from: Date())
+
+        var next = rollState
+
+        if next.isUnloaded {
+            next.rollNumber = max(1, next.rollNumber)
+        } else {
+            next.rollNumber += 1
+        }
+
+        next.filmName = cleanName
+        next.boxIso = boxISO
+        next.category = category
+        next.currentFrame = 1
+        next.maxFrames = maxFrames
+        next.isExpired = isExpired
+        next.expiredYear = isExpired
+            ? currentYear - max(1, yearsExpired ?? 1)
+            : currentYear
+        next.autoApplyExpiredComp = true
+
+        rollState = next
+        return true
+    }
+
     // MARK: - Persistence Helpers
 
     private func saveRollState(_ state: FilmRollState) {

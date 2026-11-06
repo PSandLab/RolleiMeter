@@ -197,7 +197,7 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
 
     // ── FOMAPAN / KENTMERE / ROLLEI / LOMO ──
     FilmFamily(
-        brand: "Foma \u{00B7} Kentmere",
+        brand: "Foma",
         familyName: "Fomapan",
         category: "B&W",
         variants: [
@@ -207,7 +207,7 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
         ]
     ),
     FilmFamily(
-        brand: "Foma \u{00B7} Kentmere",
+        brand: "Kentmere",
         familyName: "Kentmere Pan",
         category: "B&W",
         variants: [
@@ -216,7 +216,7 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
         ]
     ),
     FilmFamily(
-        brand: "Foma \u{00B7} Kentmere",
+        brand: "Rollei",
         familyName: "Rollei B&W",
         category: "B&W",
         variants: [
@@ -226,7 +226,7 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
         ]
     ),
     FilmFamily(
-        brand: "Foma \u{00B7} Kentmere",
+        brand: "Lomography",
         familyName: "Lomography Color",
         category: "Color",
         variants: [
@@ -236,7 +236,7 @@ let BUILTIN_FILM_FAMILIES: [FilmFamily] = [
         ]
     ),
     FilmFamily(
-        brand: "Foma \u{00B7} Kentmere",
+        brand: "Harman",
         familyName: "Harman Phoenix",
         category: "Color",
         variants: [
@@ -269,9 +269,19 @@ struct FilmRollState: Codable, Equatable {
     var expiredYear: Int = 2016
     var autoApplyExpiredComp: Bool = true
 
-    var isUnloaded: Bool { filmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var isBonusFrames: Bool { !isUnloaded && currentFrame > maxFrames }
-    var isRollComplete: Bool { !isUnloaded && currentFrame >= maxFrames }
+    var isUnloaded: Bool {
+        filmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isBonusFrames: Bool {
+        !isUnloaded && currentFrame > maxFrames
+    }
+
+    // recordMoment() stores the current frame and then increments currentFrame.
+    // Therefore the roll completes only after the final standard frame is recorded.
+    var isRollComplete: Bool {
+        !isUnloaded && currentFrame > maxFrames
+    }
     var isSlideFilm: Bool { !isUnloaded && category.caseInsensitiveCompare("Slide") == .orderedSame }
 
     var yearsExpired: Int {

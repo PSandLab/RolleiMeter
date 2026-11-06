@@ -148,72 +148,128 @@ struct InteractiveFilmLeaderChamber: View {
                         .transition(.opacity)
                     }
 
-                    // 7. Interactive Drag Gesture Surface (User stays in 100% control until finger release)
-                    if ceremonyPhase == 0 {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        if !isDragging {
-                                            isDragging = true
-                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.7)
-                                        }
+                    // 7. Leader Pickup Hit Area.
+// Only the physical leader origin starts the drag.
+// The rest of the chamber remains available to vertical scrolling.
+if ceremonyPhase == 0 {
+    Color.clear
+        .frame(width: 58, height: 58)
+        .contentShape(Circle())
+        .position(x: startX, y: h * 0.5)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { value in
+                    if !isDragging {
+                        let horizontal = value.translation.width
+                        let vertical = value.translation.height
 
-                                        let rawProgress = (value.location.x - startX) / travel
-                                        let clamped = min(max(rawProgress, 0.0), 1.0)
-                                        let maxDeflection = h * 0.24
-                                        let yDeflection = max(-maxDeflection, min(maxDeflection, value.location.y - h * 0.5))
+                        // Ignore taps and vertical gestures.
+                        // This lets the surrounding ScrollView keep scrolling.
+                        guard horizontal > 4,
+                              abs(horizontal) > abs(vertical) * 1.15 else {
+                            return
+                        }
 
-                                        // When inside the latch zone, gently magnetize the tip toward the spool slot
-                                        if clamped >= latchThreshold {
-                                            let magnet = latchThreshold + (clamped - latchThreshold) * 0.45
-                                            pullProgress = min(max(magnet, latchThreshold), 0.94)
-                                            dragY = yDeflection * 0.22
-                                            if !isLatchedHold {
-                                                enterLatchedHoldHeartbeat()
-                                            }
-                                        } else {
-                                            if isLatchedHold {
-                                                exitLatchedHoldHeartbeat()
-                                            }
-                                            pullProgress = clamped
-                                            dragY = yDeflection * (1.0 - clamped * 0.45)
-
-                                            // Sprocket ratchet clicks every 9pt of film pulled
-                                            let distPt = Int(clamped * travel)
-                                            let sprocketStep = distPt / 9
-                                            if sprocketStep != lastSprocketTick {
-                                                lastSprocketTick = sprocketStep
-                                                UISelectionFeedbackGenerator().selectionChanged()
-                                            }
-
-                                            // Spindle revolution thunk every 48pt
-                                            let spindleStep = distPt / 48
-                                            if spindleStep != lastSpindleThunk {
-                                                lastSpindleThunk = spindleStep
-                                                UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.5)
-                                            }
-                                        }
-                                    }
-                                    .onEnded { _ in
-                                        isDragging = false
-                                        if pullProgress >= latchThreshold {
-                                            exitLatchedHoldHeartbeat()
-                                            runGrandLoadingCeremony()
-                                        } else {
-                                            exitLatchedHoldHeartbeat()
-                                            UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.55)
-                                            withAnimation(.spring(response: 0.38, dampingFraction: 0.52)) {
-                                                pullProgress = 0.0
-                                                dragY = 0.0
-                                            }
-                                            lastSprocketTick = 0
-                                            lastSpindleThunk = 0
-                                        }
-                                    }
-                            )
+                        isDragging = true
+                        UIImpactFeedbackGenerator(style: .medium)
+                            .impactOccurred(intensity: 0.7)
                     }
+
+                    guard isDragging else { return }
+
+                    // Progress is based on movement from the leader's
+                    // original pickup location, never the finger's absolute X.
+                    let rawProgress = value.translation.width / travel
+                    let clamped = min(max(rawProgress, 0.0), 1.0)
+
+                    let maxDeflection = h * 0.24
+                    let yDeflection = max(
+                        -maxDeflection,
+                        min(maxDeflection, value.translation.height)
+                    )
+
+                    // Preserve the original magnetic latch behavior.
+                    if clamped >= latchThreshold {
+                        let magnet =
+                            latchThreshold
+                            + (clamped - latchThreshold) * 0.45
+
+                        pullProgress = min(
+                            max(magnet, latchThreshold),
+                            0.94
+                        )
+
+                        dragY = yDeflection * 0.22
+
+                        if !isLatchedHold {
+                            enterLatchedHoldHeartbeat()
+                        }
+                    } else {
+                        if isLatchedHold {
+                            exitLatchedHoldHeartbeat()
+                        }
+
+                        pullProgress = clamped
+                        dragY = yDeflection * (1.0 - clamped * 0.45)
+
+                        // Keep the original sprocket ratchet cadence.
+                        let distPt = Int(clamped * travel)
+                        let sprocketStep = distPt / 9
+
+                        if sprocketStep != lastSprocketTick {
+                            lastSprocketTick = sprocketStep
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
+
+                        // Keep the original spindle revolution cadence.
+                        let spindleStep = distPt / 48
+
+                        if spindleStep != lastSpindleThunk {
+                            lastSpindleThunk = spindleStep
+                            UIImpactFeedbackGenerator(style: .light)
+                                .impactOccurred(intensity: 0.5)
+                        }
+                    }
+                }
+                .onEnded { _ in
+                    guard isDragging else { return }
+
+                    isDragging = false
+
+                    if pullProgress >= latchThreshold {
+                        exitLatchedHoldHeartbeat()
+                        runGrandLoadingCeremony()
+                    } else {
+                        exitLatchedHoldHeartbeat()
+
+                        UIImpactFeedbackGenerator(style: .light)
+                            .impactOccurred(intensity: 0.55)
+
+                        withAnimation(
+                            .spring(response: 0.38, dampingFraction: 0.52)
+                        ) {
+                            pullProgress = 0.0
+                            dragY = 0.0
+                        }
+
+                        lastSprocketTick = 0
+                        lastSpindleThunk = 0
+                    }
+                }
+        )
+        .accessibilityElement()
+        .accessibilityLabel("Film leader")
+        .accessibilityHint(
+            "Drag right to load the selected film. Drag left to rewind."
+        )
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default) {
+            guard ceremonyPhase == 0 else { return }
+            guard !isDragging else { return }
+            runGrandLoadingCeremony()
+        }
+}
+
                 }
                 .clipShape(.rect(cornerRadius: 20, style: .continuous))
             }
@@ -241,9 +297,10 @@ struct InteractiveFilmLeaderChamber: View {
                         .foregroundStyle(.secondary)
                         .transition(.opacity)
                 } else {
-                    Text("\(stockFullName) · \(rollLength) EXP")
+                    Text(String(format: "ROLL #%02d", rollNumber))
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 }
             }
             .padding(.horizontal, 4)
