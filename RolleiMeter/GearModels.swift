@@ -582,7 +582,10 @@ func resolveLensVariants(_ lens: LensGearSpec) -> [LensVariantItem] {
     }
 
     if mount == "Hasselblad V" && m.contains("C / CF") {
-        let base = m.replacingOccurrences(of: " C / CF", with: "").replacingOccurrences(of: " C / CF / CFE", with: "").trimmingCharacters(in: .whitespaces)
+        let base = m
+            .replacingOccurrences(of: " C / CF / CFE", with: "")
+            .replacingOccurrences(of: " C / CF", with: "")
+            .trimmingCharacters(in: .whitespaces)
         return [
             LensVariantItem(badge: "CF (Prontor)", subtitle: "Ergonomic rubber grip · EV interlock optional", spec: LensVariantSpec(lens, idSuffix: "cf", model: "\(base) CF")),
             LensVariantItem(badge: "C (Synchro-Compur)", subtitle: "Classic chrome/black all-metal barrel", spec: LensVariantSpec(lens, idSuffix: "c", model: "\(base) C")),
@@ -618,7 +621,8 @@ private func LensVariantSpec(
 func matchesFocalCategory(model: String, category: FocalLengthCategory) -> Bool {
     if category == .all { return true }
     let lower = model.lowercased()
-    let isZoom = lower.range(of: #"\b\d{2,3}\s*-\s*\d{2,3}\s*mm"#, options: .regularExpression) != nil
+    let zoomPattern = #"\b\d{2,3}\s*[-–—]\s*\d{2,3}\s*mm"#
+    let isZoom = lower.range(of: zoomPattern, options: .regularExpression) != nil
     if category == .zoom { return isZoom }
     if isZoom { return false }
 
@@ -631,8 +635,8 @@ func matchesFocalCategory(model: String, category: FocalLengthCategory) -> Bool 
 
     switch category {
     case .all, .zoom: return true
-    case .ultraWide: return mm <= 25.0
-    case .w28: return mm >= 26.0 && mm <= 31.0
+    case .ultraWide: return mm <= 24.0
+    case .w28: return mm >= 25.0 && mm <= 31.0
     case .w35: return mm >= 32.0 && mm <= 43.0
     case .std50: return mm >= 44.0 && mm <= 65.0
     case .port85: return mm >= 70.0 && mm <= 100.0
@@ -660,8 +664,8 @@ func matchesAdaptedMount(lensMount: String, filter: String) -> Bool {
     case "Canon FD": return lensMount.localizedCaseInsensitiveContains("Canon FD")
     case "Olympus OM": return lensMount.localizedCaseInsensitiveContains("Olympus OM")
     case "Pentax K": return lensMount.localizedCaseInsensitiveContains("Pentax K")
-    case "Contax (C/Y)": return lensMount.localizedCaseInsensitiveContains("Contax/Yashica")
-    default: return true
+    case "Contax (C/Y)", "Contax C/Y": return lensMount.localizedCaseInsensitiveContains("Contax/Yashica") || lensMount.localizedCaseInsensitiveContains("C/Y")
+    default: return false
     }
 }
 
@@ -683,6 +687,25 @@ struct GearCatalogData: Codable {
 enum GearCatalogCache {
     private static var cachedCatalog: GearCatalogData?
     private static var cachedPrewarmedLenses: [PrewarmedLensEntry]?
+
+    static var defaultCamera: CameraGearSpec {
+        if let first = loadBundledCatalog().cameras.first {
+            return first
+        }
+        return CameraGearSpec(
+            id: "rollei_35_s",
+            brand: "Rollei",
+            model: "Rollei 35 S / 35 SE",
+            isFixed: true,
+            mount: "Fixed",
+            minShutter: 0.5,
+            maxShutter: 0.002,
+            fixedLensName: "Rollei-HFT Sonnar 40mm f/2.8",
+            fixedMinAperture: 2.8,
+            fixedMaxAperture: 22.0,
+            fixedApertureStops: [2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0]
+        )
+    }
 
     static func loadBundledCatalog() -> GearCatalogData {
         if let cached = cachedCatalog {
@@ -709,6 +732,40 @@ enum GearCatalogCache {
                     )
                 ],
                 lenses: []
+            )
+            cachedCatalog = fallback
+            return fallback
+        }
+        guard !decoded.cameras.isEmpty else {
+            let fallback = GearCatalogData(
+                mounts: [
+                    "Fixed",
+                    "Leica M",
+                    "Nikon F",
+                    "Canon FD",
+                    "Pentax K",
+                    "Olympus OM",
+                    "Minolta SR/MD",
+                    "Hasselblad V"
+                ],
+                cameras: [
+                    CameraGearSpec(
+                        id: "rollei_35_s",
+                        brand: "Rollei",
+                        model: "Rollei 35 S / 35 SE",
+                        isFixed: true,
+                        mount: "Fixed",
+                        minShutter: 0.5,
+                        maxShutter: 0.002,
+                        fixedLensName: "Rollei-HFT Sonnar 40mm f/2.8",
+                        fixedMinAperture: 2.8,
+                        fixedMaxAperture: 22.0,
+                        fixedApertureStops: [
+                            2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0
+                        ]
+                    )
+                ],
+                lenses: decoded.lenses
             )
             cachedCatalog = fallback
             return fallback
@@ -778,18 +835,26 @@ enum GearCatalogCache {
         let base = loadBundledCatalog().cameras
         var seen = Set<String>()
         var result: [CameraGearSpec] = []
-        for cam in (customCameras + base) {
-            let key = "\(cam.brand) \(cam.model)".trimmingCharacters(in: .whitespaces).lowercased()
+        for camera in (customCameras + base) {
+            let key = [
+                camera.brand,
+                camera.model,
+                camera.mount
+            ]
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            .joined(separator: "|")
+
             if seen.insert(key).inserted {
-                result.append(cam)
+                result.append(camera)
             }
         }
         return result
     }
 
     static func allLensEntries(customLenses: [LensGearSpec]) -> [PrewarmedLensEntry] {
-        let base = prewarmedBundledLenses()
-        guard !customLenses.isEmpty else { return base }
+        let bundled = prewarmedBundledLenses()
         let customEntries = customLenses.map { lens in
             PrewarmedLensEntry(
                 lens: lens,
@@ -797,10 +862,34 @@ enum GearCatalogCache {
                 variants: resolveLensVariants(lens)
             )
         }
-        return (customEntries + base).sorted { a, b in
-            if a.focalLengthMm != b.focalLengthMm { return a.focalLengthMm < b.focalLengthMm }
-            if a.lens.minAperture != b.lens.minAperture { return a.lens.minAperture < b.lens.minAperture }
-            return a.lens.model < b.lens.model
+
+        var seen = Set<String>()
+        var deduplicated: [PrewarmedLensEntry] = []
+
+        for entry in (customEntries + bundled) {
+            let key = [
+                entry.lens.brand,
+                entry.lens.model,
+                entry.lens.mount
+            ]
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            .joined(separator: "|")
+
+            if seen.insert(key).inserted {
+                deduplicated.append(entry)
+            }
+        }
+
+        return deduplicated.sorted { lhs, rhs in
+            if lhs.focalLengthMm != rhs.focalLengthMm {
+                return lhs.focalLengthMm < rhs.focalLengthMm
+            }
+            if lhs.lens.minAperture != rhs.lens.minAperture {
+                return lhs.lens.minAperture < rhs.lens.minAperture
+            }
+            return lhs.lens.model < rhs.lens.model
         }
     }
 }

@@ -551,10 +551,16 @@ struct RollView: View {
                             Text(gear.hasCamera ? gear.cameraName : "Choose Camera")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Palette.text)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.86)
+                                .fixedSize(horizontal: false, vertical: true)
                             if let subtitle = cameraSubtitle {
                                 Text(subtitle)
                                     .font(.caption)
                                     .foregroundStyle(Palette.textSub)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.82)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
 

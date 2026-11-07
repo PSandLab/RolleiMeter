@@ -8,6 +8,7 @@ struct CustomGearForm: View {
     var onFinish: () -> Void = {}
     var presetKinds: [CustomGearKind] = CustomGearKind.allCases
     var presetBrand: String = ""
+    var presetCamera: CameraGearSpec? = nil
 
     @State private var kind: CustomGearKind
     @State private var brand = ""
@@ -27,12 +28,14 @@ struct CustomGearForm: View {
         store: FilmLogStore,
         onFinish: @escaping () -> Void = {},
         presetKinds: [CustomGearKind] = CustomGearKind.allCases,
-        presetBrand: String = ""
+        presetBrand: String = "",
+        presetCamera: CameraGearSpec? = nil
     ) {
         self.store = store
         self.onFinish = onFinish
         self.presetKinds = presetKinds
         self.presetBrand = presetBrand
+        self.presetCamera = presetCamera
 
         let initial = presetKinds.first ?? .fixedLens
         _kind = State(initialValue: initial)
@@ -138,7 +141,12 @@ struct CustomGearForm: View {
                 } label: {
                     HStack {
                         Spacer()
-                        Label("Mount & Save Custom Gear", systemImage: "checkmark.circle.fill")
+                        Label(
+                            kind == .lens
+                                ? "Create & Mount Custom Lens"
+                                : "Create & Mount Custom Camera",
+                            systemImage: "checkmark.circle.fill"
+                        )
                             .font(.headline)
                         Spacer()
                     }
@@ -210,7 +218,33 @@ struct CustomGearForm: View {
     }
 
     private var canAdd: Bool {
-        !trimmedModel.isEmpty
+        guard !trimmedModel.isEmpty else {
+            return false
+        }
+
+        if kind != .fixedLens,
+           mountSelection == Self.otherMountTag,
+           customMount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+
+        if kind == .lens,
+           presetCamera == nil,
+           !store.activeGear.hasCamera {
+            return false
+        }
+
+        if kind != .body,
+           widestApertureIndex >= smallestApertureIndex {
+            return false
+        }
+
+        if kind != .lens,
+           fastestShutterIndex <= slowestShutterIndex {
+            return false
+        }
+
+        return true
     }
 
     private func addGear() {
@@ -273,7 +307,11 @@ struct CustomGearForm: View {
     }
 
     private func addLens() {
-        let customStops = defaultApertureStopsForRange(minAperture: widestApertureStop, maxAperture: smallestApertureStop)
+        let customStops = defaultApertureStopsForRange(
+            minAperture: widestApertureStop,
+            maxAperture: smallestApertureStop
+        )
+
         let lens = LensGearSpec(
             id: "custom_lens_\(UUID().uuidString)",
             brand: cleanBrand,
@@ -287,12 +325,41 @@ struct CustomGearForm: View {
 
         store.addCustomLens(lens)
 
-        var gear = store.activeGear
-        gear.lensId = lens.id
-        gear.lensName = lens.model
-        gear.minAperture = lens.minAperture
-        gear.maxAperture = lens.maxAperture
-        gear.apertureStops = lens.apertureStops
+        var gear: ActiveGearProfile
+
+        if let camera = presetCamera {
+            // Use the camera body that was staged in CameraLensView.
+            // Do not attach this lens to a different previously committed body.
+            gear = ActiveGearProfile(
+                cameraId: camera.id,
+                cameraName: camera.model,
+                mount: camera.mount,
+                isFixedLens: false,
+                minShutter: camera.minShutter,
+                maxShutter: camera.maxShutter,
+                lensId: lens.id,
+                lensName: lens.model,
+                minAperture: lens.minAperture,
+                maxAperture: lens.maxAperture,
+                apertureStops: lens.apertureStops
+            )
+        } else {
+            // Preserve the existing fallback path for callers that create a
+            // custom lens while a camera is already committed in the store.
+            gear = store.activeGear
+
+            guard gear.hasCamera else {
+                return
+            }
+
+            gear.lensId = lens.id
+            gear.lensName = lens.model
+            gear.isFixedLens = false
+            gear.minAperture = lens.minAperture
+            gear.maxAperture = lens.maxAperture
+            gear.apertureStops = lens.apertureStops
+        }
+
         store.activeGear = gear
     }
 
@@ -303,9 +370,9 @@ struct CustomGearForm: View {
 
     private var cleanMount: String {
         if mountSelection == Self.otherMountTag {
-            let value = customMount.trimmingCharacters(in: .whitespacesAndNewlines)
-            return value.isEmpty ? "Custom" : value
+            return customMount.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+
         return mountSelection
     }
 
@@ -323,47 +390,78 @@ private struct AnalogStopRulerScrubber: View {
     let totalCount: Int
     let onChange: (Int) -> Void
 
+    private var safeRange: ClosedRange<Int> {
+        let lower = min(range.lowerBound, totalCount - 1)
+            .clamped(to: 0...(totalCount - 1))
+        let upper = max(range.upperBound, lower)
+            .clamped(to: lower...(totalCount - 1))
+        return lower...upper
+    }
+
+    private func updateIndex(_ proposed: Int) {
+        let next = proposed.clamped(to: safeRange)
+
+        guard next != index else { return }
+
+        UISelectionFeedbackGenerator().selectionChanged()
+        onChange(next)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(title)
                     .font(.subheadline)
+
                 Spacer()
+
                 Text(valueLabel)
                     .font(.subheadline.weight(.bold).monospacedDigit())
                     .foregroundStyle(Palette.accent)
             }
 
             GeometryReader { geo in
-                let w = max(geo.size.width, 1)
-                let usable = max(w - 20, 1)
-                let frac = CGFloat(index) / CGFloat(max(totalCount - 1, 1))
+                let width = max(geo.size.width, 1)
+                let usable = max(width - 20, 1)
+                let denominator = CGFloat(max(totalCount - 1, 1))
+                let fraction = CGFloat(index) / denominator
 
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.secondary.opacity(0.14))
 
-                    Canvas { ctx, size in
-                        let span = size.width - 20
-                        for i in 0..<totalCount {
-                            let f = CGFloat(i) / CGFloat(max(totalCount - 1, 1))
-                            let x = 10 + f * span
-                            let inValidRange = range.contains(i)
-                            let isSelected = (i == index)
-                            let tickH: CGFloat = isSelected ? 20 : (i % 3 == 0 ? 13 : 7)
-                            let topY = (size.height - tickH) * 0.5
+                    Canvas { context, size in
+                        let span = max(size.width - 20, 1)
 
-                            var p = Path()
-                            p.move(to: CGPoint(x: x, y: topY))
-                            p.addLine(to: CGPoint(x: x, y: topY + tickH))
-                            ctx.stroke(
-                                p,
+                        for i in 0..<totalCount {
+                            let position = CGFloat(i) / denominator
+                            let x = 10 + position * span
+                            let valid = safeRange.contains(i)
+                            let selected = i == index
+                            let height: CGFloat = selected
+                                ? 20
+                                : (i % 3 == 0 ? 13 : 7)
+
+                            let top = (size.height - height) * 0.5
+
+                            var path = Path()
+                            path.move(to: CGPoint(x: x, y: top))
+                            path.addLine(to: CGPoint(x: x, y: top + height))
+
+                            context.stroke(
+                                path,
                                 with: .color(
-                                    isSelected
+                                    selected
                                         ? Palette.accent
-                                        : (inValidRange ? Color.primary.opacity(i % 3 == 0 ? 0.5 : 0.25) : Color.secondary.opacity(0.10))
+                                        : (
+                                            valid
+                                                ? Color.primary.opacity(
+                                                    i % 3 == 0 ? 0.5 : 0.25
+                                                )
+                                                : Color.secondary.opacity(0.10)
+                                        )
                                 ),
-                                lineWidth: isSelected ? 2.5 : 1.2
+                                lineWidth: selected ? 2.5 : 1.2
                             )
                         }
                     }
@@ -371,23 +469,52 @@ private struct AnalogStopRulerScrubber: View {
                     Circle()
                         .fill(Palette.accent)
                         .frame(width: 14, height: 14)
-                        .offset(x: 10 + frac * usable - 7)
+                        .offset(x: 10 + fraction * usable - 7)
+                        .shadow(
+                            color: Palette.accent.opacity(0.35),
+                            radius: 3
+                        )
                 }
                 .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 6)
                         .onChanged { value in
-                            let ratio = ((value.location.x - 10) / usable).clamped(to: 0...1)
-                            let rawIdx = Int((ratio * CGFloat(totalCount - 1)).rounded())
-                            let clamped = rawIdx.clamped(to: range)
-                            if clamped != index {
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                onChange(clamped)
+                            // Let vertical Form scrolling win.
+                            guard abs(value.translation.width)
+                                    > abs(value.translation.height) * 1.1 else {
+                                return
                             }
+
+                            let ratio = (
+                                (value.location.x - 10) / usable
+                            )
+                            .clamped(to: 0...1)
+
+                            let rawIndex = Int(
+                                (ratio * CGFloat(totalCount - 1)).rounded()
+                            )
+
+                            updateIndex(rawIndex)
                         }
                 )
             }
-            .frame(height: 30)
+            .frame(height: 36)
+            .accessibilityElement()
+            .accessibilityLabel(title)
+            .accessibilityValue(valueLabel)
+            .accessibilityHint(
+                "Swipe up or down to adjust the stop, or drag horizontally across the ruler."
+            )
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    updateIndex(index + 1)
+                case .decrement:
+                    updateIndex(index - 1)
+                @unknown default:
+                    break
+                }
+            }
         }
         .padding(.vertical, 4)
     }

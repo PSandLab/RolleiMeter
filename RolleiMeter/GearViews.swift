@@ -4,6 +4,96 @@ import UIKit
 
 // MARK: - Camera & Optics Studio (Clean Hierarchy, Single-Column List & Bottom-Docked Cocking Lever)
 
+// MARK: - RolleiMeter Gear Liquid Glass Controls
+
+private struct GearGlassCapsuleModifier: ViewModifier {
+    let tint: Color?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            if let tint {
+                content.glassEffect(
+                    .regular.tint(tint).interactive(),
+                    in: Capsule()
+                )
+            } else {
+                content.glassEffect(
+                    .regular.interactive(),
+                    in: Capsule()
+                )
+            }
+        } else {
+            content
+                .background(.regularMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(
+                            Color.white.opacity(0.14),
+                            lineWidth: 0.7
+                        )
+                }
+        }
+    }
+}
+
+private struct GearGlassGroupModifier: ViewModifier {
+    let spacing: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func gearGlass(tint: Color? = nil) -> some View {
+        modifier(GearGlassCapsuleModifier(tint: tint))
+    }
+
+    func gearGlassGroup(spacing: CGFloat = 8) -> some View {
+        modifier(GearGlassGroupModifier(spacing: spacing))
+    }
+}
+
+private struct GearGlassChip: View {
+    let title: String
+    let isSelected: Bool
+    var minHeight: CGFloat = 44
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(
+                    .subheadline.weight(
+                        isSelected ? .semibold : .medium
+                    )
+                )
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 14)
+                .frame(minHeight: minHeight)
+                .foregroundStyle(
+                    isSelected ? Palette.accent : Palette.textSub
+                )
+                .gearGlass(
+                    tint: isSelected
+                        ? Palette.accent.opacity(0.22)
+                        : nil
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 struct CameraLensView: View {
     @ObservedObject var store: FilmLogStore
     var onFinish: () -> Void = {}
@@ -15,7 +105,7 @@ struct CameraLensView: View {
 
     private enum MountSetup: String, CaseIterable {
         case matched = "Native"
-        case adapter = "Adapted"
+        case adapter = "Adapt Mount"
         case bodyOnly = "Body Only"
     }
 
@@ -24,9 +114,10 @@ struct CameraLensView: View {
     @State private var showAllBodiesForBrand: Bool = false
     @State private var focalFilter: FocalLengthCategory = .all
     @State private var mountSetup: MountSetup = .matched
+    @State private var adapterMountFilter: String = "All"
     @State private var searchText: String = ""
 
-    @State private var stagedCamera: CameraGearSpec = GearCatalogCache.loadBundledCatalog().cameras[0]
+    @State private var stagedCamera: CameraGearSpec = GearCatalogCache.defaultCamera
     @State private var stagedLensEntry: PrewarmedLensEntry? = nil
     @State private var stagedVariantID: String = ""
     @State private var isCocked: Bool = true
@@ -120,9 +211,7 @@ struct CameraLensView: View {
     }
 
     private var isStagedComboCurrentlyMounted: Bool {
-        let active = store.activeGear
-        let preview = resolvedPreviewProfile
-        return active.cameraId == preview.cameraId && active.lensId == preview.lensId
+        store.activeGear == resolvedPreviewProfile
     }
 
     private func cameraPriorityScore(_ cam: CameraGearSpec) -> Int {
@@ -168,26 +257,79 @@ struct CameraLensView: View {
 
     private var filteredLenses: [PrewarmedLensEntry] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
         let mountPool: [PrewarmedLensEntry]
-        if stagedCamera.isFixed || mountSetup == .adapter {
-            mountPool = allLenses
-        } else {
-            let native = allLenses.filter { $0.lens.mount.caseInsensitiveCompare(stagedCamera.mount) == .orderedSame }
-            mountPool = native.isEmpty ? allLenses : native
+
+        switch mountSetup {
+        case .matched:
+            // Native means exact mount equality only.
+            // Never fall back to all catalog lenses.
+            mountPool = allLenses.filter {
+                $0.lens.mount.caseInsensitiveCompare(stagedCamera.mount) == .orderedSame
+            }
+
+        case .adapter:
+            if adapterMountFilter == "All" {
+                mountPool = allLenses
+            } else {
+                mountPool = allLenses.filter {
+                    matchesAdaptedMount(
+                        lensMount: $0.lens.mount,
+                        filter: adapterMountFilter
+                    )
+                }
+            }
+
+        case .bodyOnly:
+            mountPool = []
         }
 
-        if !q.isEmpty {
-            return mountPool
-                .map { ($0, fuzzyMatchScore(query: q, target: "\($0.lens.brand) \($0.lens.model) \($0.lens.mount)")) }
-                .filter { $0.1 > 0 }
-                .sorted { $0.1 > $1.1 }
-                .map { $0.0 }
-        }
+        let focalPool: [PrewarmedLensEntry]
 
         if focalFilter == .all {
-            return mountPool
+            focalPool = mountPool
+        } else {
+            focalPool = mountPool.filter {
+                matchesFocalCategory(
+                    model: $0.lens.model,
+                    category: focalFilter
+                )
+            }
         }
-        return mountPool.filter { matchesFocalCategory(model: $0.lens.model, category: focalFilter) }
+
+        guard !q.isEmpty else {
+            return focalPool
+        }
+
+        return focalPool
+            .map { entry in
+                let variantSearchText = entry.variants.map { variant in
+                    [
+                        variant.badge,
+                        variant.subtitle,
+                        variant.spec.model,
+                        variant.spec.mount
+                    ]
+                    .joined(separator: " ")
+                }
+                .joined(separator: " ")
+
+                let target = [
+                    entry.lens.brand,
+                    entry.lens.model,
+                    entry.lens.mount,
+                    variantSearchText
+                ]
+                .joined(separator: " ")
+
+                return (
+                    entry,
+                    fuzzyMatchScore(query: q, target: target)
+                )
+            }
+            .filter { $0.1 > 0 }
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
     }
 
     var body: some View {
@@ -251,8 +393,15 @@ struct CameraLensView: View {
                     CustomGearForm(
                         store: store,
                         onFinish: onFinish,
-                        presetKinds: (step == .lens && !stagedCamera.isFixed) ? [.lens] : [.fixedLens, .body],
-                        presetBrand: selectedBrand == "Custom" || selectedBrand == "Other" ? "" : selectedBrand
+                        presetKinds: (step == .lens && !stagedCamera.isFixed)
+                            ? [.lens]
+                            : [.fixedLens, .body],
+                        presetBrand: selectedBrand == "Custom" || selectedBrand == "Other"
+                            ? ""
+                            : selectedBrand,
+                        presetCamera: (step == .lens && !stagedCamera.isFixed)
+                            ? stagedCamera
+                            : nil
                     )
                 } label: {
                     Label("Custom", systemImage: "plus")
@@ -271,79 +420,146 @@ struct CameraLensView: View {
         }
     }
 
-    // MARK: - 1. Top Active Rig Summary & 2-Step Segmented Switcher
+    // MARK: - Active Rig Summary + Grouped Liquid Glass Step Switcher
 
     private var activeRigHeaderCard: some View {
         let preview = resolvedPreviewProfile
 
-        return VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                CameraBrandLogo(brand: stagedCamera.brand, size: 46)
+        return VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .center, spacing: 12) {
+                CameraBrandLogo(
+                    brand: stagedCamera.brand,
+                    size: 48
+                )
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(stagedCamera.model)
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(Palette.text)
-                            .lineLimit(1)
-
-                        Circle()
-                            .fill(isCocked ? Palette.accent : Palette.textDim)
-                            .frame(width: 7, height: 7)
-                    }
-
-                    Text(preview.hasLens
-                         ? cleanLensDisplayName(preview.lensName, brand: stagedCamera.brand)
-                         : "\(formatMountBadge(stagedCamera.mount)) Body Only")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Palette.textSub)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 4)
-
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(shutterRangeText(stagedCamera.minShutter, stagedCamera.maxShutter))
-                        .font(.footnote.weight(.semibold).monospacedDigit())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strippedCameraTitle(stagedCamera))
+                        .font(.title3.weight(.bold))
                         .foregroundStyle(Palette.text)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.86)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    Text(formatApertureRange(preview.minAperture, preview.maxAperture))
-                        .font(.footnote.weight(.medium).monospacedDigit())
-                        .foregroundStyle(Palette.textSub)
+                    Text(
+                        preview.hasLens
+                            ? cleanLensDisplayName(
+                                preview.lensName,
+                                brand: stagedCamera.brand
+                            )
+                            : "NO LENS STAGED · \(formatMountBadge(stagedCamera.mount))"
+                    )
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.86)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Spacer(minLength: 0)
+
+                Circle()
+                    .fill(isCocked ? Palette.good : Palette.textDim)
+                    .frame(width: 8, height: 8)
+                    .accessibilityLabel(isCocked ? "Rig cocked" : "Rig needs cocking")
             }
 
-            // Integrated 44pt 2-Step Segmented Switcher (Only shown for interchangeable-lens bodies)
+            HStack(spacing: 12) {
+                HStack(spacing: 5) {
+                    Image(systemName: "timer")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Palette.textDim)
+
+                    Text(
+                        shutterRangeText(
+                            stagedCamera.minShutter,
+                            stagedCamera.maxShutter
+                        )
+                    )
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Palette.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                }
+
+                if preview.hasLens {
+                    HStack(spacing: 5) {
+                        Image(systemName: "camera.aperture")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Palette.textDim)
+
+                        Text(
+                            formatApertureRange(
+                                preview.minAperture,
+                                preview.maxAperture
+                            )
+                        )
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .foregroundStyle(Palette.textSub)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    }
+                } else {
+                    Text("BODY ONLY")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Palette.textSub)
+                }
+
+                if mountSetup == .adapter {
+                    Text("ADAPTED")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Palette.accent)
+                }
+
+                Spacer(minLength: 0)
+            }
+
             if !stagedCamera.isFixed {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     stepTabButton(
                         stepNumber: "1",
-                        title: "Body · \(strippedCameraTitle(stagedCamera))",
+                        title: "BODY",
                         isActive: step == .body
                     ) {
+                        guard step != .body else { return }
                         Haptics.tap()
+
                         withAnimation(.snappy(duration: 0.22)) {
+                            searchText = ""
                             step = .body
                         }
                     }
+                    .frame(maxWidth: .infinity)
 
                     stepTabButton(
                         stepNumber: "2",
-                        title: "Lens · \(stepTwoShortLabel)",
+                        title: "LENS",
                         isActive: step == .lens
                     ) {
+                        guard step != .lens else { return }
                         Haptics.tap()
+
                         withAnimation(.snappy(duration: 0.22)) {
+                            searchText = ""
                             step = .lens
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(4)
-                .background(Palette.background, in: .rect(cornerRadius: 12, style: .continuous))
+                .gearGlassGroup(spacing: 8)
             }
         }
         .padding(16)
-        .background(Palette.panel, in: .rect(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Palette.panel)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(
+                            Color.white.opacity(0.07),
+                            lineWidth: 0.8
+                        )
+                }
+        )
     }
 
     private func stepTabButton(
@@ -353,138 +569,173 @@ struct CameraLensView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: 8) {
                 Text(stepNumber)
                     .font(.caption2.weight(.bold).monospacedDigit())
-                    .frame(width: 18, height: 18)
-                    .background(
+                    .frame(width: 20, height: 20)
+                    .background {
                         Circle()
-                            .fill(isActive ? Palette.background.opacity(0.22) : Color.white.opacity(0.08))
-                    )
+                            .fill(
+                                isActive
+                                    ? Palette.accent.opacity(0.22)
+                                    : Color.white.opacity(0.08)
+                            )
+                    }
 
                 Text(title)
-                    .font(.subheadline.weight(isActive ? .semibold : .medium))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .padding(.horizontal, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(isActive ? Palette.text : Color.clear)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .padding(.horizontal, 12)
+            .foregroundStyle(
+                isActive ? Palette.accent : Palette.textSub
             )
-            .foregroundStyle(isActive ? Palette.background : Palette.textSub)
+            .gearGlass(
+                tint: isActive
+                    ? Palette.accent.opacity(0.22)
+                    : nil
+            )
         }
         .buttonStyle(.plain)
-    }
-
-    private var stepTwoShortLabel: String {
-        if mountSetup == .bodyOnly { return "Body Only" }
-        if let entry = stagedLensEntry {
-            return shortFocalBadge(entry)
-        }
-        return "Select"
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     // MARK: - 2. Single-Tier Filter Strips (44pt Touch Targets, Proper Margins)
 
     @ViewBuilder
     private var bodyBrandFilterStrip: some View {
-        let isSearching = !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isSearching = !searchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+
         if !isSearching {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(brandList, id: \.self) { brand in
-                        let active = (selectedBrand == brand)
-                        Button {
-                            UISelectionFeedbackGenerator().selectionChanged()
+                        let active = selectedBrand == brand
+
+                        GearGlassChip(
+                            title: brand,
+                            isSelected: active
+                        ) {
+                            guard !active else { return }
+
+                            UISelectionFeedbackGenerator()
+                                .selectionChanged()
+
                             withAnimation(.snappy(duration: 0.20)) {
                                 selectedBrand = brand
+                                searchText = ""
                                 showAllBodiesForBrand = false
                             }
-                        } label: {
-                            Text(brand)
-                                .font(.subheadline.weight(active ? .semibold : .medium))
-                                .padding(.horizontal, 16)
-                                .frame(minHeight: 44)
-                                .background(
-                                    Capsule()
-                                        .fill(active ? Palette.text : Palette.panel)
-                                )
-                                .foregroundStyle(active ? Palette.background : Palette.textSub)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .gearGlassGroup(spacing: 8)
+                .padding(.horizontal, 16)
             }
-            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .contentMargins(.horizontal, 0, for: .scrollContent)
         }
     }
 
     private var lensFocalFilterStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(FocalLengthCategory.allCases) { cat in
-                    let active = (focalFilter == cat && mountSetup != .bodyOnly)
-                    Button {
-                        UISelectionFeedbackGenerator().selectionChanged()
+                ForEach(FocalLengthCategory.allCases) { category in
+                    let active = focalFilter == category
+
+                    let title = category == .all
+                        ? "All"
+                        : (
+                            category == .zoom
+                                ? "Zooms"
+                                : "\(category.label)mm"
+                        )
+
+                    GearGlassChip(
+                        title: title,
+                        isSelected: active
+                    ) {
+                        guard !active else { return }
+
+                        UISelectionFeedbackGenerator()
+                            .selectionChanged()
+
                         withAnimation(.snappy(duration: 0.20)) {
-                            if mountSetup == .bodyOnly { mountSetup = .matched }
-                            focalFilter = cat
+                            focalFilter = category
+                        }
+                    }
+                }
+
+                GearGlassChip(
+                    title: "Native",
+                    isSelected: mountSetup == .matched
+                ) {
+                    guard mountSetup != .matched else { return }
+                    Haptics.tap()
+                    setMountSetup(.matched)
+                }
+
+                GearGlassChip(
+                    title: "Adapt Mount",
+                    isSelected: mountSetup == .adapter
+                ) {
+                    guard mountSetup != .adapter else { return }
+                    Haptics.tap()
+                    setMountSetup(.adapter)
+                }
+
+                GearGlassChip(
+                    title: "Body Only",
+                    isSelected: mountSetup == .bodyOnly
+                ) {
+                    guard mountSetup != .bodyOnly else { return }
+                    Haptics.tap()
+                    setMountSetup(.bodyOnly)
+                }
+
+                if mountSetup == .adapter {
+                    Menu {
+                        Picker(
+                            "Lens Mount",
+                            selection: Binding(
+                                get: { adapterMountFilter },
+                                set: { setAdapterMountFilter($0) }
+                            )
+                        ) {
+                            ForEach(ADAPTER_MOUNT_FILTERS, id: \.self) { mount in
+                                Text(mount).tag(mount)
+                            }
                         }
                     } label: {
-                        Text(cat == .all ? "All" : (cat == .zoom ? "Zooms" : "\(cat.label)mm"))
-                            .font(.subheadline.weight(active ? .semibold : .medium).monospacedDigit())
-                            .padding(.horizontal, 16)
-                            .frame(minHeight: 44)
-                            .background(
-                                Capsule()
-                                    .fill(active ? Palette.text : Palette.panel)
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.caption.weight(.semibold))
+
+                            Text(
+                                adapterMountFilter == "All"
+                                    ? "Lens Mount"
+                                    : adapterMountFilter
                             )
-                            .foregroundStyle(active ? Palette.background : Palette.textSub)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // Inline Mount Setup Pills at the end of the single filter strip (Eliminates stacked filter rows)
-                Button {
-                    Haptics.tap()
-                    withAnimation(.snappy(duration: 0.20)) {
-                        mountSetup = (mountSetup == .adapter) ? .matched : .adapter
-                    }
-                } label: {
-                    Text(mountSetup == .adapter ? "✓ All Mounts" : "Adapt Mount")
-                        .font(.subheadline.weight(mountSetup == .adapter ? .semibold : .medium))
-                        .padding(.horizontal, 16)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        }
+                        .padding(.horizontal, 14)
                         .frame(minHeight: 44)
-                        .background(
-                            Capsule()
-                                .fill(mountSetup == .adapter ? Palette.text : Palette.panel)
+                        .foregroundStyle(Palette.accent)
+                        .gearGlass(
+                            tint: Palette.accent.opacity(0.18)
                         )
-                        .foregroundStyle(mountSetup == .adapter ? Palette.background : Palette.textSub)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    Haptics.tap()
-                    withAnimation(.snappy(duration: 0.20)) {
-                        mountSetup = (mountSetup == .bodyOnly) ? .matched : .bodyOnly
-                        isCocked = isStagedComboCurrentlyMounted
                     }
-                } label: {
-                    Text("Body Only")
-                        .font(.subheadline.weight(mountSetup == .bodyOnly ? .semibold : .medium))
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 44)
-                        .background(
-                            Capsule()
-                                .fill(mountSetup == .bodyOnly ? Palette.text : Palette.panel)
-                        )
-                        .foregroundStyle(mountSetup == .bodyOnly ? Palette.background : Palette.textSub)
+                    .accessibilityLabel("Filter adapted lenses by lens mount")
+                    .accessibilityValue(adapterMountFilter)
                 }
-                .buttonStyle(.plain)
             }
+            .gearGlassGroup(spacing: 8)
+            .padding(.horizontal, 16)
         }
-        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
     }
 
     // MARK: - 3. Airy Single-Column Scannable Lists
@@ -492,27 +743,51 @@ struct CameraLensView: View {
     @ViewBuilder
     private var bodyListSection: some View {
         let cameras = filteredCameras
-        let isSearching = !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let visibleCameras = (isSearching || showAllBodiesForBrand) ? cameras : Array(cameras.prefix(8))
+        let isSearching = !searchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+
+        let visibleCameras = (
+            isSearching || showAllBodiesForBrand
+        )
+            ? cameras
+            : Array(cameras.prefix(8))
 
         VStack(spacing: 10) {
-            ForEach(visibleCameras) { cam in
-                let isSelected = (stagedCamera.id == cam.id)
-                CameraBodyListRow(
-                    camera: cam,
-                    isSelected: isSelected
-                ) {
-                    Haptics.tap()
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                        selectCameraBody(cam)
+            if visibleCameras.isEmpty {
+                ContentUnavailableView(
+                    isSearching ? "No Matching Cameras" : "No Camera Bodies",
+                    systemImage: "camera",
+                    description: Text(
+                        isSearching
+                            ? "Try another camera name or manufacturer."
+                            : "Choose another manufacturer or add a custom camera."
+                    )
+                )
+            } else {
+                ForEach(visibleCameras) { camera in
+                    let isSelected = stagedCamera.id == camera.id
+
+                    CameraBodyListRow(
+                        camera: camera,
+                        isSelected: isSelected
+                    ) {
+                        Haptics.tap()
+
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            selectCameraBody(camera)
+                        }
                     }
-                }
-                .contextMenu {
-                    if cam.isCustom {
-                        Button(role: .destructive) {
-                            store.removeCustomCamera(id: cam.id)
-                        } label: {
-                            Label("Delete Custom Camera", systemImage: "trash")
+                    .contextMenu {
+                        if camera.isCustom {
+                            Button(role: .destructive) {
+                                deleteCustomCamera(camera)
+                            } label: {
+                                Label(
+                                    "Delete Custom Camera",
+                                    systemImage: "trash"
+                                )
+                            }
                         }
                     }
                 }
@@ -521,19 +796,32 @@ struct CameraLensView: View {
             if !isSearching && cameras.count > 8 {
                 Button {
                     Haptics.tap()
+
                     withAnimation(.snappy(duration: 0.22)) {
                         showAllBodiesForBrand.toggle()
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Text(showAllBodiesForBrand ? "Show Top Flagships" : "Show All \(cameras.count) \(selectedBrand) Models")
-                        Image(systemName: showAllBodiesForBrand ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.bold))
+                        Text(
+                            showAllBodiesForBrand
+                                ? "Show Top Flagships"
+                                : "Show All \(cameras.count) \(selectedBrand) Models"
+                        )
+
+                        Image(
+                            systemName: showAllBodiesForBrand
+                                ? "chevron.up"
+                                : "chevron.down"
+                        )
+                        .font(.caption.weight(.bold))
                     }
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Palette.textSub)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Palette.panel, in: .rect(cornerRadius: 16, style: .continuous))
+                    .background(
+                        Palette.panel,
+                        in: .rect(cornerRadius: 16, style: .continuous)
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -545,31 +833,62 @@ struct CameraLensView: View {
         let lenses = filteredLenses
 
         VStack(spacing: 10) {
-            ForEach(lenses) { entry in
-                let isSelected = (stagedLensEntry?.id == entry.id && mountSetup != .bodyOnly)
-                OpticalLensListRow(
-                    entry: entry,
-                    isSelected: isSelected,
-                    selectedVariantID: $stagedVariantID
-                ) {
-                    Haptics.tap()
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                        stagedLensEntry = entry
-                        stagedVariantID = entry.variants.first?.id ?? ""
-                        if mountSetup == .bodyOnly {
-                            mountSetup = .matched
+            if mountSetup == .bodyOnly {
+                ContentUnavailableView(
+                    "Body Only",
+                    systemImage: "camera",
+                    description: Text(
+                        "No lens is staged. Choose Native or Adapt Mount to attach a lens."
+                    )
+                )
+            } else if lenses.isEmpty {
+                ContentUnavailableView(
+                    mountSetup == .matched
+                        ? "No Native Lenses"
+                        : "No Matching Lenses",
+                    systemImage: "camera.macro",
+                    description: Text(
+                        mountSetup == .matched
+                            ? "This body has no catalog lenses for its native mount. Choose Adapt Mount to browse other lens mounts."
+                            : "No lenses match the selected mount and focal-length filters."
+                    )
+                )
+            } else {
+                ForEach(lenses) { entry in
+                    let isSelected =
+                        stagedLensEntry?.id == entry.id
+                        && mountSetup != .bodyOnly
+
+                    OpticalLensListRow(
+                        entry: entry,
+                        isSelected: isSelected,
+                        selectedVariantID: $stagedVariantID
+                    ) {
+                        Haptics.tap()
+
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            stagedLensEntry = entry
+                            stagedVariantID = entry.variants.first?.id ?? ""
+
+                            if mountSetup == .bodyOnly {
+                                mountSetup = .matched
+                            }
+
+                            isCocked = isStagedComboCurrentlyMounted
                         }
+                    } onVariantChange: {
                         isCocked = isStagedComboCurrentlyMounted
                     }
-                } onVariantChange: {
-                    isCocked = isStagedComboCurrentlyMounted
-                }
-                .contextMenu {
-                    if entry.lens.isCustom {
-                        Button(role: .destructive) {
-                            store.removeCustomLens(id: entry.lens.id)
-                        } label: {
-                            Label("Delete Custom Lens", systemImage: "trash")
+                    .contextMenu {
+                        if entry.lens.isCustom {
+                            Button(role: .destructive) {
+                                deleteCustomLens(entry.lens)
+                            } label: {
+                                Label(
+                                    "Delete Custom Lens",
+                                    systemImage: "trash"
+                                )
+                            }
                         }
                     }
                 }
@@ -579,28 +898,174 @@ struct CameraLensView: View {
 
     // MARK: - Selection & State Sync Helpers
 
+    private func deleteCustomCamera(_ camera: CameraGearSpec) {
+        let wasStaged = stagedCamera.id == camera.id
+
+        store.removeCustomCamera(id: camera.id)
+
+        guard wasStaged else { return }
+
+        guard let fallback = allCameras.first else {
+            stagedLensEntry = nil
+            stagedVariantID = ""
+            isCocked = false
+            return
+        }
+
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
+            selectCameraBody(fallback)
+        }
+    }
+
+    private func deleteCustomLens(_ lens: LensGearSpec) {
+        let wasStaged = stagedLensEntry?.lens.id == lens.id
+
+        store.removeCustomLens(id: lens.id)
+
+        guard wasStaged else { return }
+
+        let remaining = allLenses
+
+        let replacement: PrewarmedLensEntry?
+
+        switch mountSetup {
+        case .matched:
+            replacement = remaining.first(where: {
+                $0.lens.mount.caseInsensitiveCompare(stagedCamera.mount) == .orderedSame
+            })
+
+        case .adapter:
+            replacement = remaining.first(where: {
+                adapterMountFilter == "All"
+                    || matchesAdaptedMount(
+                        lensMount: $0.lens.mount,
+                        filter: adapterMountFilter
+                    )
+            })
+
+        case .bodyOnly:
+            replacement = nil
+        }
+
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.72)) {
+            stagedLensEntry = replacement
+            stagedVariantID = replacement?.variants.first?.id ?? ""
+
+            if replacement == nil && mountSetup != .bodyOnly {
+                mountSetup = .bodyOnly
+            }
+        }
+
+        isCocked = isStagedComboCurrentlyMounted
+    }
+
+    private func setAdapterMountFilter(_ filter: String) {
+        adapterMountFilter = filter
+
+        guard mountSetup == .adapter else { return }
+
+        let candidates = filter == "All"
+            ? allLenses
+            : allLenses.filter {
+                matchesAdaptedMount(
+                    lensMount: $0.lens.mount,
+                    filter: filter
+                )
+            }
+
+        if let current = stagedLensEntry,
+           filter == "All" || matchesAdaptedMount(
+                lensMount: current.lens.mount,
+                filter: filter
+           ) {
+            // Keep the currently staged lens if it still matches.
+        } else {
+            stagedLensEntry = candidates.first
+            stagedVariantID = candidates.first?.variants.first?.id ?? ""
+        }
+
+        isCocked = isStagedComboCurrentlyMounted
+    }
+
+    private func setMountSetup(_ newMode: MountSetup) {
+        guard !stagedCamera.isFixed else { return }
+
+        withAnimation(.snappy(duration: 0.22)) {
+            switch newMode {
+            case .matched:
+                let native = allLenses.filter {
+                    $0.lens.mount.caseInsensitiveCompare(stagedCamera.mount) == .orderedSame
+                }
+
+                if let current = stagedLensEntry,
+                   current.lens.mount.caseInsensitiveCompare(stagedCamera.mount) == .orderedSame {
+                    mountSetup = .matched
+                } else if let replacement = native.first(where: {
+                    $0.focalLengthMm >= 34 && $0.focalLengthMm <= 55
+                }) ?? native.first {
+                    stagedLensEntry = replacement
+                    stagedVariantID = replacement.variants.first?.id ?? ""
+                    mountSetup = .matched
+                } else {
+                    stagedLensEntry = nil
+                    stagedVariantID = ""
+                    mountSetup = .bodyOnly
+                }
+
+            case .adapter:
+                mountSetup = .adapter
+                setAdapterMountFilter(adapterMountFilter)
+
+            case .bodyOnly:
+                mountSetup = .bodyOnly
+            }
+        }
+
+        isCocked = isStagedComboCurrentlyMounted
+    }
+
     private func selectCameraBody(_ cam: CameraGearSpec) {
         stagedCamera = cam
+
+        selectedBrand = cam.isCustom
+            ? "Custom"
+            : (
+                brandList.first(where: {
+                    $0.caseInsensitiveCompare(cam.brand) == .orderedSame
+                }) ?? "Other"
+            )
+
+        searchText = ""
+        showAllBodiesForBrand = false
+
         if cam.isFixed {
             step = .body
             stagedLensEntry = nil
             stagedVariantID = ""
             mountSetup = .matched
         } else {
-            let matching = allLenses.filter { $0.lens.mount.caseInsensitiveCompare(cam.mount) == .orderedSame }
+            let matching = allLenses.filter {
+                $0.lens.mount.caseInsensitiveCompare(cam.mount) == .orderedSame
+            }
+
             if let current = stagedLensEntry,
                current.lens.mount.caseInsensitiveCompare(cam.mount) == .orderedSame {
-                // Keep compatible lens
-            } else if let std = matching.first(where: { $0.focalLengthMm >= 34 && $0.focalLengthMm <= 55 }) ?? matching.first {
-                stagedLensEntry = std
-                stagedVariantID = std.variants.first?.id ?? ""
+                mountSetup = .matched
+            } else if let standard = matching.first(where: {
+                $0.focalLengthMm >= 34 && $0.focalLengthMm <= 55
+            }) ?? matching.first {
+                stagedLensEntry = standard
+                stagedVariantID = standard.variants.first?.id ?? ""
                 mountSetup = .matched
             } else {
                 stagedLensEntry = nil
+                stagedVariantID = ""
                 mountSetup = .bodyOnly
             }
+
             step = .lens
         }
+
         isCocked = isStagedComboCurrentlyMounted
     }
 
@@ -610,10 +1075,14 @@ struct CameraLensView: View {
         let active = store.activeGear
         if let matchCam = allCameras.first(where: { $0.id == active.cameraId }) {
             stagedCamera = matchCam
-            selectedBrand = brandList.contains(matchCam.brand) ? matchCam.brand : "Other"
+            selectedBrand = brandList.first(where: {
+                $0.caseInsensitiveCompare(matchCam.brand) == .orderedSame
+            }) ?? "Other"
         } else if let firstCam = allCameras.first {
             stagedCamera = firstCam
-            selectedBrand = brandList.contains(firstCam.brand) ? firstCam.brand : "Rollei"
+            selectedBrand = brandList.first(where: {
+                $0.caseInsensitiveCompare(firstCam.brand) == .orderedSame
+            }) ?? "Other"
         }
 
         if stagedCamera.isFixed {
@@ -650,6 +1119,10 @@ struct CameraLensView: View {
             stagedLensEntry = firstMatch
             stagedVariantID = firstMatch.variants.first?.id ?? ""
             mountSetup = .matched
+        } else {
+            stagedLensEntry = nil
+            stagedVariantID = ""
+            mountSetup = .bodyOnly
         }
         isCocked = isStagedComboCurrentlyMounted
     }
@@ -670,28 +1143,47 @@ private struct CameraBodyListRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
 
+    private var metadata: String {
+        if camera.isFixed {
+            let lens = camera.fixedLensName.isEmpty
+                ? "Fixed Lens"
+                : cleanLensDisplayName(
+                    camera.fixedLensName,
+                    brand: camera.brand
+                )
+
+            return "\(lens) · \(shutterRangeText(camera.minShutter, camera.maxShutter))"
+        }
+
+        return "\(formatMountBadge(camera.mount)) Mount · Shutter \(shutterRangeText(camera.minShutter, camera.maxShutter))"
+    }
+
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(camera.model)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Palette.text)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    Text(camera.isFixed
-                         ? (camera.fixedLensName.isEmpty ? "Fixed Lens · \(shutterRangeText(camera.minShutter, camera.maxShutter))" : "\(cleanLensDisplayName(camera.fixedLensName, brand: camera.brand)) · \(shutterRangeText(camera.minShutter, camera.maxShutter))")
-                         : "\(formatMountBadge(camera.mount)) Mount  ·  Shutter \(shutterRangeText(camera.minShutter, camera.maxShutter))")
+                    Text(metadata)
                         .font(.footnote.weight(.medium).monospacedDigit())
                         .foregroundStyle(Palette.textSub)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
 
                 ZStack {
                     Circle()
-                        .fill(isSelected ? Palette.accent : Color.white.opacity(0.06))
+                        .fill(
+                            isSelected
+                                ? Palette.accent
+                                : Color.white.opacity(0.07)
+                        )
                         .frame(width: 24, height: 24)
 
                     if isSelected {
@@ -702,14 +1194,29 @@ private struct CameraBodyListRow: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected ? Palette.panelRaised : Palette.panel)
-            )
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Palette.panelRaised
+                            : Palette.panel
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                            .strokeBorder(
+                                isSelected
+                                    ? Palette.accent.opacity(0.36)
+                                    : Color.white.opacity(0.055),
+                                lineWidth: isSelected ? 1.1 : 0.7
+                            )
+                    }
+            }
         }
         .buttonStyle(PressStyle(scale: 0.98))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -721,26 +1228,39 @@ private struct OpticalLensListRow: View {
     let onVariantChange: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Button(action: onSelect) {
                 HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(cleanLensDisplayName(entry.lens.model, brand: entry.lens.brand))
-                            .font(.body.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(Palette.text)
-                            .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(
+                            cleanLensDisplayName(
+                                entry.lens.model,
+                                brand: entry.lens.brand
+                            )
+                        )
+                        .font(.body.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(Palette.text)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        Text("\(entry.lens.brand)  ·  \(formatMountBadge(entry.lens.mount))  ·  \(formatApertureRange(entry.lens.minAperture, entry.lens.maxAperture))")
-                            .font(.footnote.weight(.medium).monospacedDigit())
-                            .foregroundStyle(Palette.textSub)
-                            .lineLimit(1)
+                        Text(
+                            "\(entry.lens.brand) · \(formatMountBadge(entry.lens.mount)) · \(formatApertureRange(entry.lens.minAperture, entry.lens.maxAperture))"
+                        )
+                        .font(.footnote.weight(.medium).monospacedDigit())
+                        .foregroundStyle(Palette.textSub)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer(minLength: 8)
 
                     ZStack {
                         Circle()
-                            .fill(isSelected ? Palette.accent : Color.white.opacity(0.06))
+                            .fill(
+                                isSelected
+                                    ? Palette.accent
+                                    : Color.white.opacity(0.07)
+                            )
                             .frame(width: 24, height: 24)
 
                         if isSelected {
@@ -750,46 +1270,69 @@ private struct OpticalLensListRow: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Inline Version Pills (Only expanded on the selected lens row when multiple generations exist)
             if isSelected && entry.variants.count > 1 {
-                HStack(spacing: 8) {
-                    ForEach(entry.variants) { variant in
-                        let active = (variant.id == selectedVariantID) || (selectedVariantID.isEmpty && variant.id == entry.variants.first?.id)
-                        Button {
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            withAnimation(.snappy(duration: 0.18)) {
-                                selectedVariantID = variant.id
-                                onVariantChange()
-                            }
-                        } label: {
-                            Text(variant.badge)
-                                .font(.caption.weight(active ? .semibold : .medium))
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, minHeight: 36)
-                                .padding(.horizontal, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(active ? Palette.text : Palette.background)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(entry.variants) { variant in
+                            let active = (
+                                variant.id == selectedVariantID
+                                || (
+                                    selectedVariantID.isEmpty
+                                    && variant.id == entry.variants.first?.id
                                 )
-                                .foregroundStyle(active ? Palette.background : Palette.textSub)
+                            )
+
+                            GearGlassChip(
+                                title: variant.badge,
+                                isSelected: active,
+                                minHeight: 44
+                            ) {
+                                guard !active else { return }
+
+                                UISelectionFeedbackGenerator()
+                                    .selectionChanged()
+
+                                withAnimation(.snappy(duration: 0.18)) {
+                                    selectedVariantID = variant.id
+                                    onVariantChange()
+                                }
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
+                    .gearGlassGroup(spacing: 8)
+                    .padding(.horizontal, 1)
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(
+                    .opacity.combined(with: .move(edge: .top))
+                )
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isSelected ? Palette.panelRaised : Palette.panel)
-        )
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Palette.panelRaised
+                        : Palette.panel
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 17, style: .continuous)
+                        .strokeBorder(
+                            isSelected
+                                ? Palette.accent.opacity(0.36)
+                                : Color.white.opacity(0.055),
+                            lineWidth: isSelected ? 1.1 : 0.7
+                        )
+                }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -804,11 +1347,45 @@ private struct BottomCockingLeverDock: View {
     @State private var throwProgress: CGFloat = 0.0
     @State private var isDragging: Bool = false
     @State private var lastToothTick: Int = 0
+    @State private var dragStartProgress: CGFloat = 0.0
+
+    // Mounting ceremony state.
+    @State private var isCompletingMount: Bool = false
+    @State private var mountingPhase: Int = 0
+    @State private var lensAlignment: CGFloat = 0.0
+    @State private var bayonetRotation: Double = 0.0
+    @State private var lockPinProgress: CGFloat = 0.0
+    @State private var shutterAdvanceProgress: CGFloat = 0.0
+    @State private var mountingGlow: CGFloat = 0.0
+    @State private var mountingTask: Task<Void, Never>? = nil
 
     private let latchPoint: CGFloat = 0.88
 
     private var effectiveProgress: CGFloat {
-        isCocked ? 1.0 : throwProgress
+        (isCocked || isCompletingMount) ? 1.0 : throwProgress
+    }
+
+    @ViewBuilder
+    private var mountingCeremonyContent: some View {
+        if isCompletingMount {
+            GearMountingCeremonyVisual(
+                cameraModel: cameraModel,
+                lensSummary: lensSummary,
+                phase: mountingPhase,
+                lensAlignment: lensAlignment,
+                bayonetRotation: bayonetRotation,
+                lockPinProgress: lockPinProgress,
+                shutterAdvanceProgress: shutterAdvanceProgress,
+                mountingGlow: mountingGlow
+            )
+            .frame(height: 86)
+            .transition(
+                .asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .move(edge: .top).combined(with: .opacity)
+                )
+            )
+        }
     }
 
     var body: some View {
@@ -820,7 +1397,11 @@ private struct BottomCockingLeverDock: View {
                         .fill(isCocked ? Palette.accent : Palette.textDim)
                         .frame(width: 6, height: 6)
 
-                    Text(isCocked ? "COCKED & LOCKED · \(cameraModel.uppercased())" : "THROW ADVANCE LEVER TO COCK & MOUNT")
+                    Text(
+                        isCocked
+                            ? "RIG COCKED & MOUNTED"
+                            : "DRAG LEVER TO COCK RIG"
+                    )
                         .font(.caption.weight(.semibold).monospacedDigit())
                         .foregroundStyle(isCocked ? Palette.text : Palette.textSub)
                 }
@@ -829,15 +1410,22 @@ private struct BottomCockingLeverDock: View {
 
                 if isCocked {
                     Button {
-                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.65)
+                        UIImpactFeedbackGenerator(style: .rigid)
+                            .impactOccurred(intensity: 0.65)
+
                         withAnimation(.spring(response: 0.34, dampingFraction: 0.62)) {
                             isCocked = false
                             throwProgress = 0.0
+                            mountingPhase = 0
+                            isCompletingMount = false
                         }
                     } label: {
                         Text("Release")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(Palette.textSub)
+                            .foregroundStyle(Palette.text)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .gearGlass()
                     }
                     .buttonStyle(.plain)
                 } else if throwProgress > 0.02 {
@@ -847,6 +1435,8 @@ private struct BottomCockingLeverDock: View {
                 }
             }
             .padding(.horizontal, 4)
+
+            mountingCeremonyContent
 
             // Mechanical Advance Lever & Inset Routed Groove
             GeometryReader { geo in
@@ -907,57 +1497,102 @@ private struct BottomCockingLeverDock: View {
 
                     // 3. Sculpted Brushed-Metal Advance Lever Handle with Vertical Thumb-Knurling
                     SculptedMetalAdvanceHandle(
-                        isCocked: isCocked,
+                        isCocked: isCocked || isCompletingMount,
                         isDragging: isDragging
                     )
                     .frame(width: handleW, height: handleH)
                     .offset(x: currentX)
                     .shadow(color: .black.opacity(0.55), radius: 5, x: 0, y: 2)
-                }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            if isCocked { return }
-                            if !isDragging {
-                                isDragging = true
-                                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.55)
-                            }
-
-                            let raw = (value.location.x - handleW * 0.5) / maxTravel
-                            let clamped = min(max(raw, 0.0), 1.0)
-                            // Progressive physical spring resistance curve
-                            let resisted = CGFloat(pow(Double(clamped), 0.90))
-                            throwProgress = resisted
-
-                            // Rigid ratcheting gear-tooth haptics across the throw
-                            let tooth = Int(resisted * 20)
-                            if tooth != lastToothTick {
-                                lastToothTick = tooth
-                                let intensity = CGFloat(0.50 + 0.45 * resisted)
-                                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: intensity)
-                            }
-
-                            // Sharp mechanical thud when sear latches at full throw
-                            if resisted >= latchPoint {
-                                latchCockedPosition()
-                            }
-                        }
-                        .onEnded { _ in
-                            guard !isCocked else { return }
-                            isDragging = false
-                            if throwProgress >= latchPoint {
-                                latchCockedPosition()
-                            } else {
-                                // Un-cocked spring return recoil
-                                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.6)
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.58)) {
-                                    throwProgress = 0.0
+                    .contentShape(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard !isCocked, !isCompletingMount else {
+                                    return
                                 }
-                                lastToothTick = 0
+
+                                if !isDragging {
+                                    isDragging = true
+                                    dragStartProgress = throwProgress
+
+                                    UIImpactFeedbackGenerator(style: .rigid)
+                                        .impactOccurred(intensity: 0.55)
+                                }
+
+                                let raw = dragStartProgress
+                                    + (value.translation.width / maxTravel)
+
+                                let clamped = min(max(raw, 0.0), 1.0)
+
+                                // Preserve the existing progressive resistance curve.
+                                let resisted = CGFloat(
+                                    pow(Double(clamped), 0.90)
+                                )
+
+                                throwProgress = resisted
+
+                                // Preserve exactly 20 ratchet increments across the lever throw.
+                                let tooth = Int(resisted * 20)
+
+                                if tooth != lastToothTick {
+                                    lastToothTick = tooth
+
+                                    let intensity = CGFloat(
+                                        0.50 + 0.45 * resisted
+                                    )
+
+                                    UIImpactFeedbackGenerator(style: .rigid)
+                                        .impactOccurred(intensity: intensity)
+                                }
+
+                                // Preserve the existing 0.88 sear latch threshold.
+                                if resisted >= latchPoint {
+                                    beginMountingCeremony()
+                                }
                             }
-                        }
-                )
+                            .onEnded { _ in
+                                guard !isCocked, !isCompletingMount else {
+                                    isDragging = false
+                                    return
+                                }
+
+                                isDragging = false
+
+                                if throwProgress >= latchPoint {
+                                    beginMountingCeremony()
+                                } else {
+                                    UIImpactFeedbackGenerator(style: .rigid)
+                                        .impactOccurred(intensity: 0.6)
+
+                                    withAnimation(
+                                        .spring(response: 0.32, dampingFraction: 0.58)
+                                    ) {
+                                        throwProgress = 0.0
+                                    }
+
+                                    dragStartProgress = 0.0
+                                    lastToothTick = 0
+                                }
+                            }
+                    )
+                    .accessibilityElement()
+                    .accessibilityLabel("Mechanical shutter cocking lever")
+                    .accessibilityValue(
+                        isCocked
+                            ? "Rig cocked and mounted"
+                            : "\(Int((throwProgress * 100).rounded())) percent"
+                    )
+                    .accessibilityHint(
+                        "Drag the metal lever to the right until it locks to mount and cock the rig."
+                    )
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(.default) {
+                        guard !isCocked, !isCompletingMount else { return }
+                        beginMountingCeremony()
+                    }
+                }
             }
             .frame(height: 56)
         }
@@ -975,24 +1610,355 @@ private struct BottomCockingLeverDock: View {
         )
         .onChange(of: isCocked) { _, newValue in
             if !newValue {
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.62)) {
+                mountingTask?.cancel()
+                mountingTask = nil
+                isCompletingMount = false
+                mountingPhase = 0
+                lensAlignment = 0.0
+                bayonetRotation = 0.0
+                lockPinProgress = 0.0
+                shutterAdvanceProgress = 0.0
+                mountingGlow = 0.0
+
+                withAnimation(
+                    .spring(response: 0.34, dampingFraction: 0.62)
+                ) {
                     throwProgress = 0.0
                 }
+
                 lastToothTick = 0
+                dragStartProgress = 0.0
             }
+        }
+        .onDisappear {
+            mountingTask?.cancel()
+            mountingTask = nil
         }
     }
 
-    private func latchCockedPosition() {
-        guard !isCocked else { return }
+    private func beginMountingCeremony() {
+        guard !isCocked, !isCompletingMount else {
+            return
+        }
+
         isDragging = false
-        // Sharp mechanical thud (.heavy) when sear latches and cocks the frame
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 1.0)
+        isCompletingMount = true
+        mountingPhase = 1
+
+        // Snap the original lever into its fully thrown position.
         withAnimation(.spring(response: 0.24, dampingFraction: 0.68)) {
             throwProgress = 1.0
-            isCocked = true
         }
-        onLatchCocked()
+
+        // Preserve the original sear-latch impact.
+        UIImpactFeedbackGenerator(style: .heavy)
+            .impactOccurred(intensity: 1.0)
+
+        mountingTask?.cancel()
+
+        mountingTask = Task { @MainActor in
+            // STAGE 1 — ALIGN THE LENS WITH THE BODY MOUNT.
+            // Lens slides inward and settles into the camera's mount plane.
+            UIImpactFeedbackGenerator(style: .medium)
+                .impactOccurred(intensity: 0.65)
+
+            withAnimation(
+                .spring(response: 0.42, dampingFraction: 0.72)
+            ) {
+                lensAlignment = 1.0
+                mountingGlow = 0.22
+            }
+
+            try? await Task.sleep(for: .milliseconds(420))
+            guard !Task.isCancelled else { return }
+
+            // STAGE 2 — ROTATE THE BAYONET RING AND ENGAGE THE LOCK PIN.
+            mountingPhase = 2
+
+            withAnimation(
+                .spring(response: 0.46, dampingFraction: 0.70)
+            ) {
+                bayonetRotation = 65.0
+            }
+
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+
+            UIImpactFeedbackGenerator(style: .rigid)
+                .impactOccurred(intensity: 0.9)
+
+            withAnimation(
+                .spring(response: 0.24, dampingFraction: 0.66)
+            ) {
+                lockPinProgress = 1.0
+                bayonetRotation = 90.0
+                mountingGlow = 0.58
+            }
+
+            try? await Task.sleep(for: .milliseconds(380))
+            guard !Task.isCancelled else { return }
+
+            // STAGE 3 — ADVANCE THE SHUTTER AND LOCK THE RIG.
+            mountingPhase = 3
+
+            withAnimation(
+                .spring(response: 0.36, dampingFraction: 0.66)
+            ) {
+                shutterAdvanceProgress = 1.0
+                mountingGlow = 1.0
+            }
+
+            // Three tactile shutter/advance ticks, evenly spaced.
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .milliseconds(115))
+                guard !Task.isCancelled else { return }
+
+                UISelectionFeedbackGenerator()
+                    .selectionChanged()
+            }
+
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+
+            UINotificationFeedbackGenerator()
+                .notificationOccurred(.success)
+
+            // The lever is already visually at full throw.
+            // Publish cocked state only after the entire ceremony finishes.
+            isCocked = true
+            isCompletingMount = false
+            mountingPhase = 0
+            mountingTask = nil
+
+            // Preserve the existing store commit callback.
+            onLatchCocked()
+        }
+    }
+}
+
+// MARK: - Three-Stage Camera/Lens Mounting Ceremony Visual
+
+private struct GearMountingCeremonyVisual: View {
+    let cameraModel: String
+    let lensSummary: String
+    let phase: Int
+    let lensAlignment: CGFloat
+    let bayonetRotation: Double
+    let lockPinProgress: CGFloat
+    let shutterAdvanceProgress: CGFloat
+    let mountingGlow: CGFloat
+
+    var body: some View {
+        HStack(spacing: 14) {
+            // Camera body silhouette.
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.30, green: 0.32, blue: 0.36),
+                                Color(red: 0.12, green: 0.13, blue: 0.16)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(
+                                Color.white.opacity(0.22),
+                                lineWidth: 0.8
+                            )
+                    }
+
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.35))
+                        .frame(width: 7, height: 18)
+
+                    Circle()
+                        .strokeBorder(
+                            Color.white.opacity(0.48),
+                            lineWidth: 2
+                        )
+                        .frame(width: 21, height: 21)
+                }
+            }
+            .frame(width: 70, height: 48)
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 22, height: 5)
+                    .offset(y: -3)
+            }
+
+            // Mount plane and locking ring.
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.9))
+                    .frame(width: 48, height: 48)
+
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.8),
+                                Color.white.opacity(0.16),
+                                Color.white.opacity(0.56)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 4
+                    )
+                    .frame(width: 43, height: 43)
+                    .rotationEffect(.degrees(bayonetRotation))
+
+                Circle()
+                    .trim(from: 0.0, to: lockPinProgress)
+                    .stroke(
+                        Palette.accent,
+                        style: StrokeStyle(
+                            lineWidth: 3,
+                            lineCap: .round
+                        )
+                    )
+                    .frame(width: 34, height: 34)
+                    .rotationEffect(.degrees(-90))
+
+                // Five rotating shutter leaves visibly advance during Stage 3.
+                ForEach(0..<5, id: \.self) { blade in
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.65),
+                                    Color(red: 0.20, green: 0.22, blue: 0.26)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 4, height: 17)
+                        .offset(y: -7)
+                        .rotationEffect(
+                            .degrees(
+                                Double(blade) * 72
+                                + Double(shutterAdvanceProgress) * 36
+                            )
+                        )
+                        .opacity(shutterAdvanceProgress * 0.85)
+                }
+
+                Circle()
+                    .fill(
+                        mountingGlow > 0.5
+                            ? Palette.good
+                            : Palette.accent
+                    )
+                    .frame(width: 5, height: 5)
+                    .offset(y: -19)
+                    .rotationEffect(.degrees(bayonetRotation))
+            }
+            .shadow(
+                color: Palette.accent.opacity(mountingGlow * 0.36),
+                radius: 8
+            )
+
+            // Lens barrel slides toward the body and seats into the mount.
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.36, green: 0.38, blue: 0.42),
+                                Color(red: 0.12, green: 0.13, blue: 0.16),
+                                Color(red: 0.28, green: 0.30, blue: 0.34)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                Color.white.opacity(0.22),
+                                lineWidth: 0.8
+                            )
+                    }
+
+                HStack(spacing: 4) {
+                    ForEach(0..<3, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.black.opacity(0.65))
+                            .frame(width: 3, height: 31)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 1)
+                                    .strokeBorder(
+                                        Color.white.opacity(0.16),
+                                        lineWidth: 0.5
+                                    )
+                            }
+                    }
+
+                    Circle()
+                        .fill(Color.black)
+                        .frame(width: 23, height: 23)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    Color.white.opacity(0.42),
+                                    lineWidth: 2
+                                )
+                        }
+                        .overlay {
+                            Circle()
+                                .fill(Color(red: 0.04, green: 0.05, blue: 0.07))
+                                .frame(width: 13, height: 13)
+                        }
+                }
+                .padding(.horizontal, 5)
+            }
+            .frame(width: 70, height: 42)
+            .offset(x: (1.0 - lensAlignment) * 24)
+            .rotation3DEffect(
+                .degrees((1.0 - lensAlignment) * -7),
+                axis: (x: 0, y: 1, z: 0)
+            )
+            .scaleEffect(0.94 + lensAlignment * 0.06)
+        }
+        .overlay(alignment: .bottom) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(phase == 3 ? Palette.good : Palette.accent)
+                    .frame(width: 5, height: 5)
+
+                Text(stageTitle)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(
+                        phase == 3 ? Palette.good : Palette.textSub
+                    )
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .offset(y: 11)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Camera and lens mounting ceremony")
+        .accessibilityValue(stageTitle)
+    }
+
+    private var stageTitle: String {
+        switch phase {
+        case 1:
+            return "ALIGNING \(cameraModel.uppercased()) · \(lensSummary.uppercased())"
+        case 2:
+            return "BAYONET ROTATION · LOCK PIN ENGAGING"
+        case 3:
+            return "SHUTTER ADVANCED · RIG COCKED"
+        default:
+            return "MOUNTING"
+        }
     }
 }
 
