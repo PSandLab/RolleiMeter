@@ -165,6 +165,8 @@ struct RollView: View {
     @State private var selectedCategory: String = "Color"
     @State private var query: String = ""
     @State private var didInitializeStage: Bool = false
+    /// The list row whose loading chamber is open (nil = all rows closed).
+    @State private var expandedRowID: String? = nil
 
     private let categories = ["Color", "B&W", "Slide", "Custom"]
     private let quickDecades = [10, 15, 20, 25, 30, 40]
@@ -292,301 +294,139 @@ struct RollView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // ── ONE UNIFIED CONNECTED FILM LOADING & CANISTER CHASSIS ──
-                VStack(spacing: 0) {
-                    // PART A: Upper Open-Camera Loading Bay
-                    VStack(alignment: .leading, spacing: 14) {
-                        // MARK: - Selected Stock Header + Floating Glass Controls
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 16) {
+                    // MARK: - Film Category Selector: Grouped Liquid Glass
 
-                        HStack(alignment: .center, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(activeStagedName)
-                                    .font(.title3.weight(.bold))
+                    HStack(spacing: 6) {
+                        ForEach(categories, id: \.self) { cat in
+                            let active = selectedCategory == cat
+
+                            RolleiGlassSegment(
+                                title: cat,
+                                isSelected: active
+                            ) {
+                                guard !active else { return }
+
+                                Haptics.tap()
+
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                    selectedCategory = cat
+                                    expandedRowID = nil
+                                }
+                            }
+                        }
+                    }
+                    .rolleiGlassGroup(spacing: 6)
+
+                    // MARK: - Film Canister List
+                    // Each row is a film stock. Tapping a row opens the loading
+                    // chamber inline, directly beneath the row that was tapped.
+
+                    VStack(spacing: 0) {
+                        if selectedCategory == "Custom" {
+                            customFilmRows
+                        } else if filteredFamilies.isEmpty {
+                            ContentUnavailableView.search(text: query)
+                                .padding(.vertical, 24)
+                        } else {
+                            ForEach(Array(filteredFamilies.enumerated()), id: \.element.id) { index, family in
+                                if index > 0 {
+                                    rowSeparator
+                                }
+
+                                filmRow(
+                                    id: familyRowID(family),
+                                    brand: family.brand,
+                                    brandLabel: family.brand,
+                                    familyName: family.familyName,
+                                    category: family.category,
+                                    isoLabel: family.variants.map(\.label).joined(separator: " / "),
+                                    defaultISO: family.variants.first?.iso ?? 400,
+                                    isLoaded: isLoaded(family),
+                                    onDelete: nil
+                                ) {
+                                    stage(family: family)
+                                }
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Palette.panel)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                            )
+                    )
+                    .clipShape(.rect(cornerRadius: 24, style: .continuous))
+
+                    // ── COMPACT CAMERA & LENS FOOTER CARD ──
+                    NavigationLink(value: FilmRoute.gear) {
+                        HStack(spacing: 12) {
+                            if let brand = activeCameraBrand {
+                                CameraBrandLogo(brand: brand, size: 38)
+                            } else {
+                                Image(systemName: "camera")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 38, height: 38)
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(gear.hasCamera ? gear.cameraName : "Choose Camera")
+                                    .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(Palette.text)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.86)
                                     .fixedSize(horizontal: false, vertical: true)
-
-                                HStack(spacing: 6) {
-                                    Text(activeStagedCategory.uppercased())
-                                        .font(.caption2.weight(.semibold))
+                                if let subtitle = cameraSubtitle {
+                                    Text(subtitle)
+                                        .font(.caption)
                                         .foregroundStyle(Palette.textSub)
-
-                                    if stagedCustomStock != nil || stagedFamily.variants.count == 1 {
-                                        Text("ISO \(activeStagedISO)")
-                                            .font(.caption2.weight(.semibold).monospacedDigit())
-                                            .foregroundStyle(Palette.textSub)
-                                    }
-
-                                    if isStagedAlreadyLoaded {
-                                        Text("ACTIVE · \(roll.currentFrame)/\(roll.maxFrames)")
-                                            .font(.caption2.weight(.bold).monospacedDigit())
-                                            .foregroundStyle(Palette.good)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.8)
-                                    } else {
-                                        Text("NEW ROLL")
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(Palette.textDim)
-                                    }
-                                }
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.78)
-                            }
-
-                            Spacer(minLength: 4)
-
-                            HStack(spacing: 8) {
-                                Menu {
-                                    Picker("Roll Length", selection: $stagedFrames) {
-                                        Text("36 Exposures · Standard").tag(36)
-                                        Text("24 Exposures").tag(24)
-                                        Text("16 Exposures · Half Roll").tag(16)
-                                        Text("12 Exposures").tag(12)
-                                    }
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Text("\(stagedFrames) EXP")
-                                            .monospacedDigit()
-
-                                        Image(systemName: "chevron.up.chevron.down")
-                                            .font(.system(size: 9, weight: .bold))
-                                    }
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Palette.text)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 9)
-                                    .rolleiGlassCapsule()
-                                }
-                                .accessibilityLabel("Roll length")
-                                .accessibilityValue("\(stagedFrames) exposures")
-
-                                Button {
-                                    Haptics.tap()
-                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.68)) {
-                                        stagedExpired.toggle()
-                                    }
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        Image(
-                                            systemName: stagedExpired
-                                                ? "clock.badge.exclamationmark.fill"
-                                                : "clock"
-                                        )
-                                        .font(.system(size: 11, weight: .semibold))
-
-                                        Text("Expired")
-                                            .font(.caption.weight(.semibold))
-                                    }
-                                    .foregroundStyle(
-                                        stagedExpired ? Palette.accent : Palette.text
-                                    )
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 9)
-                                    .rolleiGlassCapsule(
-                                        tint: stagedExpired
-                                            ? Palette.accent.opacity(0.24)
-                                            : nil
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Expired film")
-                                .accessibilityValue(stagedExpired ? "On" : "Off")
-                            }
-                            .rolleiGlassGroup(spacing: 8)
-                        }
-
-                        // Fast Tactile Expired Film Decade Pills & Continuous Scrubber (1 to 50 Years)
-                        if stagedExpired {
-                            ExpiredFilmFastScrubber(
-                                years: $stagedExpiredYears,
-                                quickDecades: quickDecades,
-                                supportsCompensation: activeStagedCategory.caseInsensitiveCompare("Slide") != .orderedSame
-                            )
-                            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-                        }
-
-                        // MARK: - ISO Variant Selector: One Grouped Liquid Glass Control
-
-                        if stagedCustomStock == nil && stagedFamily.variants.count > 1 {
-                            HStack(spacing: 8) {
-                                ForEach(stagedFamily.variants) { option in
-                                    let isSelected = option.id == stagedVariant.id
-
-                                    RolleiGlassSegment(
-                                        title: option.label,
-                                        isSelected: isSelected
-                                    ) {
-                                        guard !isSelected else { return }
-
-                                        Haptics.tap()
-
-                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.65)) {
-                                            stagedVariantID = option.id
-                                        }
-                                    }
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.82)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
-                            .rolleiGlassGroup(spacing: 8)
-                            .accessibilityLabel("Film ISO")
-                        }
-
-                        // The Interactive 35mm Leader-Pull Chamber
-                        InteractiveFilmLeaderChamber(
-                            brand: activeStagedBrand,
-                            familyName: activeStagedFamilyName,
-                            stockFullName: shortFilmBadge(name: activeStagedName, iso: activeStagedISO),
-                            category: activeStagedCategory,
-                            iso: activeStagedISO,
-                            rollLength: stagedFrames,
-                            rollNumber: nextRollNumber,
-                            isAlreadyLoaded: isStagedAlreadyLoaded
-                        ) {
-                            commitLoadedFilm()
-                        }
-                    }
-                    .padding(16)
-
-                    // Machined Seam Connecting the Chamber to the Physical Canister Tray
-                    Rectangle()
-                        .fill(Color.white.opacity(0.07))
-                        .frame(height: 1)
-
-                    // PART B: Connected Physical 3D Canister Tray (Same Housing)
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack {
-                            Text("CANISTER TRAY")
-                                .font(.caption2.weight(.bold))
-                                .tracking(1.6)
-                                .foregroundStyle(Palette.textDim)
 
                             Spacer()
 
-                            // MARK: - Film Category Selector: Grouped Liquid Glass
-
-                            HStack(spacing: 5) {
-                                ForEach(categories, id: \.self) { cat in
-                                    let active = selectedCategory == cat
-
-                                    RolleiGlassSegment(
-                                        title: cat,
-                                        isSelected: active
-                                    ) {
-                                        guard !active else { return }
-
-                                        Haptics.tap()
-
-                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.7)) {
-                                            selectedCategory = cat
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .rolleiGlassGroup(spacing: 6)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Palette.textDim)
                         }
-
-                        // Physical 35mm Canister Slots Grid
-                        if selectedCategory == "Custom" {
-                            customCanisterGrid
-                        } else {
-                            LazyVGrid(
-                                columns: [
-                                    GridItem(.flexible(), spacing: 10),
-                                    GridItem(.flexible(), spacing: 10),
-                                    GridItem(.flexible(), spacing: 10)
-                                ],
-                                spacing: 10
-                            ) {
-                                ForEach(filteredFamilies) { family in
-                                    let isStaged = (stagedCustomStock == nil && stagedFamily.id == family.id)
-                                    PhysicalCanisterSlotCard(
-                                        brand: family.brand,
-                                        brandLabel: family.brand,
-                                        familyName: family.familyName,
-                                        category: family.category,
-                                        isoLabel: family.variants.map(\.label).joined(separator: "/"),
-                                        defaultISO: family.variants.first?.iso ?? 400,
-                                        isStaged: isStaged
-                                    ) {
-                                        Haptics.rigid()
-                                        withAnimation(.spring(response: 0.28, dampingFraction: 0.62)) {
-                                            stagedCustomStock = nil
-                                            stagedFamily = family
-                                            stagedVariantID = family.variants[0].id
-                                            stagedFrames = 36
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(16)
-                    .background(Color.black.opacity(0.28))
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(Palette.panel)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        .padding(14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Palette.panel)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                                )
                         )
-                )
-                .clipShape(.rect(cornerRadius: 24, style: .continuous))
-
-                // ── COMPACT CAMERA & LENS FOOTER CARD (Out of the way of the Film Chamber) ──
-                NavigationLink(value: FilmRoute.gear) {
-                    HStack(spacing: 12) {
-                        if let brand = activeCameraBrand {
-                            CameraBrandLogo(brand: brand, size: 38)
-                        } else {
-                            Image(systemName: "camera")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 38, height: 38)
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(gear.hasCamera ? gear.cameraName : "Choose Camera")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Palette.text)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.86)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if let subtitle = cameraSubtitle {
-                                Text(subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(Palette.textSub)
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.82)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Palette.textDim)
                     }
-                    .padding(14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Palette.panel)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-                            )
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .onChange(of: expandedRowID) { _, newID in
+                guard let newID else { return }
+
+                // Once the drawer has finished opening, nudge the scroll view
+                // only as much as needed to reveal the whole chamber.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(420))
+                    guard expandedRowID == newID else { return }
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                        proxy.scrollTo(newID, anchor: nil)
+                    }
+                }
+            }
         }
         .background(Palette.background.ignoresSafeArea())
-        .searchable(text: $query, prompt: "Search film canisters")
+        .searchable(text: $query, prompt: "Search films")
         .navigationDestination(for: FilmRoute.self) { route in
             switch route {
             case .library:
@@ -604,6 +444,7 @@ struct RollView: View {
                         stagedExpiredYears = yearsExpired
                         selectedCategory = family.category
                         query = ""
+                        expandedRowID = familyRowID(family)
                     }
 
                     popToRoll()
@@ -617,6 +458,7 @@ struct RollView: View {
                         stagedExpiredYears = 20
                         selectedCategory = "Custom"
                         query = ""
+                        expandedRowID = customRowID(createdStock)
                     }
 
                     popToRoll()
@@ -625,7 +467,7 @@ struct RollView: View {
                 CameraLensView(store: store, onFinish: popToRoll)
             }
         }
-        .navigationTitle("Film Chamber")
+        .navigationTitle("Film")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -659,99 +501,341 @@ struct RollView: View {
         }
     }
 
+    // MARK: - List Rows
+
+    private var rowSeparator: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.06))
+            .frame(height: 1)
+            .padding(.leading, 80)
+    }
+
+    private func familyRowID(_ family: FilmFamily) -> String {
+        "family_\(family.id)"
+    }
+
+    private func customRowID(_ stock: FilmStockPreset) -> String {
+        "custom_\(stock.id)"
+    }
+
+    private func isLoaded(_ family: FilmFamily) -> Bool {
+        guard !roll.isUnloaded else { return false }
+        return family.variants.contains {
+            $0.fullName.caseInsensitiveCompare(roll.filmName) == .orderedSame
+                && $0.iso == roll.boxIso
+        }
+    }
+
+    private func isLoaded(_ stock: FilmStockPreset) -> Bool {
+        guard !roll.isUnloaded else { return false }
+        return stock.name.caseInsensitiveCompare(roll.filmName) == .orderedSame
+            && stock.iso == roll.boxIso
+    }
+
+    /// One film in the list: a tappable header and, when open, the loading
+    /// drawer (variants, roll length, expiry and the leader-pull chamber).
     @ViewBuilder
-    private var customCanisterGrid: some View {
-        LazyVGrid(
-            columns: [
-                GridItem(.flexible(), spacing: 10),
-                GridItem(.flexible(), spacing: 10),
-                GridItem(.flexible(), spacing: 10)
-            ],
-            spacing: 10
-        ) {
-            if filteredCustomFilms.isEmpty {
-                ContentUnavailableView(
-                    query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "No Custom Films"
-                        : "No Matching Films",
-                    systemImage: "film",
-                    description: Text(
-                        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? "Create a custom stock to add it to your tray."
-                            : "Try another film name or ISO."
-                    )
-                )
-                .frame(maxWidth: .infinity)
-                .gridCellColumns(3)
-            }
+    private func filmRow(
+        id: String,
+        brand: String,
+        brandLabel: String,
+        familyName: String,
+        category: String,
+        isoLabel: String,
+        defaultISO: Int,
+        isLoaded: Bool,
+        onDelete: (() -> Void)?,
+        onStage: @escaping () -> Void
+    ) -> some View {
+        let isExpanded = expandedRowID == id
 
-            ForEach(filteredCustomFilms) { stock in
-                let isStaged = stagedCustomStock?.id == stock.id
-
-                PhysicalCanisterSlotCard(
-                    brand: stock.name,
-                    brandLabel: "CUSTOM",
-                    familyName: stock.name,
-                    category: stock.category,
-                    isoLabel: "ISO \(stock.iso)",
-                    defaultISO: stock.iso,
-                    isStaged: isStaged
-                ) {
-                    Haptics.rigid()
-
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.62)) {
-                        stagedCustomStock = stock
-                        stagedFrames = 36
-                    }
-                }
-                .contextMenu {
-                    Button(role: .destructive) {
-                        deleteCustomStock(stock)
-                    } label: {
-                        Label("Delete Custom Film", systemImage: "trash")
-                    }
-                }
-            }
-
-            NavigationLink(value: FilmRoute.customFilm) {
-                VStack(spacing: 8) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(
-                                style: StrokeStyle(lineWidth: 1.2, dash: [4, 4])
-                            )
-                            .foregroundStyle(Palette.accent.opacity(0.55))
-                            .frame(width: 48, height: 56)
-
-                        Image(systemName: "plus")
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(Palette.accent)
+        VStack(spacing: 0) {
+            FilmCanisterListRow(
+                brand: brand,
+                brandLabel: brandLabel,
+                familyName: familyName,
+                category: category,
+                isoLabel: isoLabel,
+                defaultISO: defaultISO,
+                isExpanded: isExpanded,
+                isLoaded: isLoaded,
+                onSelect: {
+                    if isExpanded {
+                        Haptics.tap()
+                    } else {
+                        Haptics.rigid()
                     }
 
-                    Text("Custom Film")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Palette.accent)
-                        .lineLimit(1)
-
-                    Text("Add Stock")
-                        .font(.caption2)
-                        .foregroundStyle(Palette.textDim)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.white.opacity(0.035))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(
-                                    Color.white.opacity(0.09),
-                                    lineWidth: 0.8
-                                )
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                        if isExpanded {
+                            expandedRowID = nil
+                        } else {
+                            onStage()
+                            expandedRowID = id
                         }
-                )
+                    }
+                },
+                onDelete: onDelete
+            )
+
+            if isExpanded {
+                loadingDrawer
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity
+                                .combined(with: .scale(scale: 0.97, anchor: .top)),
+                            removal: .opacity
+                        )
+                    )
             }
-            .buttonStyle(.plain)
+        }
+        .background(isExpanded ? Palette.accent.opacity(0.05) : Color.clear)
+        .clipped()
+        .id(id)
+    }
+
+    @ViewBuilder
+    private var customFilmRows: some View {
+        let hasQuery = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        if filteredCustomFilms.isEmpty && hasQuery {
+            ContentUnavailableView.search(text: query)
+                .padding(.vertical, 24)
+            rowSeparator
+        }
+
+        ForEach(filteredCustomFilms) { stock in
+            filmRow(
+                id: customRowID(stock),
+                brand: stock.name,
+                brandLabel: "Custom",
+                familyName: stock.name,
+                category: stock.category,
+                isoLabel: "ISO \(stock.iso)",
+                defaultISO: stock.iso,
+                isLoaded: isLoaded(stock),
+                onDelete: { deleteCustomStock(stock) }
+            ) {
+                stage(custom: stock)
+            }
+
+            rowSeparator
+        }
+
+        NavigationLink(value: FilmRoute.customFilm) {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
+                        .foregroundStyle(Palette.accent.opacity(0.55))
+                        .frame(width: 44, height: 50)
+
+                    Image(systemName: "plus")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Palette.accent)
+                }
+                .frame(width: 52, height: 54)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("New Custom Film")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Palette.accent)
+
+                    Text(
+                        store.customFilms.isEmpty
+                            ? "Add a stock that isn't in the catalog"
+                            : "Add another stock"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(Palette.textSub)
+                    .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.textDim)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Inline Loading Drawer (opens under the tapped row)
+
+    private var loadingDrawer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                HStack(spacing: 6) {
+                    if stagedCustomStock != nil || stagedFamily.variants.count == 1 {
+                        Text("ISO \(activeStagedISO)")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(Palette.textSub)
+                    }
+
+                    if isStagedAlreadyLoaded {
+                        Text("ACTIVE · \(roll.currentFrame)/\(roll.maxFrames)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(Palette.good)
+                    } else {
+                        Text("NEW ROLL")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Palette.textDim)
+                    }
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+                Spacer(minLength: 4)
+
+                HStack(spacing: 8) {
+                    Menu {
+                        Picker("Roll Length", selection: $stagedFrames) {
+                            Text("36 Exposures · Standard").tag(36)
+                            Text("24 Exposures").tag(24)
+                            Text("16 Exposures · Half Roll").tag(16)
+                            Text("12 Exposures").tag(12)
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("\(stagedFrames) EXP")
+                                .monospacedDigit()
+
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Palette.text)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .rolleiGlassCapsule()
+                    }
+                    .accessibilityLabel("Roll length")
+                    .accessibilityValue("\(stagedFrames) exposures")
+
+                    Button {
+                        Haptics.tap()
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.68)) {
+                            stagedExpired.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(
+                                systemName: stagedExpired
+                                    ? "clock.badge.exclamationmark.fill"
+                                    : "clock"
+                            )
+                            .font(.system(size: 11, weight: .semibold))
+
+                            Text("Expired")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(
+                            stagedExpired ? Palette.accent : Palette.text
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .rolleiGlassCapsule(
+                            tint: stagedExpired
+                                ? Palette.accent.opacity(0.24)
+                                : nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Expired film")
+                    .accessibilityValue(stagedExpired ? "On" : "Off")
+                }
+                .rolleiGlassGroup(spacing: 8)
+            }
+
+            // Fast Tactile Expired Film Decade Pills & Continuous Scrubber (1 to 50 Years)
+            if stagedExpired {
+                ExpiredFilmFastScrubber(
+                    years: $stagedExpiredYears,
+                    quickDecades: quickDecades,
+                    supportsCompensation: activeStagedCategory.caseInsensitiveCompare("Slide") != .orderedSame
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
+
+            // MARK: - ISO Variant Selector: One Grouped Liquid Glass Control
+
+            if stagedCustomStock == nil && stagedFamily.variants.count > 1 {
+                HStack(spacing: 8) {
+                    ForEach(stagedFamily.variants) { option in
+                        let isSelected = option.id == stagedVariant.id
+
+                        RolleiGlassSegment(
+                            title: option.label,
+                            isSelected: isSelected
+                        ) {
+                            guard !isSelected else { return }
+
+                            Haptics.tap()
+
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.65)) {
+                                stagedVariantID = option.id
+                            }
+                        }
+                    }
+                }
+                .rolleiGlassGroup(spacing: 8)
+                .accessibilityLabel("Film ISO")
+            }
+
+            // The Interactive 35mm Leader-Pull Chamber
+            InteractiveFilmLeaderChamber(
+                brand: activeStagedBrand,
+                familyName: activeStagedFamilyName,
+                stockFullName: shortFilmBadge(name: activeStagedName, iso: activeStagedISO),
+                category: activeStagedCategory,
+                iso: activeStagedISO,
+                rollLength: stagedFrames,
+                rollNumber: nextRollNumber,
+                isAlreadyLoaded: isStagedAlreadyLoaded
+            ) {
+                commitLoadedFilm()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 2)
+        .padding(.bottom, 16)
+    }
+
+    // MARK: - Staging
+
+    private func stage(family: FilmFamily) {
+        stagedCustomStock = nil
+        stagedFamily = family
+
+        if isLoaded(family),
+           let match = family.variants.first(where: {
+               $0.fullName.caseInsensitiveCompare(roll.filmName) == .orderedSame
+                   && $0.iso == roll.boxIso
+           }) {
+            // Re-opening the roll that is in the camera shows it as loaded.
+            stagedVariantID = match.id
+            stagedFrames = roll.maxFrames
+            stagedExpired = roll.isExpired
+            stagedExpiredYears = roll.isExpired ? roll.yearsExpired : 20
+        } else {
+            stagedVariantID = family.variants[0].id
+            stagedFrames = 36
+        }
+    }
+
+    private func stage(custom stock: FilmStockPreset) {
+        stagedCustomStock = stock
+
+        if isLoaded(stock) {
+            stagedFrames = roll.maxFrames
+            stagedExpired = roll.isExpired
+            stagedExpiredYears = roll.isExpired ? roll.yearsExpired : 20
+        } else {
+            stagedFrames = 36
         }
     }
 
@@ -803,8 +887,15 @@ struct RollView: View {
 
     private func deleteCustomStock(_ stock: FilmStockPreset) {
         let wasStaged = stagedCustomStock?.id == stock.id
+        let rowID = customRowID(stock)
 
         store.deleteCustomFilm(stock)
+
+        if expandedRowID == rowID {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                expandedRowID = nil
+            }
+        }
 
         guard wasStaged else { return }
 
@@ -817,7 +908,6 @@ struct RollView: View {
             stagedFrames = 36
             stagedExpired = false
             stagedExpiredYears = 20
-            selectedCategory = fallback.category
         }
     }
 
@@ -843,90 +933,108 @@ struct RollView: View {
     }
 }
 
-// MARK: - Physical 35mm Canister Slot Card
+// MARK: - Film Canister List Row
 
-private struct PhysicalCanisterSlotCard: View {
+private struct FilmCanisterListRow: View {
     let brand: String
     let brandLabel: String
     let familyName: String
     let category: String
     let isoLabel: String
     let defaultISO: Int
-    let isStaged: Bool
+    let isExpanded: Bool
+    let isLoaded: Bool
     let onSelect: () -> Void
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(spacing: 7) {
-                ZStack {
-                    // Recessed physical foam slot shadow.
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.black.opacity(0.45))
-                        .frame(width: 58, height: 64)
+        if let onDelete {
+            header
+                .contextMenu {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete Custom Film", systemImage: "trash")
+                    }
+                }
+        } else {
+            header
+        }
+    }
 
-                    // Keep the existing real canister artwork and leader animation.
+    private var header: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 14) {
+                ZStack {
+                    // Recessed physical foam slot.
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color.black.opacity(0.42))
+                        .frame(width: 48, height: 52)
+
                     FilmCanisterArtwork(
                         brand: brand,
                         familyName: familyName,
                         category: category,
                         iso: defaultISO,
                         showLeader: true,
-                        leaderExtension: isStaged ? 1.0 : 0.45,
-                        width: 50,
-                        height: 54
+                        leaderExtension: isExpanded ? 1.0 : 0.4,
+                        width: 46,
+                        height: 50
                     )
-                    .scaleEffect(isStaged ? 1.08 : 0.96)
-                    .offset(y: isStaged ? -3 : 0)
+                    .scaleEffect(isExpanded ? 1.06 : 1.0)
+                }
+                .frame(width: 52, height: 54)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(familyName)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isExpanded ? Palette.accent : Palette.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text("\(brandLabel) · \(isoLabel)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Palette.textSub)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
-                Text(familyName)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(
-                        isStaged ? Palette.accent : Palette.text
-                    )
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: 34,
-                        alignment: .center
-                    )
+                Spacer(minLength: 8)
 
-                Text("\(brandLabel) · \(isoLabel)")
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Palette.textSub)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .frame(maxWidth: .infinity)
+                if isLoaded {
+                    Text("IN CAMERA")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.6)
+                        .foregroundStyle(Palette.good)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Palette.good.opacity(0.14)))
+                }
+
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isExpanded ? Palette.accent : Palette.textDim)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity)
-            .background {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .fill(
-                        isStaged
-                            ? Palette.accent.opacity(0.09)
-                            : Color.white.opacity(0.035)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 17, style: .continuous)
-                            .strokeBorder(
-                                isStaged
-                                    ? Palette.accent.opacity(0.88)
-                                    : Color.white.opacity(0.09),
-                                lineWidth: isStaged ? 1.6 : 0.8
-                            )
-                    }
-            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(PressStyle(scale: 0.94))
+        .buttonStyle(FilmRowPressStyle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(brandLabel), \(familyName), \(isoLabel)"
+        .accessibilityLabel("\(brandLabel), \(familyName), \(isoLabel)")
+        .accessibilityValue(
+            isLoaded ? "In camera" : (isExpanded ? "Open" : "Closed")
         )
-        .accessibilityValue(isStaged ? "Selected" : "Not selected")
-        .accessibilityAddTraits(isStaged ? .isSelected : [])
+        .accessibilityHint(isExpanded ? "Closes the loading chamber" : "Opens the loading chamber")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+private struct FilmRowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Color.white.opacity(configuration.isPressed ? 0.05 : 0))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
