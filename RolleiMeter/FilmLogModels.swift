@@ -256,6 +256,33 @@ let BUILTIN_FILM_STOCKS: [FilmStockPreset] = BUILTIN_FILM_FAMILIES.flatMap { fam
     }
 }
 
+// MARK: - Expired Storage Condition
+
+enum ExpiredStorageCondition: String, Codable, CaseIterable, Identifiable {
+    case cold = "Cold"
+    case room = "Room"
+    case hot  = "Hot"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .cold: return "❄️ Cold"
+        case .room: return "🏠 Room"
+        case .hot:  return "☀️ Attic"
+        }
+    }
+
+    /// Stops-per-decade multiplier
+    var slopeMultiplier: Double {
+        switch self {
+        case .cold: return 0.25
+        case .room: return 1.00
+        case .hot:  return 1.50
+        }
+    }
+}
+
 // MARK: - Film Roll State
 
 struct FilmRollState: Codable, Equatable {
@@ -268,6 +295,27 @@ struct FilmRollState: Codable, Equatable {
     var isExpired: Bool = false
     var expiredYear: Int = 2016
     var autoApplyExpiredComp: Bool = true
+    var expiredStorageCondition: ExpiredStorageCondition = .room
+
+    enum CodingKeys: String, CodingKey {
+        case rollNumber, filmName, boxIso, category, currentFrame, maxFrames, isExpired, expiredYear, autoApplyExpiredComp, expiredStorageCondition
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rollNumber = try container.decodeIfPresent(Int.self, forKey: .rollNumber) ?? 1
+        filmName = try container.decodeIfPresent(String.self, forKey: .filmName) ?? "Kodak Portra 400"
+        boxIso = try container.decodeIfPresent(Int.self, forKey: .boxIso) ?? 400
+        category = try container.decodeIfPresent(String.self, forKey: .category) ?? "Color"
+        currentFrame = try container.decodeIfPresent(Int.self, forKey: .currentFrame) ?? 1
+        maxFrames = try container.decodeIfPresent(Int.self, forKey: .maxFrames) ?? 36
+        isExpired = try container.decodeIfPresent(Bool.self, forKey: .isExpired) ?? false
+        expiredYear = try container.decodeIfPresent(Int.self, forKey: .expiredYear) ?? 2016
+        autoApplyExpiredComp = try container.decodeIfPresent(Bool.self, forKey: .autoApplyExpiredComp) ?? true
+        expiredStorageCondition = try container.decodeIfPresent(ExpiredStorageCondition.self, forKey: .expiredStorageCondition) ?? .room
+    }
 
     var isUnloaded: Bool {
         filmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -300,9 +348,16 @@ struct FilmRollState: Codable, Equatable {
         return Double(yearsExpired) / 10.0
     }
 
+    var isHighISOCosmicSensitive: Bool {
+        boxIso >= 1600
+    }
+
     var recommendedExpiredCompEv: Double {
         guard !isUnloaded && isExpired && !isSlideFilm else { return 0.0 }
-        return (decadesExpired * 3.0).rounded() / 3.0
+        let storageSlope = expiredStorageCondition.slopeMultiplier
+        let cosmicFactor = isHighISOCosmicSensitive ? 1.35 : 1.00
+        let rawEv = decadesExpired * storageSlope * cosmicFactor
+        return (rawEv * 3.0).rounded() / 3.0
     }
 
     var activeExpiredCompEv: Double {

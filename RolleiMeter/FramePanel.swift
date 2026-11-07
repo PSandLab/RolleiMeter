@@ -14,6 +14,10 @@ struct FramePanel: View {
     @State private var advancePulse: Double = 0.0
 
     var body: some View {
+        let rollFillRatio = min(max(Double(frame) / Double(max(rollLength, 1)), 0.0), 1.2)
+        let dynamicResponse = 0.34 + (0.08 * rollFillRatio)       // 0.34s at Frame 1 -> 0.42s at Frame 36
+        let dynamicDamping  = 0.42 + (0.22 * rollFillRatio)       // 0.42 at Frame 1  -> 0.64 at Frame 36
+
         ZStack(alignment: .top) {
             PanelTitle(text: "FRAME", k: k)
                 .scaleEffect(1.0 + 0.03 * advancePulse)
@@ -31,18 +35,18 @@ struct FramePanel: View {
         .onTapGesture {
             UISelectionFeedbackGenerator().selectionChanged()
             advancePulse = 0.7
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.45)) {
+            withAnimation(.spring(response: dynamicResponse, dampingFraction: dynamicDamping)) {
                 advancePulse = 0.0
             }
             onTap()
         }
         .onChange(of: frame) { _, _ in
             advancePulse = 1.0
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.44)) {
+            withAnimation(.spring(response: dynamicResponse, dampingFraction: dynamicDamping)) {
                 advancePulse = 0.0
             }
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.64), value: frame)
+        .animation(.spring(response: dynamicResponse, dampingFraction: dynamicDamping), value: frame)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isUnloaded ? "No film roll loaded" : "Frame \(frame) of \(rollLength)")
     }

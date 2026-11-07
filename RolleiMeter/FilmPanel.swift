@@ -69,16 +69,64 @@ struct FilmPanel: View {
                             )
                     )
 
+                if isPullOrPush {
+                    // Parallax Detent Scale along bottom inner edge
+                    Canvas { ctx, size in
+                        let midX = size.width * 0.5
+                        let bottomY = size.height - 2 * k
+                        let tickSpacing: CGFloat = 8 * k
+                        for i in -7...7 {
+                            let tx = midX + CGFloat(i) * tickSpacing - dragOffset * 0.65
+                            guard tx >= 8 * k && tx <= size.width - 8 * k else { continue }
+                            let isCenter = i == 0
+                            let tickH: CGFloat = isCenter ? 4 * k : 2.2 * k
+                            var p = Path()
+                            p.move(to: CGPoint(x: tx, y: bottomY - tickH))
+                            p.addLine(to: CGPoint(x: tx, y: bottomY))
+                            ctx.stroke(p, with: .color(isCenter ? Palette.accent : Color.white.opacity(0.18)), lineWidth: 1.0 * k)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14 * k, style: .continuous))
+                    .allowsHitTesting(false)
+                }
+
                 Text(readout)
-                    .font(AppTypography.next(size: 27 * k, weight: .medium).monospacedDigit())
+                    .font(AppTypography.next(size: (isPullOrPush ? 23 : 27) * k, weight: .medium).monospacedDigit())
                     .foregroundStyle(isUnloaded || isPullOrPush ? Palette.accent : Palette.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
                     .padding(.horizontal, 14 * k)
                     .scaleEffect(1.0 + 0.08 * isoPulse)
-                    .offset(x: dragOffset * 0.35)
+                    .offset(x: dragOffset * 0.35, y: isPullOrPush ? -7 * k : 0)
                     .contentTransition(.numericText())
                     .animation(.spring(response: 0.24, dampingFraction: 0.62), value: readout)
+
+                if isPullOrPush {
+                    let evStops = log2(Double(currentISO) / Double(max(boxISO, 1)))
+                    let formattedStops = String(format: "%+.1f", evStops).replacingOccurrences(of: ".0", with: "")
+                    let pushPullTag = evStops > 0 ? "PUSH \(formattedStops)" : "PULL \(formattedStops)"
+
+                    VStack(spacing: 0) {
+                        Spacer()
+                        HStack(spacing: 6 * k) {
+                            // Struck-through original box ISO
+                            Text("\(boxISO)")
+                                .font(AppTypography.next(size: 11 * k, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(Palette.textDim)
+                                .strikethrough(true, color: Palette.accent)
+
+                            // Push/Pull Stop Badge
+                            Text(pushPullTag)
+                                .font(.system(size: 9.5 * k, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Palette.accent)
+                                .padding(.horizontal, 5 * k)
+                                .padding(.vertical, 1.5 * k)
+                                .background(Palette.accent.opacity(0.16), in: Capsule())
+                        }
+                        .offset(x: -dragOffset * 0.45)
+                        .padding(.bottom, 3 * k)
+                    }
+                }
             }
             .offset(x: dragOffset)
             .rotation3DEffect(

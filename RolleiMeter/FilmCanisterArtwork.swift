@@ -3,20 +3,23 @@ import SwiftUI
 // MARK: - 35mm Film Canister Vector Artwork (With Spinning Spindle & Tension Physics)
 
 struct FilmCanisterArtwork: View {
-    let brand: String
-    let familyName: String
-    let category: String
+    var filmName: String = ""
+    var brand: String = ""
+    var familyName: String = ""
     var iso: Int = 400
+    var category: String = "Color"
     var showLeader: Bool = true
     var leaderExtension: CGFloat = 1.0
     var spoolRotation: Double = 0.0
     var tension: CGFloat = 0.0
+    var yearsExpired: Int = 0
     var width: CGFloat = 46
     var height: CGFloat = 42
 
     var body: some View {
-        let b = brand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let f = familyName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let effectiveFilm = (!filmName.isEmpty ? filmName : "\(brand) \(familyName)").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let b = (!brand.isEmpty ? brand : effectiveFilm).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let f = (!familyName.isEmpty ? familyName : effectiveFilm).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let cat = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         Canvas { ctx, size in
@@ -429,6 +432,27 @@ struct FilmCanisterArtwork: View {
             let botCapRect = CGRect(x: cylLeft - w * 0.02, y: cylTop + cylH - capH, width: cylW + w * 0.04, height: capH)
             ctx.fill(Path(roundedRect: topCapRect, cornerRadius: w * 0.04), with: .color(Color(red: 0.118, green: 0.161, blue: 0.231)))
             ctx.fill(Path(roundedRect: botCapRect, cornerRadius: w * 0.04), with: .color(Color(red: 0.118, green: 0.161, blue: 0.231)))
+
+            // Procedural Expired Weathering (Brassing Scratches & Patina on Crimped Steel Rims)
+            let bodyRect = cylRect
+            if yearsExpired >= 10 {
+                let weatherIntensity = min(Double(yearsExpired) / 40.0, 1.0)
+                let scratchCount = min(yearsExpired / 5, 8)
+                for s in 0..<scratchCount {
+                    let normX = CGFloat((s * 37 + 13) % 100) / 100.0
+                    let sx = bodyRect.minX + 4.0 + normX * (bodyRect.width - 8.0)
+                    let topScratch = CGRect(x: sx, y: topCapRect.minY + 1.0, width: 2.4, height: 1.2)
+                    let botScratch = CGRect(x: sx, y: botCapRect.maxY - 2.2, width: 2.8, height: 1.2)
+                    ctx.fill(Path(topScratch), with: .color(Color(red: 0.85, green: 0.68, blue: 0.34).opacity(0.55 * weatherIntensity)))
+                    ctx.fill(Path(botScratch), with: .color(Color(red: 0.85, green: 0.68, blue: 0.34).opacity(0.55 * weatherIntensity)))
+                }
+
+                // Warm Vintage Yellow Patina Wash over Canister Body
+                ctx.fill(
+                    Path(roundedRect: bodyRect, cornerRadius: w * 0.06),
+                    with: .color(Color(red: 0.62, green: 0.48, blue: 0.22).opacity(0.14 * weatherIntensity))
+                )
+            }
 
             // 7. 3D cylindrical horizontal shading (shifts specular highlight slightly with spoolRotation)
             let specShift = CGFloat(sin(radPhase) * 0.04)

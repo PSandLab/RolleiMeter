@@ -13,7 +13,12 @@ struct InteractiveFilmLeaderChamber: View {
     let rollLength: Int
     let rollNumber: Int
     let isAlreadyLoaded: Bool
+    var yearsExpired: Int = 0
+    var isCustomFilm: Bool = false
+    var filmName: String? = nil
     var onLoadComplete: () -> Void
+
+    private var resolvedFilmName: String { filmName ?? stockFullName }
 
     @State private var pullProgress: CGFloat = 0.0
     @State private var dragY: CGFloat = 0.0
@@ -23,46 +28,61 @@ struct InteractiveFilmLeaderChamber: View {
     @State private var heartbeatTask: Task<Void, Never>? = nil
 
     // Grand Loading Ceremony States
+    @State private var isRunningCeremony: Bool = false
+    @State private var isFrameOneLocked: Bool = false
     @State private var ceremonyPhase: Int = 0 // 0 = open chamber, 1 = door closed, 2 = winding S->0->1, 3 = locked at 1
     @State private var doorClosedProgress: CGFloat = 0.0
     @State private var odometerPosition: Double = -2.0 // -2 = "S", -1 = "00", 0 = "0", 1 = "1"
     @State private var motorWindAngle: Double = 0.0
     @State private var ceremonyGlow: Double = 0.0
+    @State private var windShift: CGFloat = 0.0
 
     @State private var lastSprocketTick: Int = 0
     @State private var lastSpindleThunk: Int = 0
     @State private var idlePulse: Bool = false
     @State private var canisterSwapPop: CGFloat = 0.0
 
-    // Leader Threading States (leader tucks into the take-up spool and locks)
-    @State private var isThreading: Bool = false
-    @State private var insertProgress: CGFloat = 0.0   // 0 = at spool mouth, 1 = tucked into catch slot
-    @State private var tabVisibility: CGFloat = 1.0    // pull-tab fades as it disappears into the spool
-    @State private var wrapProgress: CGFloat = 0.0     // film wrapping onto the take-up drum
-    @State private var lockFlash: Double = 0.0         // catch-slot clamp flash
-    @State private var lockWindAngle: Double = 0.0     // first take-up wrap after the clamp bites
+    // Stage 0 Open-Chamber Suck-In & Mechanical Micro-States
+    @State private var suckInProgress: CGFloat = 0.0        // 0.0 -> 1.0 during 450ms pre-door cinch
+    @State private var pressurePlateProgress: CGFloat = 0.0 // 0.0 -> 1.0 spring-steel flatten before door latch
+    @State private var rewindForkAngle: Double = 0.0        // Counter-clockwise spin during Stage 2 wind
+    @State private var dxPinCompression: CGFloat = 0.0      // 0.0 -> 1.0 leaf-spring compression on canister seat
+    @State private var dxTracePulse: CGFloat = 0.0          // 0.0 -> 1.0 gold electrical trace pulse
+    @State private var lastToothClashStep: Int = -1
 
     private let latchThreshold: CGFloat = 0.82
+    private var latchPulseScale: CGFloat { heartbeatScale }
 
     var body: some View {
         VStack(spacing: 10) {
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
-                let startX: CGFloat = 78
-                let endX: CGFloat = w - 52
-                let travel = max(endX - startX, 1)
-                // Past the end of travel the tongue tucks into the drum's catch slot
-                // (the drum is drawn on top, so the tip disappears inside it).
-                let insertDepth = max((w - 30) - endX, 0)
-                let tipX = startX + travel * pullProgress + insertDepth * insertProgress
+                let startX: CGFloat = 78.0
+                let drumCenterX: CGFloat = w - 34.0
+                let drumRadius: CGFloat = 16.0
+                let tangentX: CGFloat = drumCenterX - drumRadius // Left horizon of 3D take-up drum
+                let endX: CGFloat = drumCenterX                  // Tongue threads directly into drum slot center
+                let travel: CGFloat = max(endX - startX, 1.0)
 
-                let tension = min(max((pullProgress - 0.06) / 0.82, 0.0), 1.0)
-                let frictionJitter = isDragging && tension > 0.35 && !isLatchedHold
-                    ? sin(Double(pullProgress * travel) * 0.85) * Double(tension) * 1.4
-                    : 0.0
-                let spoolDegrees = Double(pullProgress * travel) * 3.8 + motorWindAngle + lockWindAngle
-                let isSealing = ceremonyPhase > 0 || isThreading
+                // Effective inward suck distance during Stage 0 cinch (gulps 34pt of leader into the drum)
+                let suckInShiftPt: CGFloat = suckInProgress * 34.0
+                let tipX: CGFloat = startX + travel * pullProgress + suckInShiftPt
+
+                // Sprocket tooth misalignment penalty when pulled at extreme vertical angles (|dragY| > 0.14h)
+                let maxCleanDeflection: CGFloat = h * 0.14
+                let toothClash: CGFloat = min(max((abs(dragY) - maxCleanDeflection) / (h * 0.10), 0.0), 1.0)
+
+                // Tension mounts from 0.06 to 0.88; spikes to 1.0 during Stage 0 suck-in cinch
+                let baseTension = min(max((pullProgress - 0.06) / 0.82, 0.0), 1.0)
+                let tension: CGFloat = max(baseTension, suckInProgress)
+
+                // High-frequency friction jitter amplified by toothClash
+                let jitterAmp: CGFloat = (isDragging && tension > 0.35) ? (1.4 + toothClash * 2.2) : 0.0
+                let frictionJitter: CGFloat = sin((pullProgress * travel) * (0.85 + toothClash * 1.4)) * tension * jitterAmp
+
+                // Total spool rotation includes drag pull, Stage 0 suck-in cinch (140 deg), and Stage 2 motor wind
+                let spoolDegrees: Double = Double(pullProgress * travel) * 3.8 + Double(suckInProgress) * 140.0 + motorWindAngle
 
                 ZStack {
                     // 1. Recessed Camera Film-Back Chamber Track
@@ -71,10 +91,10 @@ struct InteractiveFilmLeaderChamber: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .strokeBorder(
-                                    isSealing
+                                    isRunningCeremony
                                         ? Palette.accent.opacity(0.65)
                                         : (isLatchedHold ? Palette.accent.opacity(0.85) : Color.white.opacity(0.08)),
-                                    lineWidth: isLatchedHold || isSealing ? 1.5 : 1.0
+                                    lineWidth: isLatchedHold || isRunningCeremony ? 1.5 : 1.0
                                 )
                         )
 
@@ -84,40 +104,60 @@ struct InteractiveFilmLeaderChamber: View {
                         endX: endX,
                         pullProgress: pullProgress,
                         latchThreshold: latchThreshold,
-                        isWinding: isSealing
+                        isWinding: isRunningCeremony
                     )
 
-                    // 3. Unspooling 35mm Celluloid Film Strip (Parallel Top/Bottom Bezier Curves)
+                    // LAYER 1 (BOTTOM): Take-Up Spool Cavity, Barrel Core, Vertical Slit & Catch Tooth
+                    TakeUpSpoolBottomLayer(
+                        drumCenterX: drumCenterX,
+                        midY: h * 0.5,
+                        drumRadius: drumRadius,
+                        spoolDegrees: spoolDegrees,
+                        isLatched: pullProgress >= 0.82,
+                        suckInProgress: suckInProgress,
+                        windProgress: CGFloat(min(max(motorWindAngle / 720.0, 0.0), 1.0)),
+                        emulsionCategory: category
+                    )
+
+                    // LAYER 2 (MIDDLE): Unspooling Celluloid Strip + 3D Cylindrical Drum Wrap
                     UnspoolingFilmStripCanvas(
-                        category: category,
                         startX: startX,
                         tipX: tipX,
-                        travel: travel,
+                        tangentX: tangentX,
+                        drumCenterX: drumCenterX,
+                        drumRadius: drumRadius,
+                        midY: h * 0.5,
+                        dragY: dragY * (1.0 - pressurePlateProgress),
                         pullProgress: pullProgress,
-                        dragY: dragY,
-                        motorWindAngle: motorWindAngle,
-                        idlePulse: idlePulse,
-                        isDragging: isDragging,
-                        isLatchedHold: isLatchedHold,
-                        heartbeatScale: heartbeatScale,
-                        tabVisibility: tabVisibility
-                    )
-
-                    // 4. Right Side: Realistic Cylindrical Take-Up Spool Drum (No floating semicircles)
-                    TakeUpSpoolView(
+                        suckInProgress: suckInProgress,
+                        windShift: windShift + suckInShiftPt,
+                        tension: tension,
+                        toothClash: toothClash,
+                        pressurePlateProgress: pressurePlateProgress,
+                        filmName: resolvedFilmName,
                         category: category,
-                        pullProgress: pullProgress,
-                        latchThreshold: latchThreshold,
-                        spoolDegrees: spoolDegrees,
-                        isLatchedHold: isLatchedHold,
-                        heartbeatScale: heartbeatScale,
-                        isWinding: ceremonyPhase > 0,
-                        wrapProgress: wrapProgress,
-                        lockFlash: lockFlash
+                        yearsExpired: yearsExpired
                     )
-                    .position(x: w - 34, y: h * 0.5)
 
-                    // 5. Left Side: Supply Well + 3D Spinning & Tilting Canister (No floating semicircle above)
+                    // LAYER 3 (TOP): Spool Front Cheek Flanges & Over-Clamp Bar (Occludes Leader Tip Inside Slot)
+                    TakeUpSpoolTopFlangeLayer(
+                        drumCenterX: drumCenterX,
+                        midY: h * 0.5,
+                        drumRadius: drumRadius,
+                        spoolDegrees: spoolDegrees,
+                        isLatched: pullProgress >= 0.82,
+                        heartbeatScale: latchPulseScale
+                    )
+
+                    // Left Side: Supply Well DX Leaf-Spring Contact Pins
+                    DXContactPinsCanvas(
+                        midY: h * 0.5,
+                        compression: dxPinCompression,
+                        tracePulse: dxTracePulse,
+                        hasDXCode: !isCustomFilm
+                    )
+
+                    // Left Side: Supply Well + 3D Spinning & Tilting Canister
                     ZStack {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .fill(Color.black.opacity(0.55))
@@ -128,6 +168,7 @@ struct InteractiveFilmLeaderChamber: View {
                             )
 
                         FilmCanisterArtwork(
+                            filmName: resolvedFilmName,
                             brand: brand,
                             familyName: familyName,
                             category: category,
@@ -136,6 +177,7 @@ struct InteractiveFilmLeaderChamber: View {
                             leaderExtension: 0,
                             spoolRotation: spoolDegrees,
                             tension: tension,
+                            yearsExpired: yearsExpired,
                             width: 66,
                             height: 86
                         )
@@ -147,7 +189,7 @@ struct InteractiveFilmLeaderChamber: View {
                     .position(x: 42, y: h * 0.5)
 
                     // 6. Grand Film Loading Ceremony Overlay (Camera Back Door + Odometer Wind S -> 00 -> 0 -> 1)
-                    if ceremonyPhase > 0 {
+                    if doorClosedProgress > 0.01 {
                         GrandFilmLoadingCeremonyView(
                             brand: brand,
                             stockFullName: stockFullName,
@@ -158,133 +200,136 @@ struct InteractiveFilmLeaderChamber: View {
                             doorClosedProgress: doorClosedProgress,
                             odometerPosition: odometerPosition,
                             motorWindAngle: motorWindAngle,
-                            ceremonyGlow: ceremonyGlow
+                            ceremonyGlow: ceremonyGlow,
+                            rewindForkAngle: rewindForkAngle
                         )
                         .transition(.opacity)
                     }
 
                     // 7. Leader Pickup Hit Area.
-// Only the physical leader origin starts the drag.
-// The rest of the chamber remains available to vertical scrolling.
-if ceremonyPhase == 0 && !isThreading {
-    Color.clear
-        .frame(width: 58, height: 58)
-        .contentShape(Circle())
-        .position(x: startX, y: h * 0.5)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 4)
-                .onChanged { value in
-                    if !isDragging {
-                        let horizontal = value.translation.width
-                        let vertical = value.translation.height
+                    if !isRunningCeremony {
+                        Color.clear
+                            .frame(width: 58, height: 58)
+                            .contentShape(Circle())
+                            .position(x: startX, y: h * 0.5)
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 4)
+                                    .onChanged { value in
+                                        if !isDragging {
+                                            let horizontal = value.translation.width
+                                            let vertical = value.translation.height
 
-                        // Ignore taps and vertical gestures.
-                        // This lets the surrounding ScrollView keep scrolling.
-                        guard horizontal > 4,
-                              abs(horizontal) > abs(vertical) * 1.15 else {
-                            return
-                        }
+                                            guard horizontal > 4,
+                                                  abs(horizontal) > abs(vertical) * 1.15 else {
+                                                return
+                                            }
 
-                        isDragging = true
-                        UIImpactFeedbackGenerator(style: .medium)
-                            .impactOccurred(intensity: 0.7)
+                                            isDragging = true
+                                            UIImpactFeedbackGenerator(style: .medium)
+                                                .impactOccurred(intensity: 0.7)
+                                        }
+
+                                        guard isDragging else { return }
+
+                                        let rawProgress = value.translation.width / travel
+                                        let clamped = min(max(rawProgress, 0.0), 1.0)
+
+                                        let maxDeflection = h * 0.24
+                                        let yDeflection = max(
+                                            -maxDeflection,
+                                            min(maxDeflection, value.translation.height)
+                                        )
+
+                                        if clamped >= latchThreshold {
+                                            let magnet =
+                                                latchThreshold
+                                                + (clamped - latchThreshold) * 0.45
+
+                                            pullProgress = min(
+                                                max(magnet, latchThreshold),
+                                                0.94
+                                            )
+
+                                            dragY = yDeflection * 0.22
+
+                                            if !isLatchedHold {
+                                                enterLatchedHoldHeartbeat()
+                                            }
+                                        } else {
+                                            if isLatchedHold {
+                                                exitLatchedHoldHeartbeat()
+                                            }
+
+                                            pullProgress = clamped
+                                            dragY = yDeflection * (1.0 - clamped * 0.45)
+
+                                            let distPt = Int(clamped * travel)
+                                            let sprocketStep = distPt / 9
+
+                                            if sprocketStep != lastSprocketTick {
+                                                lastSprocketTick = sprocketStep
+                                                UISelectionFeedbackGenerator().selectionChanged()
+                                            }
+
+                                            let spindleStep = distPt / 48
+
+                                            if spindleStep != lastSpindleThunk {
+                                                lastSpindleThunk = spindleStep
+                                                UIImpactFeedbackGenerator(style: .light)
+                                                    .impactOccurred(intensity: 0.5)
+                                            }
+                                        }
+
+                                        if toothClash > 0.25 {
+                                            let clashStep = Int((clamped * travel) / 5.0)
+                                            if clashStep != lastToothClashStep {
+                                                lastToothClashStep = clashStep
+                                                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.35 + 0.45 * toothClash)
+                                            }
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        guard isDragging else { return }
+
+                                        isDragging = false
+
+                                        if pullProgress >= latchThreshold {
+                                            exitLatchedHoldHeartbeat()
+                                            runGrandLoadingCeremony()
+                                        } else {
+                                            exitLatchedHoldHeartbeat()
+
+                                            UIImpactFeedbackGenerator(style: .light)
+                                                .impactOccurred(intensity: 0.55)
+
+                                            withAnimation(
+                                                .spring(response: 0.38, dampingFraction: 0.52)
+                                            ) {
+                                                pullProgress = 0.0
+                                                dragY = 0.0
+                                                suckInProgress = 0.0
+                                                pressurePlateProgress = 0.0
+                                                rewindForkAngle = 0.0
+                                            }
+
+                                            lastSprocketTick = 0
+                                            lastSpindleThunk = 0
+                                            lastToothClashStep = -1
+                                        }
+                                    }
+                            )
+                            .accessibilityElement()
+                            .accessibilityLabel("Film leader")
+                            .accessibilityHint(
+                                "Drag right to load the selected film. Drag left to rewind."
+                            )
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction(.default) {
+                                guard !isRunningCeremony else { return }
+                                guard !isDragging else { return }
+                                runGrandLoadingCeremony()
+                            }
                     }
-
-                    guard isDragging else { return }
-
-                    // Progress is based on movement from the leader's
-                    // original pickup location, never the finger's absolute X.
-                    let rawProgress = value.translation.width / travel
-                    let clamped = min(max(rawProgress, 0.0), 1.0)
-
-                    let maxDeflection = h * 0.24
-                    let yDeflection = max(
-                        -maxDeflection,
-                        min(maxDeflection, value.translation.height)
-                    )
-
-                    // Preserve the original magnetic latch behavior.
-                    if clamped >= latchThreshold {
-                        let magnet =
-                            latchThreshold
-                            + (clamped - latchThreshold) * 0.45
-
-                        pullProgress = min(
-                            max(magnet, latchThreshold),
-                            0.94
-                        )
-
-                        dragY = yDeflection * 0.22
-
-                        if !isLatchedHold {
-                            enterLatchedHoldHeartbeat()
-                        }
-                    } else {
-                        if isLatchedHold {
-                            exitLatchedHoldHeartbeat()
-                        }
-
-                        pullProgress = clamped
-                        dragY = yDeflection * (1.0 - clamped * 0.45)
-
-                        // Keep the original sprocket ratchet cadence.
-                        let distPt = Int(clamped * travel)
-                        let sprocketStep = distPt / 9
-
-                        if sprocketStep != lastSprocketTick {
-                            lastSprocketTick = sprocketStep
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        }
-
-                        // Keep the original spindle revolution cadence.
-                        let spindleStep = distPt / 48
-
-                        if spindleStep != lastSpindleThunk {
-                            lastSpindleThunk = spindleStep
-                            UIImpactFeedbackGenerator(style: .light)
-                                .impactOccurred(intensity: 0.5)
-                        }
-                    }
-                }
-                .onEnded { _ in
-                    guard isDragging else { return }
-
-                    isDragging = false
-
-                    if pullProgress >= latchThreshold {
-                        exitLatchedHoldHeartbeat()
-                        runGrandLoadingCeremony()
-                    } else {
-                        exitLatchedHoldHeartbeat()
-
-                        UIImpactFeedbackGenerator(style: .light)
-                            .impactOccurred(intensity: 0.55)
-
-                        withAnimation(
-                            .spring(response: 0.38, dampingFraction: 0.52)
-                        ) {
-                            pullProgress = 0.0
-                            dragY = 0.0
-                        }
-
-                        lastSprocketTick = 0
-                        lastSpindleThunk = 0
-                    }
-                }
-        )
-        .accessibilityElement()
-        .accessibilityLabel("Film leader")
-        .accessibilityHint(
-            "Drag right to load the selected film. Drag left to rewind."
-        )
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction(.default) {
-            guard ceremonyPhase == 0, !isThreading else { return }
-            guard !isDragging else { return }
-            runGrandLoadingCeremony()
-        }
-}
-
                 }
                 .clipShape(.rect(cornerRadius: 20, style: .continuous))
             }
@@ -330,26 +375,37 @@ if ceremonyPhase == 0 && !isThreading {
             heartbeatTask = nil
         }
         .onChange(of: stockFullName) { _, _ in
-            guard ceremonyPhase == 0, !isThreading else { return }
+            dxPinCompression = 1.0
+            dxTracePulse = 1.0
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) {
+                dxPinCompression = 0.0
+            }
+            withAnimation(.easeOut(duration: 0.45)) {
+                dxTracePulse = 0.0
+            }
+            guard !isRunningCeremony else { return }
             exitLatchedHoldHeartbeat()
             canisterSwapPop = 1.0
             withAnimation(.spring(response: 0.34, dampingFraction: 0.48)) {
                 canisterSwapPop = 0.0
                 pullProgress = 0.0
                 dragY = 0.0
+                suckInProgress = 0.0
+                pressurePlateProgress = 0.0
+                rewindForkAngle = 0.0
             }
         }
     }
 
     private var statusDotColor: Color {
-        if ceremonyPhase == 3 { return Palette.good }
-        if ceremonyPhase > 0 || isThreading || isLatchedHold { return Palette.accent }
+        if isFrameOneLocked || ceremonyPhase == 3 { return Palette.good }
+        if isRunningCeremony || ceremonyPhase > 0 || isLatchedHold { return Palette.accent }
         return isAlreadyLoaded ? Palette.good : Palette.textDim
     }
 
     private var statusTextColor: Color {
-        if ceremonyPhase == 3 { return Palette.good }
-        if ceremonyPhase > 0 || isThreading || isLatchedHold { return Palette.accent }
+        if isFrameOneLocked || ceremonyPhase == 3 { return Palette.good }
+        if isRunningCeremony || ceremonyPhase > 0 || isLatchedHold { return Palette.accent }
         return .secondary
     }
 
@@ -359,8 +415,8 @@ if ceremonyPhase == 0 && !isThreading {
         case 2: return "ADVANCING LEADER · S → 00 → 0 → FRAME 1…"
         case 3: return "ROLL LOADED · LOCKED AT FRAME 1"
         default:
-            if isThreading {
-                return "LEADER CAUGHT · LOCKING INTO SPOOL…"
+            if suckInProgress > 0.01 {
+                return "CINCHING LEADER ONTO SPOOL…"
             }
             if isLatchedHold {
                 return "SPOOL ENGAGED · RELEASE FINGER TO LOAD"
@@ -385,12 +441,12 @@ if ceremonyPhase == 0 && !isThreading {
                     heartbeatScale = 1.16
                 }
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.48)
-                try? await Task.sleep(for: .milliseconds(320))
+                try? await Task.sleep(nanoseconds: 320_000_000)
                 if Task.isCancelled || !isLatchedHold { break }
                 withAnimation(.easeInOut(duration: 0.36)) {
                     heartbeatScale = 1.0
                 }
-                try? await Task.sleep(for: .milliseconds(360))
+                try? await Task.sleep(nanoseconds: 360_000_000)
             }
         }
     }
@@ -404,109 +460,118 @@ if ceremonyPhase == 0 && !isThreading {
         }
     }
 
-    // MARK: - 3-Stage Grand Film Loading Ceremony
+    private func stopLatchHeartbeat() {
+        exitLatchedHoldHeartbeat()
+    }
+
+    // MARK: - 4-Phase Grand Film Loading Ceremony
 
     private func runGrandLoadingCeremony() {
-        guard ceremonyPhase == 0, !isThreading else { return }
-        isThreading = true
-        odometerPosition = -2.0 // Starts at "S"
-
-        UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.7)
+        guard !isRunningCeremony else { return }
+        isRunningCeremony = true
+        ceremonyPhase = 0
+        stopLatchHeartbeat()
 
         Task { @MainActor in
-            // Stage 0a: Leader slides the rest of the way and tucks into the
-            // take-up drum's catch slot. The pull-tab disappears inside the drum.
-            withAnimation(.timingCurve(0.42, 0.0, 0.22, 1.0, duration: 0.34)) {
-                pullProgress = 1.0
-                insertProgress = 1.0
+            // =========================================================================
+            // STAGE 0 (t = 0.00s - 0.45s): OPEN-CHAMBER SUCK-IN, TOOTH BITE & SLACK CINCH
+            // =========================================================================
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
+
+            // Snap catenary slack (dragY) taut like a plucked guitar string
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.38)) {
                 dragY = 0.0
             }
-            withAnimation(.easeIn(duration: 0.28)) {
-                tabVisibility = 0.0
-            }
-            try? await Task.sleep(for: .milliseconds(320))
 
-            // Stage 0b: The catch slot bites — the drum clamps the tongue and
-            // takes up the first wrap of film, then settles.
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
-            withAnimation(.spring(response: 0.2, dampingFraction: 0.45)) {
-                lockFlash = 1.0
+            // High-torque 140-degree spool cinch sucks 34pt of tongue inside the drum core
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.66)) {
+                pullProgress = 0.96
+                suckInProgress = 1.0
             }
-            withAnimation(.timingCurve(0.3, 0.0, 0.2, 1.0, duration: 0.52)) {
-                lockWindAngle = 150.0
-                wrapProgress = 1.0
-            }
-            for _ in 0..<3 {
-                try? await Task.sleep(for: .milliseconds(120))
-                UISelectionFeedbackGenerator().selectionChanged()
-            }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.8)
-            withAnimation(.easeOut(duration: 0.32)) {
-                lockFlash = 0.0
-            }
-            try? await Task.sleep(for: .milliseconds(180))
 
-            // Stage 1: Close the Camera Back Door over the chamber
+            // Supply canister yank feedback when slack hits zero at t = 120ms
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.90)
+
+            // Allow user to admire the wrapped, drum-tight film across the open rails
+            try? await Task.sleep(nanoseconds: 330_000_000)
+
+            // =========================================================================
+            // STAGE 1 (t = 0.45s - 0.98s): SPRING-STEEL PRESSURE PLATE & BACK DOOR SLAM
+            // =========================================================================
             ceremonyPhase = 1
-            isThreading = false
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
+                pressurePlateProgress = 1.0
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.65)
+
+            try? await Task.sleep(nanoseconds: 70_000_000)
+
             withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
                 doorClosedProgress = 1.0
             }
-            try? await Task.sleep(for: .milliseconds(320))
+
+            try? await Task.sleep(nanoseconds: 460_000_000)
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 1.0)
 
-            // Stage 2: Two-stroke mechanical film wind (S -> 00 -> 0 -> 1) (0.55s -> 2.05s)
+            // =========================================================================
+            // STAGE 2 (t = 0.98s - 2.48s): TWO-STROKE WIND (S -> 00 -> 0 -> 1) & REWIND FORK SPIN
+            // =========================================================================
             ceremonyPhase = 2
+            try? await Task.sleep(nanoseconds: 120_000_000)
 
-            // Stroke 1: Wind from "S" (-2) to "00" (-1) to "0" (0)
+            // Stroke 1: S (-2.0) -> 0 (0.0)
             withAnimation(.spring(response: 0.55, dampingFraction: 0.76)) {
                 odometerPosition = 0.0
                 motorWindAngle = 360.0
+                windShift = 72.0
             }
+
+            // Rewind fork takes up cassette slack for 190ms, then spins counter-clockwise
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 190_000_000)
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
+                    rewindForkAngle = -240.0
+                }
+            }
+
             for _ in 0..<4 {
-                try? await Task.sleep(for: .milliseconds(95))
+                try? await Task.sleep(nanoseconds: 95_000_000)
                 UISelectionFeedbackGenerator().selectionChanged()
             }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)
 
-            // Brief pause between lever strokes
-            try? await Task.sleep(for: .milliseconds(240))
+            // 240ms mechanical lever return pause
+            try? await Task.sleep(nanoseconds: 240_000_000)
 
-            // Stroke 2: Wind from "0" (0) to "1" (1) and lock!
+            // Stroke 2: 0 (0.0) -> 1 (1.0) with full 360-degree counter-clockwise rewind fork rotation
             withAnimation(.spring(response: 0.52, dampingFraction: 0.68)) {
                 odometerPosition = 1.0
                 motorWindAngle = 720.0
+                windShift = 144.0
+                rewindForkAngle = -600.0
             }
+
             for _ in 0..<3 {
-                try? await Task.sleep(for: .milliseconds(90))
+                try? await Task.sleep(nanoseconds: 90_000_000)
                 UISelectionFeedbackGenerator().selectionChanged()
             }
 
-            // Stage 3: Frame 1 Locked & Illuminated Confirmation (2.05s -> 3.0s)
-            try? await Task.sleep(for: .milliseconds(140))
+            // =========================================================================
+            // STAGE 3 (t = 2.48s - 3.35s): FRAME 1 LOCKED & ILLUMINATED CONFIRMATION
+            // =========================================================================
             ceremonyPhase = 3
+            try? await Task.sleep(nanoseconds: 220_000_000)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 1.0)
+
             withAnimation(.spring(response: 0.38, dampingFraction: 0.62)) {
+                isFrameOneLocked = true
                 ceremonyGlow = 1.0
             }
 
-            try? await Task.sleep(for: .milliseconds(900))
+            try? await Task.sleep(nanoseconds: 880_000_000)
             onLoadComplete()
-
-            // Reset internal ceremony state after dismissal
-            try? await Task.sleep(for: .milliseconds(300))
-            ceremonyPhase = 0
-            doorClosedProgress = 0.0
-            odometerPosition = -2.0
-            motorWindAngle = 0.0
-            ceremonyGlow = 0.0
-            pullProgress = 0.0
-            insertProgress = 0.0
-            tabVisibility = 1.0
-            wrapProgress = 0.0
-            lockFlash = 0.0
-            lockWindAngle = 0.0
         }
     }
 }
@@ -533,6 +598,7 @@ private struct GrandFilmLoadingCeremonyView: View {
     let odometerPosition: Double
     let motorWindAngle: Double
     let ceremonyGlow: Double
+    var rewindForkAngle: Double = 0.0
 
     var body: some View {
         ZStack {
@@ -556,8 +622,30 @@ private struct GrandFilmLoadingCeremonyView: View {
                         )
                 )
 
-            HStack(spacing: 16) {
-                // Left: Classic Yellow-Bordered Film Box Reminder Window on the Camera Back
+            HStack(spacing: 12) {
+                // Left-Side Recessed Rewind Fork Spin-Check Indicator
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.07, green: 0.08, blue: 0.09))
+                        .frame(width: 26, height: 26)
+                        .overlay(
+                            Circle().stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+
+                    // Fork Spline + Direction Arrow
+                    ZStack {
+                        Capsule()
+                            .fill(Color(red: 0.76, green: 0.81, blue: 0.87))
+                            .frame(width: 14, height: 2.5)
+                        Circle()
+                            .fill(Palette.accent)
+                            .frame(width: 3.5, height: 3.5)
+                            .offset(x: 5)
+                    }
+                    .rotationEffect(.degrees(rewindForkAngle))
+                }
+
+                // Center: Classic Yellow-Bordered Film Box Reminder Window on the Camera Back
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Circle()
@@ -724,142 +812,167 @@ private struct FilmChamberBackdropCanvas: View {
     }
 }
 
-private struct UnspoolingFilmStripCanvas: View, Animatable {
-    let category: String
-    let startX: CGFloat
-    var tipX: CGFloat
-    let travel: CGFloat
-    let pullProgress: CGFloat
-    var dragY: CGFloat
-    var motorWindAngle: Double
-    let idlePulse: Bool
-    let isDragging: Bool
-    let isLatchedHold: Bool
-    let heartbeatScale: CGFloat
-    var tabVisibility: CGFloat
+// MARK: - Take-Up Spool 3-Layer Sandwich & Photochemical Film Strip
 
-    // Interpolate the strip geometry so the rewind spring and the leader
-    // tucking into the spool are actually animated frame by frame.
-    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<Double, CGFloat>> {
-        get {
-            AnimatablePair(
-                AnimatablePair(tipX, dragY),
-                AnimatablePair(motorWindAngle, tabVisibility)
-            )
-        }
-        set {
-            tipX = newValue.first.first
-            dragY = newValue.first.second
-            motorWindAngle = newValue.second.first
-            tabVisibility = newValue.second.second
+struct TakeUpSpoolBottomLayer: View {
+    let drumCenterX: CGFloat
+    let midY: CGFloat
+    let drumRadius: CGFloat
+    let spoolDegrees: Double
+    let isLatched: Bool
+    let suckInProgress: CGFloat
+    let windProgress: CGFloat
+    let emulsionCategory: String
+
+    private var woundCollarColor: Color {
+        switch emulsionCategory.lowercased() {
+        case "b&w":   return Color(red: 0.28, green: 0.32, blue: 0.38)
+        case "slide": return Color(red: 0.20, green: 0.19, blue: 0.48)
+        default:      return Color(red: 0.54, green: 0.30, blue: 0.16)
         }
     }
 
     var body: some View {
-
         Canvas { ctx, size in
-            let midY = size.height * 0.5
-            let stripHalfH: CGFloat = 23
-            let leaderLen: CGFloat = 34
-            let currentTipX = max(startX + 30, tipX)
-            let bodyEndX = max(startX, currentTipX - leaderLen)
-            let ctrlX = (startX + bodyEndX) * 0.5
-            let ctrlY = midY + dragY * 1.15
-            let tipY = midY + dragY * 0.72
-
-            let emulsionColor = filmEmulsionColor(for: category)
-
-            // 1. Parallel Top & Bottom Catenary Bezier Film Strip (Never collapses or disappears on vertical drag)
-            var strip = Path()
-            strip.move(to: CGPoint(x: startX, y: midY - stripHalfH))
-            strip.addQuadCurve(
-                to: CGPoint(x: bodyEndX, y: tipY - stripHalfH),
-                control: CGPoint(x: ctrlX, y: ctrlY - stripHalfH)
-            )
-            // Classic 35mm stepped leader tongue taper at the tip
-            strip.addQuadCurve(
-                to: CGPoint(x: currentTipX, y: tipY - stripHalfH * 0.40),
-                control: CGPoint(x: bodyEndX + leaderLen * 0.45, y: tipY - stripHalfH)
-            )
-            strip.addQuadCurve(
-                to: CGPoint(x: currentTipX, y: tipY + stripHalfH * 0.36),
-                control: CGPoint(x: currentTipX + 4, y: tipY)
-            )
-            strip.addLine(to: CGPoint(x: bodyEndX, y: tipY + stripHalfH))
-            // Parallel bottom Bezier curve back to canister mouth
-            strip.addQuadCurve(
-                to: CGPoint(x: startX, y: midY + stripHalfH),
-                control: CGPoint(x: ctrlX, y: ctrlY + stripHalfH)
-            )
-            strip.closeSubpath()
-
-            ctx.fill(strip, with: .color(emulsionColor.opacity(0.95)))
-            ctx.stroke(
-                strip,
-                with: .color(isLatchedHold ? Palette.accent.opacity(0.65) : Color.white.opacity(0.20)),
-                lineWidth: isLatchedHold ? 1.3 : 0.9
+            let barrelH: CGFloat = 56.0
+            let barrelRect = CGRect(
+                x: drumCenterX - drumRadius,
+                y: midY - barrelH * 0.5,
+                width: drumRadius * 2.0,
+                height: barrelH
             )
 
-            // 2. Unspooling Sprocket Perforations & Exposed Negative Windows (clipped to strip)
-            var filmCtx = ctx
-            filmCtx.clip(to: strip)
+            // 1. Recessed Spool Well Shadow
+            let wellRect = barrelRect.insetBy(dx: -6, dy: -8)
+            ctx.fill(
+                Path(roundedRect: wellRect, cornerRadius: 8),
+                with: .color(Color.black.opacity(0.85))
+            )
 
-            filmCtx.fill(
-                strip,
+            // 2. Cylindrical Drum Barrel Core
+            ctx.fill(
+                Path(roundedRect: barrelRect, cornerRadius: 4),
                 with: .linearGradient(
-                    Gradient(colors: [.white.opacity(0.15), .clear, .black.opacity(0.24)]),
-                    startPoint: CGPoint(x: startX, y: midY - stripHalfH),
-                    endPoint: CGPoint(x: startX, y: midY + stripHalfH)
+                    Gradient(colors: [
+                        Color(red: 0.16, green: 0.17, blue: 0.20),
+                        Color(red: 0.26, green: 0.28, blue: 0.32),
+                        Color(red: 0.08, green: 0.09, blue: 0.11)
+                    ]),
+                    startPoint: CGPoint(x: barrelRect.minX, y: midY),
+                    endPoint: CGPoint(x: barrelRect.maxX, y: midY)
                 )
             )
 
-            let windShift = CGFloat(motorWindAngle / 360.0) * 72.0
-            let holePitch: CGFloat = 11.0
-            let holeW: CGFloat = 5.5
-            let holeH: CGFloat = 3.8
-            let span = currentTipX - startX + windShift
-            let holeCount = Int(span / holePitch) + 2
+            // 3. Concentric Wound Celluloid Collar (Thickens during Suck-In & Stage 2 Wind)
+            let wrapThickness = (suckInProgress * 1.4) + (windProgress * 2.2)
+            if wrapThickness > 0.05 {
+                let collarRect = CGRect(
+                    x: drumCenterX - drumRadius - wrapThickness * 0.6,
+                    y: midY - 23.0,
+                    width: (drumRadius * 2.0) + wrapThickness * 1.2,
+                    height: 46.0
+                )
+                ctx.fill(
+                    Path(roundedRect: collarRect, cornerRadius: 2.5),
+                    with: .color(woundCollarColor.opacity(0.92))
+                )
+            }
 
-            for i in 0..<holeCount {
-                let hx = currentTipX + windShift - CGFloat(i) * holePitch - 10
-                guard hx >= startX - holeW && hx <= currentTipX - 4 else { continue }
-                let t = min(max((hx - startX) / max(bodyEndX - startX, 1), 0), 1)
-                let oneMinusT = 1.0 - t
-                let localMidY = oneMinusT * oneMinusT * midY + 2 * oneMinusT * t * ctrlY + t * t * tipY
+            // 4. Revolving Vertical Catch Slit & Brass Sprocket Catch Tooth
+            let angleRad = spoolDegrees * .pi / 180.0
+            let slitOffset = CGFloat(sin(angleRad)) * (drumRadius * 0.72)
+            let slitX = drumCenterX + slitOffset
 
-                let topHole = CGRect(x: hx, y: localMidY - stripHalfH + 3.0, width: holeW, height: holeH)
-                let botHole = CGRect(x: hx, y: localMidY + stripHalfH - 3.0 - holeH, width: holeW, height: holeH)
-                filmCtx.fill(Path(roundedRect: topHole, cornerRadius: 0.9), with: .color(.white.opacity(0.88)))
-                filmCtx.fill(Path(roundedRect: botHole, cornerRadius: 0.9), with: .color(.white.opacity(0.88)))
+            let slitRect = CGRect(x: slitX - 2.2, y: midY - 24.0, width: 4.4, height: 48.0)
+            ctx.fill(
+                Path(roundedRect: slitRect, cornerRadius: 1.5),
+                with: .color(isLatched ? Palette.accent.opacity(0.45) : Color.black.opacity(0.92))
+            )
 
-                if i > 2 && i % 4 == 0 && hx - 32 >= startX {
-                    let winRect = CGRect(x: hx - 32, y: localMidY - stripHalfH + 9.0, width: 30, height: (stripHalfH - 9.0) * 2)
-                    filmCtx.fill(Path(roundedRect: winRect, cornerRadius: 1.5), with: .color(.black.opacity(0.32)))
+            // Brass Catch Tooth inside slit at bottom sprocket line (midY + 17.5)
+            let toothRect = CGRect(x: slitX - 1.8, y: midY + 15.5, width: 3.6, height: 4.2)
+            ctx.fill(
+                Path(roundedRect: toothRect, cornerRadius: 0.8),
+                with: .color(isLatched ? Palette.accent : Color(red: 0.88, green: 0.66, blue: 0.31))
+            )
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+struct TakeUpSpoolTopFlangeLayer: View {
+    let drumCenterX: CGFloat
+    let midY: CGFloat
+    let drumRadius: CGFloat
+    let spoolDegrees: Double
+    let isLatched: Bool
+    let heartbeatScale: CGFloat
+
+    var body: some View {
+        Canvas { ctx, size in
+            let flangeW = (drumRadius * 2.0) + 6.0
+            let topFlange = CGRect(x: drumCenterX - flangeW * 0.5, y: midY - 31.0, width: flangeW, height: 5.5)
+            let botFlange = CGRect(x: drumCenterX - flangeW * 0.5, y: midY + 25.5, width: flangeW, height: 5.5)
+
+            // Top & Bottom Knurled Spool Flanges (Gear Teeth)
+            for flange in [topFlange, botFlange] {
+                ctx.fill(
+                    Path(roundedRect: flange, cornerRadius: 2.0),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.22, green: 0.24, blue: 0.28),
+                            Color(red: 0.48, green: 0.52, blue: 0.58),
+                            Color(red: 0.12, green: 0.13, blue: 0.16)
+                        ]),
+                        startPoint: CGPoint(x: flange.minX, y: flange.midY),
+                        endPoint: CGPoint(x: flange.maxX, y: flange.midY)
+                    )
+                )
+
+                // Revolving Knurl Notches on Flanges
+                let notchCount = 7
+                let phase = CGFloat(spoolDegrees.truncatingRemainder(dividingBy: 360.0) / 360.0)
+                for i in 0..<notchCount {
+                    let norm = (CGFloat(i) / CGFloat(notchCount) + phase).truncatingRemainder(dividingBy: 1.0)
+                    let nx = flange.minX + 2.0 + norm * (flange.width - 4.0)
+                    let nRect = CGRect(x: nx - 0.8, y: flange.minY + 1.0, width: 1.6, height: flange.height - 2.0)
+                    ctx.fill(Path(nRect), with: .color(Color.black.opacity(0.65)))
                 }
             }
 
-            // 3. Tactile Leader Pull-Tab Handle at the Tip
-            let tabVis = min(max(tabVisibility, 0), 1)
-            if tabVis > 0.01 {
-                var tabCtx = ctx
-                tabCtx.opacity = Double(tabVis)
-                let tabCenter = CGPoint(x: currentTipX - 10, y: tipY)
-                let baseR: CGFloat = isDragging ? 13.0 : (idlePulse ? 11.5 : 10.2)
-                let handleR = baseR * (isLatchedHold ? heartbeatScale : 1.0) * (0.55 + 0.45 * tabVis)
-                let glowRect = CGRect(x: tabCenter.x - handleR * 1.45, y: tabCenter.y - handleR * 1.45, width: handleR * 2.9, height: handleR * 2.9)
-                tabCtx.fill(Path(ellipseIn: glowRect), with: .color(Palette.accent.opacity(isLatchedHold ? 0.45 : (isDragging ? 0.32 : 0.14))))
+            // Right-Side Over-Clamp Bar (Occludes Leader Tip Once Threaded Into Slit)
+            let clampRect = CGRect(
+                x: drumCenterX + 1.5,
+                y: midY - 25.5,
+                width: drumRadius - 1.5,
+                height: 51.0
+            )
+            ctx.fill(
+                Path(roundedRect: clampRect, cornerRadius: 2.0),
+                with: .linearGradient(
+                    Gradient(colors: [
+                        Color(red: 0.18, green: 0.20, blue: 0.24).opacity(0.92),
+                        Color(red: 0.06, green: 0.07, blue: 0.09).opacity(0.98)
+                    ]),
+                    startPoint: CGPoint(x: clampRect.minX, y: midY),
+                    endPoint: CGPoint(x: clampRect.maxX, y: midY)
+                )
+            )
 
-                let tabRect = CGRect(x: tabCenter.x - handleR, y: tabCenter.y - handleR, width: handleR * 2, height: handleR * 2)
-                tabCtx.fill(Path(ellipseIn: tabRect), with: .color(Palette.accent))
-
-                var grip = Path()
-                grip.move(to: CGPoint(x: tabCenter.x - 2, y: tabCenter.y - 4.5))
-                grip.addLine(to: CGPoint(x: tabCenter.x + 3, y: tabCenter.y))
-                grip.addLine(to: CGPoint(x: tabCenter.x - 2, y: tabCenter.y + 4.5))
-                tabCtx.stroke(
-                    grip,
-                    with: .color(Palette.accentInk),
-                    style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round)
+            // Latched Magnetic Target Halo
+            if isLatched {
+                let haloW = (drumRadius * 2.0 + 10.0) * heartbeatScale
+                let haloH = 62.0 * heartbeatScale
+                let haloRect = CGRect(
+                    x: drumCenterX - haloW * 0.5,
+                    y: midY - haloH * 0.5,
+                    width: haloW,
+                    height: haloH
+                )
+                ctx.stroke(
+                    Path(roundedRect: haloRect, cornerRadius: 8.0),
+                    with: .color(Palette.accent.opacity(0.85)),
+                    lineWidth: 1.6
                 )
             }
         }
@@ -867,151 +980,338 @@ private struct UnspoolingFilmStripCanvas: View, Animatable {
     }
 }
 
-// MARK: - Realistic Side-Profile Cylindrical Take-Up Spool Drum (No Floating Semicircles)
-
-private struct TakeUpSpoolView: View, Animatable {
-    let category: String
+struct UnspoolingFilmStripCanvas: View {
+    let startX: CGFloat
+    let tipX: CGFloat
+    let tangentX: CGFloat
+    let drumCenterX: CGFloat
+    let drumRadius: CGFloat
+    let midY: CGFloat
+    let dragY: CGFloat
     let pullProgress: CGFloat
-    let latchThreshold: CGFloat
-    var spoolDegrees: Double
-    let isLatchedHold: Bool
-    let heartbeatScale: CGFloat
-    let isWinding: Bool
-    var wrapProgress: CGFloat
-    var lockFlash: Double
+    let suckInProgress: CGFloat
+    let windShift: CGFloat
+    let tension: CGFloat
+    let toothClash: CGFloat
+    let pressurePlateProgress: CGFloat
+    var filmName: String = ""
+    let category: String
+    var yearsExpired: Int = 0
 
-    var animatableData: AnimatablePair<Double, AnimatablePair<CGFloat, Double>> {
-        get { AnimatablePair(spoolDegrees, AnimatablePair(wrapProgress, lockFlash)) }
-        set {
-            spoolDegrees = newValue.first
-            wrapProgress = newValue.second.first
-            lockFlash = newValue.second.second
+    private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
+        let t = min(max((x - edge0) / max(edge1 - edge0, 0.0001), 0.0), 1.0)
+        return t * t * (3.0 - 2.0 * t)
+    }
+
+    private var isVision3Remjet: Bool {
+        filmName.localizedCaseInsensitiveContains("vision3")
+    }
+
+    private var isCineStillHalation: Bool {
+        filmName.localizedCaseInsensitiveContains("cinestill") && category.lowercased() != "b&w"
+    }
+
+    private var isClearPETBase: Bool {
+        filmName.localizedCaseInsensitiveContains("rollei") || filmName.localizedCaseInsensitiveContains("ortho")
+    }
+
+    private var baseEmulsionColor: Color {
+        let fogFactor = min(Double(yearsExpired) / 50.0, 1.0) * 0.22
+        switch category.lowercased() {
+        case "b&w":
+            return Color(red: 0.28 + fogFactor * 0.4, green: 0.32 + fogFactor * 0.3, blue: 0.38 + fogFactor * 0.2)
+        case "slide":
+            return Color(red: 0.20 + fogFactor * 0.3, green: 0.19 + fogFactor * 0.2, blue: 0.48)
+        default:
+            return Color(red: 0.54 + fogFactor * 0.35, green: 0.30 + fogFactor * 0.25, blue: 0.16 + fogFactor * 0.45)
+        }
+    }
+
+    private var freshHalideColor: Color {
+        switch category.lowercased() {
+        case "b&w":   return Color(red: 0.43, green: 0.48, blue: 0.55)
+        case "slide": return Color(red: 0.32, green: 0.30, blue: 0.64)
+        default:      return Color(red: 0.71, green: 0.54, blue: 0.35)
         }
     }
 
     var body: some View {
-        let isReady = pullProgress >= latchThreshold || isLatchedHold || isWinding
-        let flash = min(max(lockFlash, 0), 1)
-        let ringColor: Color = isWinding ? Palette.good : (isReady ? Palette.accent : Color.white.opacity(0.16))
-        let emulsion = filmEmulsionColor(for: category)
+        Canvas { ctx, size in
+            let stripHalfH: CGFloat = 23.0 - (pressurePlateProgress * 0.8)
+            let isLatched = pullProgress >= 0.82
+            let latchBlend = smoothstep(0.78, 0.84, pullProgress)
 
-        ZStack {
-            // Recessed take-up spool well
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.black.opacity(0.65))
-                .frame(width: 46, height: 96)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .strokeBorder(ringColor, lineWidth: isReady ? 1.5 + CGFloat(flash) : 1.0)
+            // When latched (>= 0.82), tipY locks onto the spool catch tooth at midY while belly (ctrlY) pivots!
+            let effectiveTipY = midY + dragY * 0.45 * (1.0 - latchBlend)
+            let effectiveCtrlY = midY + dragY * (isLatched ? 0.55 : 0.85)
+
+            // Tongue taper shrinks as Stage 0 sucks the narrow tongue inside the drum core
+            let tongueLen: CGFloat = 26.0 * (1.0 - suckInProgress * 0.85)
+            let rawBodyEndX = max(startX + 4.0, tipX - tongueLen)
+            let flatBodyEndX = min(rawBodyEndX, tangentX)
+            let ctrlX = startX + (flatBodyEndX - startX) * 0.52
+
+            // 1. Vision3 Remjet Carbon Underside Shadow when bowed
+            if isVision3Remjet && abs(dragY) > 2.0 {
+                var remjetPath = Path()
+                let offset: CGFloat = dragY > 0 ? 2.5 : -2.5
+                remjetPath.move(to: CGPoint(x: startX, y: midY - stripHalfH + offset))
+                remjetPath.addQuadCurve(
+                    to: CGPoint(x: flatBodyEndX, y: effectiveTipY - stripHalfH + offset),
+                    control: CGPoint(x: ctrlX, y: effectiveCtrlY - stripHalfH + offset)
                 )
-                .shadow(color: Palette.accent.opacity(0.75 * flash), radius: 8 * CGFloat(flash))
-
-            // Side-profile cylindrical take-up drum with horizontal knurled sprocket flanges
-            Canvas { ctx, size in
-                let cx = size.width * 0.5
-                let cy = size.height * 0.5
-                let drumW: CGFloat = 24
-                let drumH: CGFloat = 72
-                let drumRect = CGRect(x: cx - drumW * 0.5, y: cy - drumH * 0.5, width: drumW, height: drumH)
-                let drumPath = Path(roundedRect: drumRect, cornerRadius: 4)
-
-                ctx.fill(
-                    drumPath,
-                    with: .linearGradient(
-                        Gradient(colors: [
-                            Color(red: 0.16, green: 0.18, blue: 0.22),
-                            Color(red: 0.34, green: 0.38, blue: 0.45),
-                            Color(red: 0.12, green: 0.14, blue: 0.17)
-                        ]),
-                        startPoint: CGPoint(x: drumRect.minX, y: cy),
-                        endPoint: CGPoint(x: drumRect.maxX, y: cy)
-                    )
+                remjetPath.addLine(to: CGPoint(x: flatBodyEndX, y: effectiveTipY + stripHalfH + offset))
+                remjetPath.addQuadCurve(
+                    to: CGPoint(x: startX, y: midY + stripHalfH + offset),
+                    control: CGPoint(x: ctrlX, y: effectiveCtrlY + stripHalfH + offset)
                 )
-
-                var drumCtx = ctx
-                drumCtx.clip(to: drumPath)
-
-                // Revolving vertical catch slots & sprocket teeth across the cylinder
-                let rad = spoolDegrees * .pi / 180.0
-                let fluteCount = 6
-                for i in 0..<fluteCount {
-                    let a = rad + Double(i) * (2.0 * .pi / Double(fluteCount))
-                    let sinA = sin(a)
-                    let cosA = cos(a)
-                    guard cosA > 0 else { continue }
-                    let fx = cx + CGFloat(sinA) * (drumW * 0.44)
-                    let slotW = max(1.2, 3.2 * CGFloat(cosA))
-
-                    // Center film-catch slot
-                    let slotRect = CGRect(x: fx - slotW * 0.5, y: cy - 18, width: slotW, height: 36)
-                    drumCtx.fill(
-                        Path(slotRect),
-                        with: .color(
-                            (i == 0 && isReady)
-                                ? Palette.accent.opacity(Double(cosA))
-                                : Color.black.opacity(0.75 * Double(cosA))
-                        )
-                    )
-
-                    // Top & bottom horizontal sprocket gear teeth along the drum collars
-                    let topTooth = CGRect(x: fx - slotW * 0.4, y: drumRect.minY + 3, width: slotW * 0.8, height: 6)
-                    let botTooth = CGRect(x: fx - slotW * 0.4, y: drumRect.maxY - 9, width: slotW * 0.8, height: 6)
-                    let toothColor = isReady ? Palette.accent : Color.white
-                    drumCtx.fill(Path(topTooth), with: .color(toothColor.opacity(0.75 * Double(cosA))))
-                    drumCtx.fill(Path(botTooth), with: .color(toothColor.opacity(0.75 * Double(cosA))))
-                }
-
-                // Film wrapped onto the drum once the leader is clamped in the catch slot
-                let wrap = min(max(wrapProgress, 0), 1)
-                if wrap > 0.001 {
-                    let bandH: CGFloat = 46
-                    let bandRect = CGRect(x: drumRect.minX, y: cy - bandH * 0.5, width: drumW * wrap, height: bandH)
-                    let bandPath = Path(bandRect)
-
-                    drumCtx.fill(bandPath, with: .color(emulsion.opacity(0.96)))
-                    drumCtx.fill(
-                        bandPath,
-                        with: .linearGradient(
-                            Gradient(colors: [.black.opacity(0.45), .white.opacity(0.14), .black.opacity(0.5)]),
-                            startPoint: CGPoint(x: drumRect.minX, y: cy),
-                            endPoint: CGPoint(x: drumRect.maxX, y: cy)
-                        )
-                    )
-
-                    var bandCtx = drumCtx
-                    bandCtx.clip(to: bandPath)
-                    let holeCount = 10
-                    for i in 0..<holeCount {
-                        let a = rad + Double(i) * (2.0 * .pi / Double(holeCount))
-                        let cosA = cos(a)
-                        guard cosA > 0.05 else { continue }
-                        let hx = cx + CGFloat(sin(a)) * (drumW * 0.42)
-                        let hw = max(0.8, 3.0 * CGFloat(cosA))
-                        for hy in [bandRect.minY + 3.0, bandRect.maxY - 3.0 - 3.4] {
-                            bandCtx.fill(
-                                Path(roundedRect: CGRect(x: hx - hw * 0.5, y: hy, width: hw, height: 3.4), cornerRadius: 0.6),
-                                with: .color(.white.opacity(0.8 * cosA))
-                            )
-                        }
-                    }
-
-                    // Clamp flash where the tongue is held
-                    if flash > 0.01 {
-                        drumCtx.fill(bandPath, with: .color(Palette.accent.opacity(0.35 * flash)))
-                    }
-                }
-
-                // Top and bottom flat horizontal flange collars
-                let flangeW: CGFloat = 30
-                let topFlange = CGRect(x: cx - flangeW * 0.5, y: drumRect.minY, width: flangeW, height: 3)
-                let botFlange = CGRect(x: cx - flangeW * 0.5, y: drumRect.maxY - 3, width: flangeW, height: 3)
-                ctx.fill(Path(roundedRect: topFlange, cornerRadius: 1.5), with: .color(Color(red: 0.55, green: 0.60, blue: 0.68)))
-                ctx.fill(Path(roundedRect: botFlange, cornerRadius: 1.5), with: .color(Color(red: 0.55, green: 0.60, blue: 0.68)))
+                remjetPath.closeSubpath()
+                ctx.fill(remjetPath, with: .color(Color(red: 0.04, green: 0.05, blue: 0.06)))
             }
-            .frame(width: 46, height: 96)
+
+            // 2. Flat Chamber Parallel Bezier Strip (from startX up to tangentX)
+            var stripPath = Path()
+            stripPath.move(to: CGPoint(x: startX, y: midY - stripHalfH))
+            stripPath.addQuadCurve(
+                to: CGPoint(x: flatBodyEndX, y: effectiveTipY - stripHalfH),
+                control: CGPoint(x: ctrlX, y: effectiveCtrlY - stripHalfH)
+            )
+
+            // If tip hasn't reached the 3D drum horizon yet, draw the stepped 35mm leader tongue in 2D
+            if tipX <= tangentX + 6.0 {
+                let tipTopY = effectiveTipY - stripHalfH * 0.40
+                stripPath.addQuadCurve(
+                    to: CGPoint(x: tipX, y: tipTopY),
+                    control: CGPoint(x: flatBodyEndX + tongueLen * 0.45, y: effectiveTipY - stripHalfH * 0.40)
+                )
+                stripPath.addLine(to: CGPoint(x: tipX, y: effectiveTipY + stripHalfH))
+            } else {
+                stripPath.addLine(to: CGPoint(x: flatBodyEndX, y: effectiveTipY + stripHalfH))
+            }
+
+            stripPath.addQuadCurve(
+                to: CGPoint(x: startX, y: midY + stripHalfH),
+                control: CGPoint(x: ctrlX, y: effectiveCtrlY + stripHalfH)
+            )
+            stripPath.closeSubpath()
+
+            // Fill Flat Strip with Light-Struck vs. Fresh Unspooled Halide Dichroic Gradient
+            let baseOpacity: Double = isClearPETBase ? 0.54 : 0.90
+            let halideBoundary = min(startX + 26.0 * pullProgress, flatBodyEndX)
+            ctx.fill(
+                stripPath,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: freshHalideColor.opacity(baseOpacity), location: 0.0),
+                        .init(color: baseEmulsionColor.opacity(baseOpacity), location: max(0.05, min(0.28, (halideBoundary - startX) / max(flatBodyEndX - startX, 1.0)))),
+                        .init(color: baseEmulsionColor.opacity(baseOpacity), location: 1.0)
+                    ]),
+                    startPoint: CGPoint(x: startX, y: midY),
+                    endPoint: CGPoint(x: max(flatBodyEndX, startX + 10), y: midY)
+                )
+            )
+
+            // Acetate Cupping Specular Wave (Diagonal plastic curl reflection that sharpens with tension)
+            let waveCenter = startX + (flatBodyEndX - startX) * (0.35 + 0.30 * tension)
+            let waveHalfW = max(14.0, 38.0 * (1.0 - tension * 0.55))
+            ctx.saveGState()
+            ctx.clip(to: stripPath)
+            ctx.fill(
+                stripPath,
+                with: .linearGradient(
+                    Gradient(colors: [
+                        Color.white.opacity(0.0),
+                        Color.white.opacity(isClearPETBase ? 0.26 : 0.14),
+                        Color.white.opacity(0.0)
+                    ]),
+                    startPoint: CGPoint(x: waveCenter - waveHalfW, y: midY - stripHalfH),
+                    endPoint: CGPoint(x: waveCenter + waveHalfW, y: midY + stripHalfH)
+                )
+            )
+            ctx.restoreGState()
+
+            // Tooth-Clash Friction Amber Border Highlight
+            let strokeColor = toothClash > 0.1
+                ? Color.orange.opacity(0.45 + 0.45 * Double(toothClash))
+                : Color.white.opacity(0.22)
+            ctx.stroke(stripPath, with: .color(strokeColor), lineWidth: 0.9)
+
+            // 3. 3D CYLINDRICAL DRUM WRAP PASS (For film past tangentX wrapping onto take-up spool)
+            if tipX > tangentX {
+                let linearPastTangent = tipX - tangentX
+                let maxPhi = min(linearPastTangent / drumRadius, .pi * 0.58)
+                let wrappedMaxX = tangentX + drumRadius * sin(maxPhi)
+
+                // Taper top edge smoothly as tongue wraps around the cylinder; full height once sucked in
+                let wrapTopInset = (1.0 - suckInProgress) * (stripHalfH * 0.45) * smoothstep(0.0, 1.0, maxPhi / (.pi * 0.5))
+                var wrapPath = Path()
+                wrapPath.move(to: CGPoint(x: tangentX - 0.5, y: effectiveTipY - stripHalfH))
+                wrapPath.addLine(to: CGPoint(x: wrappedMaxX, y: midY - stripHalfH + wrapTopInset))
+                wrapPath.addLine(to: CGPoint(x: wrappedMaxX, y: midY + stripHalfH))
+                wrapPath.addLine(to: CGPoint(x: tangentX - 0.5, y: effectiveTipY + stripHalfH))
+                wrapPath.closeSubpath()
+
+                // 3-Stop Cylindrical Shader: Tangent Knuckle Highlight -> Emulsion -> Roll-Off Shadow
+                ctx.fill(
+                    wrapPath,
+                    with: .linearGradient(
+                        Gradient(stops: [
+                            .init(color: Color.white.opacity(0.32), location: 0.0),
+                            .init(color: baseEmulsionColor.opacity(0.95), location: 0.35),
+                            .init(color: Color.black.opacity(0.82), location: 1.0)
+                        ]),
+                        startPoint: CGPoint(x: tangentX, y: midY),
+                        endPoint: CGPoint(x: tangentX + drumRadius, y: midY)
+                    )
+                )
+            }
+
+            // 4. SPROCKET PERFORATIONS, NEGATIVE WINDOWS & COS(PHI) CYLINDRICAL FORESHORTENING
+            let pitch: CGFloat = 11.0
+            let holeW: CGFloat = 5.5
+            let holeH: CGFloat = 3.8
+            let phaseShift = windShift.truncatingRemainder(dividingBy: pitch)
+            var hx = startX + 6.0 - phaseShift
+            var holeIndex = Int(floor(windShift / pitch))
+
+            while hx < tipX - 4.0 {
+                defer {
+                    hx += pitch
+                    holeIndex += 1
+                }
+                guard hx >= startX + 2.0 else { continue }
+
+                if hx <= tangentX {
+                    // Flat Bezier Parametric Curve Mapping
+                    let t = min(max((hx - startX) / max(flatBodyEndX - startX, 1.0), 0.0), 1.0)
+                    let oneMinusT = 1.0 - t
+                    let curveY = (oneMinusT * oneMinusT * midY)
+                        + (2.0 * oneMinusT * t * effectiveCtrlY)
+                        + (t * t * effectiveTipY)
+
+                    // Latent Exposure Negative Window every 4 perforations
+                    if holeIndex % 4 == 0 && (hx + 30.0) < flatBodyEndX {
+                        let winRect = CGRect(x: hx, y: curveY - 14.0, width: 30.0, height: 28.0)
+                        ctx.fill(
+                            Path(roundedRect: winRect, cornerRadius: 1.5),
+                            with: .color(Color.black.opacity(0.32))
+                        )
+                    }
+
+                    // Latent Amber Rebate Edge Markings every 2 perforations
+                    if holeIndex % 2 == 0 {
+                        let rebateRect = CGRect(x: hx + 1.0, y: curveY - stripHalfH + 0.8, width: 4.0, height: 1.0)
+                        ctx.fill(Path(rebateRect), with: .color(Palette.accent.opacity(0.38)))
+                    }
+
+                    // Top & Bottom Sprocket Perforations
+                    let topHole = CGRect(x: hx - holeW * 0.5, y: curveY - stripHalfH + 2.4, width: holeW, height: holeH)
+                    let botHole = CGRect(x: hx - holeW * 0.5, y: curveY + stripHalfH - 2.4 - holeH, width: holeW, height: holeH)
+
+                    // CineStill Remjet-Free Red Halation Glow around Sprockets
+                    if isCineStillHalation {
+                        ctx.fill(
+                            Path(roundedRect: topHole.insetBy(dx: -1.6, dy: -1.4), cornerRadius: 1.8),
+                            with: .color(Color(red: 1.0, green: 0.23, blue: 0.19).opacity(0.30))
+                        )
+                        ctx.fill(
+                            Path(roundedRect: botHole.insetBy(dx: -1.6, dy: -1.4), cornerRadius: 1.8),
+                            with: .color(Color(red: 1.0, green: 0.23, blue: 0.19).opacity(0.30))
+                        )
+                    }
+
+                    if hx < rawBodyEndX {
+                        ctx.fill(Path(roundedRect: topHole, cornerRadius: 0.9), with: .color(Color.white.opacity(0.88)))
+                    }
+                    ctx.fill(Path(roundedRect: botHole, cornerRadius: 0.9), with: .color(Color.white.opacity(0.88)))
+
+                } else {
+                    // 3D Cylindrical Drum Foreshortening: x_wrapped = tangentX + R * sin(phi), w = 5.5 * cos(phi)
+                    let phi = (hx - tangentX) / drumRadius
+                    guard phi < (.pi * 0.48) else { continue } // Vanishes behind right horizon of drum!
+
+                    let cosPhi = cos(phi)
+                    let wrappedX = tangentX + drumRadius * sin(phi)
+                    let foreshortenedW = max(0.8, holeW * cosPhi)
+                    let holeOpacity = 0.88 * Double(cosPhi)
+
+                    let botWrappedHole = CGRect(
+                        x: wrappedX - foreshortenedW * 0.5,
+                        y: midY + stripHalfH - 2.4 - holeH,
+                        width: foreshortenedW,
+                        height: holeH
+                    )
+                    ctx.fill(
+                        Path(roundedRect: botWrappedHole, cornerRadius: 0.6),
+                        with: .color(Color.white.opacity(holeOpacity))
+                    )
+
+                    // Top sprocket only visible once full-height strip wraps onto drum
+                    if suckInProgress > 0.35 {
+                        let topWrappedHole = CGRect(
+                            x: wrappedX - foreshortenedW * 0.5,
+                            y: midY - stripHalfH + 2.4,
+                            width: foreshortenedW,
+                            height: holeH
+                        )
+                        ctx.fill(
+                            Path(roundedRect: topWrappedHole, cornerRadius: 0.6),
+                            with: .color(Color.white.opacity(holeOpacity * Double(suckInProgress)))
+                        )
+                    }
+                }
+            }
+
+            // 5. DISSOLVING CIRCULAR PULL-TAB GRIP BADGE (Scales 1.0 -> 0.0 across 0.76...0.84 so tongue inserts cleanly)
+            let gripBadgeScale = 1.0 - smoothstep(0.76, 0.84, pullProgress)
+            if gripBadgeScale > 0.01 && suckInProgress == 0.0 {
+                let badgeR: CGFloat = 13.0 * gripBadgeScale
+                let badgeCenter = CGPoint(x: min(tipX - 4.0, tangentX), y: effectiveTipY + 2.0)
+                let badgeRect = CGRect(
+                    x: badgeCenter.x - badgeR,
+                    y: badgeCenter.y - badgeR,
+                    width: badgeR * 2.0,
+                    height: badgeR * 2.0
+                )
+                ctx.fill(Path(ellipseIn: badgeRect), with: .color(Palette.accent.opacity(Double(gripBadgeScale))))
+                ctx.stroke(Path(ellipseIn: badgeRect), with: .color(Palette.accentInk), lineWidth: 1.5 * gripBadgeScale)
+            }
         }
-        .scaleEffect((isLatchedHold ? heartbeatScale : (isReady ? 1.04 : 1.0)) + 0.07 * CGFloat(flash))
-        .animation(.spring(response: 0.24, dampingFraction: 0.58), value: isReady)
+        .allowsHitTesting(false)
+    }
+}
+
+struct DXContactPinsCanvas: View {
+    let midY: CGFloat
+    let compression: CGFloat   // 0.0 -> 1.0 on canisterSwapPop
+    let tracePulse: CGFloat    // 0.0 -> 1.0 gold electrical readout pulse
+    let hasDXCode: Bool
+
+    var body: some View {
+        Canvas { ctx, size in
+            let pinCount = 6
+            let spacing: CGFloat = 6.8
+            let startY = midY - (CGFloat(pinCount - 1) * spacing) * 0.5
+            let baseX: CGFloat = 14.0
+            let tipExtend: CGFloat = 6.5 - (compression * 2.5)
+
+            for i in 0..<pinCount {
+                let py = startY + CGFloat(i) * spacing
+                var pinPath = Path()
+                pinPath.move(to: CGPoint(x: baseX, y: py - 1.2))
+                pinPath.addLine(to: CGPoint(x: baseX + tipExtend, y: py))
+                pinPath.addLine(to: CGPoint(x: baseX, y: py + 1.2))
+
+                let pinColor = (hasDXCode && tracePulse > 0.1)
+                    ? Palette.accent
+                    : Color(red: 0.88, green: 0.66, blue: 0.31)
+                ctx.stroke(pinPath, with: .color(pinColor), lineWidth: 1.4)
+
+                // Contact spark dot
+                let dotRect = CGRect(x: baseX + tipExtend - 1.0, y: py - 1.0, width: 2.0, height: 2.0)
+                ctx.fill(Path(ellipseIn: dotRect), with: .color(Color.white.opacity(0.65 + 0.35 * Double(tracePulse))))
+            }
+        }
         .allowsHitTesting(false)
     }
 }

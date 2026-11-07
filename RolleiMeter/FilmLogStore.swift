@@ -80,6 +80,14 @@ final class FilmLogStore: ObservableObject {
     @Published var customLenses: [LensGearSpec] {
         didSet { saveCustomLenses(customLenses) }
     }
+    @Published var expiredStorageCondition: ExpiredStorageCondition {
+        didSet {
+            UserDefaults.standard.set(expiredStorageCondition.rawValue, forKey: Keys.expiredStorageCondition)
+            if rollState.expiredStorageCondition != expiredStorageCondition {
+                rollState.expiredStorageCondition = expiredStorageCondition
+            }
+        }
+    }
     @Published var manualEvCompIndex: Int {
         didSet {
             let safeIdx = manualEvCompIndex.clamped(to: 0...(EV_COMP_STOPS.count - 1))
@@ -95,6 +103,7 @@ final class FilmLogStore: ObservableObject {
         static let customCameras = "rollei.filmlog.customCameras"
         static let customLenses = "rollei.filmlog.customLenses"
         static let manualEvComp = "rollei.filmlog.manualEvComp"
+        static let expiredStorageCondition = "rollei.filmlog.expiredStorageCondition"
     }
 
     private let snapshotCache = NSCache<NSString, UIImage>()
@@ -157,11 +166,37 @@ final class FilmLogStore: ObservableObject {
             self.customLenses = []
         }
 
+        if let raw = UserDefaults.standard.string(forKey: Keys.expiredStorageCondition),
+           let cond = ExpiredStorageCondition(rawValue: raw) {
+            self.expiredStorageCondition = cond
+        } else {
+            self.expiredStorageCondition = .room
+        }
+
         let savedEv = UserDefaults.standard.double(forKey: Keys.manualEvComp)
         let idx = EV_COMP_STOPS.firstIndex(where: { abs($0 - savedEv) < 0.08 })
             ?? EV_COMP_STOPS.firstIndex(of: 0.0)
             ?? 9
         self.manualEvCompIndex = idx
+    }
+
+    var boxISO: Int { rollState.boxIso }
+    var isUnloaded: Bool { rollState.isUnloaded }
+    var isExpired: Bool { rollState.isExpired }
+    var isSlideFilm: Bool { rollState.isSlideFilm }
+    var decadesExpired: Double { rollState.decadesExpired }
+    var yearsExpired: Int { rollState.yearsExpired }
+
+    var isHighISOCosmicSensitive: Bool {
+        boxISO >= 1600
+    }
+
+    var recommendedExpiredCompEv: Double {
+        guard !isUnloaded && isExpired && !isSlideFilm else { return 0.0 }
+        let storageSlope = expiredStorageCondition.slopeMultiplier
+        let cosmicFactor = isHighISOCosmicSensitive ? 1.35 : 1.00
+        let rawEv = decadesExpired * storageSlope * cosmicFactor
+        return (rawEv * 3.0).rounded() / 3.0
     }
 
     var manualEvComp: Double {
@@ -171,7 +206,7 @@ final class FilmLogStore: ObservableObject {
     }
 
     var expiredEvComp: Double {
-        rollState.isSlideFilm ? 0.0 : rollState.activeExpiredCompEv
+        rollState.isSlideFilm ? 0.0 : recommendedExpiredCompEv
     }
 
     var totalEvComp: Double {
@@ -225,6 +260,7 @@ final class FilmLogStore: ObservableObject {
             ? currentYear - max(1, yearsExpired ?? 1)
             : currentYear
         next.autoApplyExpiredComp = true
+        next.expiredStorageCondition = expiredStorageCondition
 
         rollState = next
         return true

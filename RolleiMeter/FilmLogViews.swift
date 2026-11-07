@@ -559,6 +559,7 @@ struct RollView: View {
                 defaultISO: defaultISO,
                 isExpanded: isExpanded,
                 isLoaded: isLoaded,
+                yearsExpired: store.isExpired ? store.yearsExpired : 0,
                 onSelect: {
                     if isExpanded {
                         Haptics.tap()
@@ -754,6 +755,7 @@ struct RollView: View {
             // Fast Tactile Expired Film Decade Pills & Continuous Scrubber (1 to 50 Years)
             if stagedExpired {
                 ExpiredFilmFastScrubber(
+                    store: store,
                     years: $stagedExpiredYears,
                     quickDecades: quickDecades,
                     supportsCompensation: activeStagedCategory.caseInsensitiveCompare("Slide") != .orderedSame
@@ -795,7 +797,9 @@ struct RollView: View {
                 iso: activeStagedISO,
                 rollLength: stagedFrames,
                 rollNumber: nextRollNumber,
-                isAlreadyLoaded: isStagedAlreadyLoaded
+                isAlreadyLoaded: isStagedAlreadyLoaded,
+                yearsExpired: store.isExpired ? store.yearsExpired : 0,
+                isCustomFilm: stagedCustomStock != nil
             ) {
                 commitLoadedFilm()
             }
@@ -944,6 +948,7 @@ private struct FilmCanisterListRow: View {
     let defaultISO: Int
     let isExpanded: Bool
     let isLoaded: Bool
+    var yearsExpired: Int = 0
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
 
@@ -976,6 +981,7 @@ private struct FilmCanisterListRow: View {
                         iso: defaultISO,
                         showLeader: true,
                         leaderExtension: isExpanded ? 1.0 : 0.4,
+                        yearsExpired: yearsExpired,
                         width: 46,
                         height: 50
                     )
@@ -1041,6 +1047,7 @@ private struct FilmRowPressStyle: ButtonStyle {
 // MARK: - Fast Tactile Expired Film Scrubber (1 to 50 Years in One Swipe + Decade Pills)
 
 private struct ExpiredFilmFastScrubber: View {
+    @ObservedObject var store: FilmLogStore
     @Binding var years: Int
     let quickDecades: [Int]
     let supportsCompensation: Bool
@@ -1050,7 +1057,12 @@ private struct ExpiredFilmFastScrubber: View {
     }
 
     private var compStops: Double {
-        (Double(years) / 10.0 * 3.0).rounded() / 3.0
+        guard supportsCompensation else { return 0.0 }
+        let storageSlope = store.expiredStorageCondition.slopeMultiplier
+        let cosmicFactor = store.isHighISOCosmicSensitive ? 1.35 : 1.00
+        let decades = Double(years) / 10.0
+        let rawEv = decades * storageSlope * cosmicFactor
+        return (rawEv * 3.0).rounded() / 3.0
     }
 
     var body: some View {
@@ -1070,6 +1082,32 @@ private struct ExpiredFilmFastScrubber: View {
                     Text("NO AUTO COMP · SLIDE")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Palette.textSub)
+                }
+            }
+
+            // MARK: - Storage Condition 3-Way Selector
+            if !store.isSlideFilm {
+                HStack(spacing: 6) {
+                    ForEach(ExpiredStorageCondition.allCases) { condition in
+                        RolleiGlassSegment(
+                            title: condition.label,
+                            isSelected: store.expiredStorageCondition == condition
+                        ) {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.72)) {
+                                store.expiredStorageCondition = condition
+                            }
+                        }
+                    }
+
+                    if store.isHighISOCosmicSensitive {
+                        Text("COSMIC FOG ×1.35")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Palette.accent.opacity(0.14), in: Capsule())
+                    }
                 }
             }
 
