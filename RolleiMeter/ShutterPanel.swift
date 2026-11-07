@@ -41,6 +41,16 @@ struct ShutterPanel: View {
             PanelTitle(text: "SHUTTER", k: k)
                 .scaleEffect(1.0 + 0.03 * detentKick)
         }
+        .overlay(alignment: .bottomLeading) {
+            BrassDialLimitPin(isEngaged: index == 0, scale: k)
+                .padding(.leading, 14 * k)
+                .padding(.bottom, 12 * k)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            BrassDialLimitPin(isEngaged: index == currentLabels.count - 1, scale: k)
+                .padding(.trailing, 14 * k)
+                .padding(.bottom, 12 * k)
+        }
         .mattePanel(k: k, glowColor: tint, glowIntensity: detentKick)
         .onAppear { position = Double(index) }
         .onChange(of: index) { _, newIndex in

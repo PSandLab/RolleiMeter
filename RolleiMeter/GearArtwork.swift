@@ -399,3 +399,492 @@ struct CameraBrandLogo: View {
         .clipShape(.rect(cornerRadius: 10, style: .continuous))
     }
 }
+
+// MARK: - Co-Axial Camera Mount Throat Canvas
+
+struct CoAxialCameraThroatCanvas: View {
+    let cameraBrand: String
+    let cameraModel: String
+    let mount: String
+    let isFixed: Bool
+    let maxShutter: Double
+    var isAdapter: Bool = false
+    var lockPinProgress: CGFloat = 0.0     // 0.0 -> 1.0 when bayonet pin snaps into notch
+    var mirrorFlipProgress: CGFloat = 0.0  // 0.0 -> 1.0 SLR 45-deg mirror flip-up during test-fire
+    var shutterFlashProgress: CGFloat = 0.0// 0.0 -> 1.0 focal-plane / leaf shutter actuation flash
+
+    private var isMediumFormat: Bool {
+        let m = mount.lowercased()
+        return m.contains("hasselblad") || m.contains("mamiya") || m.contains("bronica") || m.contains("67") || m.contains("645") || m.contains("sl66")
+    }
+
+    private var isRangefinder: Bool {
+        let m = mount.lowercased()
+        return m.contains("leica") || m.contains("ltm") || m.contains("m39") || m.contains("nikon s") || m.contains("contax g") || m.contains("xpan")
+    }
+
+    private var hasTitaniumHoneycombCurtain: Bool {
+        maxShutter <= 0.00026 && !isRangefinder && !isFixed // 1/4000s or faster SLR (e.g. Nikon FM2 / FE2 / FA)
+    }
+
+    var body: some View {
+        Canvas { ctx, size in
+            let cx = size.width * 0.5
+            let cy = size.height * 0.5
+            let outerR = min(size.width, size.height) * 0.44
+            let throatR = outerR * 0.72
+
+            // 1. Anodized Camera Body Casting Silhouette Behind Flange
+            let bodyW = size.width * 0.92
+            let bodyH = size.height * 0.80
+            let bodyRect = CGRect(x: cx - bodyW * 0.5, y: cy - bodyH * 0.5, width: bodyW, height: bodyH)
+            ctx.fill(
+                Path(roundedRect: bodyRect, cornerRadius: 14),
+                with: .linearGradient(
+                    Gradient(colors: [
+                        Color(red: 0.14, green: 0.15, blue: 0.18),
+                        Color(red: 0.07, green: 0.08, blue: 0.10)
+                    ]),
+                    startPoint: CGPoint(x: bodyRect.minX, y: bodyRect.minY),
+                    endPoint: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+                )
+            )
+            ctx.stroke(Path(roundedRect: bodyRect, cornerRadius: 14), with: .color(Color.white.opacity(0.08)), lineWidth: 1.0)
+
+            // Leatherette Grip Texture Panels on Left & Right Wings
+            let leftGrip = CGRect(x: bodyRect.minX + 5, y: bodyRect.minY + 10, width: 18, height: bodyH - 20)
+            let rightGrip = CGRect(x: bodyRect.maxX - 23, y: bodyRect.minY + 10, width: 18, height: bodyH - 20)
+            for grip in [leftGrip, rightGrip] {
+                ctx.fill(Path(roundedRect: grip, cornerRadius: 4), with: .color(Color.black.opacity(0.55)))
+            }
+
+            // 2. Machined Chrome / Brass Bayonet Mount Flange Ring
+            let flangeRect = CGRect(x: cx - outerR, y: cy - outerR, width: outerR * 2, height: outerR * 2)
+            ctx.fill(
+                Path(ellipseIn: flangeRect),
+                with: .linearGradient(
+                    Gradient(colors: [
+                        Color(red: 0.78, green: 0.82, blue: 0.88),
+                        Color(red: 0.42, green: 0.46, blue: 0.52),
+                        Color(red: 0.85, green: 0.88, blue: 0.92),
+                        Color(red: 0.28, green: 0.31, blue: 0.36)
+                    ]),
+                    startPoint: CGPoint(x: flangeRect.minX, y: flangeRect.minY),
+                    endPoint: CGPoint(x: flangeRect.maxX, y: flangeRect.maxY)
+                )
+            )
+
+            // Optional Knurled Brass Adapter Ring when MountSetup == .adapter
+            if isAdapter {
+                let adapterR = outerR * 0.91
+                let adapterRect = CGRect(x: cx - adapterR, y: cy - adapterR, width: adapterR * 2, height: adapterR * 2)
+                ctx.stroke(
+                    Path(ellipseIn: adapterRect),
+                    with: .color(Color(red: 0.88, green: 0.68, blue: 0.32)),
+                    style: StrokeStyle(lineWidth: 3.2, dash: [3.0, 2.0])
+                )
+            }
+
+            // 3. Deep Velvet-Flocked Optical Throat Cavity
+            let throatRect = CGRect(x: cx - throatR, y: cy - throatR, width: throatR * 2, height: throatR * 2)
+            ctx.fill(Path(ellipseIn: throatRect), with: .color(Color(red: 0.03, green: 0.035, blue: 0.045)))
+
+            // 4. Internal Camera Architecture (SLR Mirror vs Rangefinder Cam vs Medium Format Gate)
+            var throatCtx = ctx
+            throatCtx.clip(to: Path(ellipseIn: throatRect))
+
+            if isMediumFormat {
+                // Square 6x6 / 6x7 Baffle Gate + Auxiliary Barn-Door Flaps
+                let gateS = throatR * 1.28
+                let gateRect = CGRect(x: cx - gateS * 0.5, y: cy - gateS * 0.5, width: gateS, height: gateS)
+                throatCtx.stroke(Path(roundedRect: gateRect, cornerRadius: 3), with: .color(Color.white.opacity(0.18)), lineWidth: 1.2)
+
+                let barnOpen = shutterFlashProgress * (gateS * 0.42)
+                let topBarn = CGRect(x: gateRect.minX, y: gateRect.minY, width: gateS, height: max(2, gateS * 0.48 - barnOpen))
+                let botBarn = CGRect(x: gateRect.minX, y: gateRect.maxY - max(2, gateS * 0.48 - barnOpen), width: gateS, height: max(2, gateS * 0.48 - barnOpen))
+                throatCtx.fill(Path(topBarn), with: .color(Color(red: 0.10, green: 0.11, blue: 0.13)))
+                throatCtx.fill(Path(botBarn), with: .color(Color(red: 0.08, green: 0.09, blue: 0.11)))
+
+            } else if isRangefinder {
+                // Rubberized Cloth Focal-Plane Curtain + 12 O'Clock Brass Rangefinder Cam Roller
+                let gateW = throatR * 1.45
+                let gateH = throatR * 0.96
+                let gateRect = CGRect(x: cx - gateW * 0.5, y: cy - gateH * 0.5, width: gateW, height: gateH)
+                throatCtx.fill(Path(roundedRect: gateRect, cornerRadius: 2), with: .color(Color(red: 0.11, green: 0.12, blue: 0.14)))
+
+                // Curtain Slit Sweep during Test-Fire
+                if shutterFlashProgress > 0.01 {
+                    let slitX = gateRect.minX + gateW * shutterFlashProgress
+                    let slitRect = CGRect(x: slitX - 8, y: gateRect.minY, width: 16, height: gateH)
+                    throatCtx.fill(Path(slitRect), with: .color(Color.white.opacity(0.55)))
+                }
+
+                // Brass Rangefinder Coupling Roller at 12 O'Clock
+                let rollerRect = CGRect(x: cx - 4.5, y: cy - throatR + 1.5, width: 9.0, height: 5.5)
+                throatCtx.fill(Path(roundedRect: rollerRect, cornerRadius: 2), with: .color(Color(red: 0.90, green: 0.72, blue: 0.34)))
+
+            } else {
+                // 35mm SLR: Curtain Plane Behind + 45-Degree Silvered Reflex Mirror
+                let gateW = throatR * 1.42
+                let gateH = throatR * 0.96
+                let gateRect = CGRect(x: cx - gateW * 0.5, y: cy - gateH * 0.5, width: gateW, height: gateH)
+                throatCtx.fill(Path(roundedRect: gateRect, cornerRadius: 2), with: .color(Color(red: 0.12, green: 0.13, blue: 0.16)))
+
+                // Titanium Honeycomb Etching Pattern if maxShutter <= 1/4000s (Nikon FM2 / FE2)
+                if hasTitaniumHoneycombCurtain {
+                    for row in 0..<3 {
+                        for col in 0..<5 {
+                            let hx = gateRect.minX + 5 + CGFloat(col) * 9.5 + (row % 2 == 0 ? 0 : 4.5)
+                            let hy = gateRect.minY + 4 + CGFloat(row) * 8.5
+                            let hexRect = CGRect(x: hx, y: hy, width: 5.5, height: 5.5)
+                            throatCtx.stroke(Path(roundedRect: hexRect, cornerRadius: 1.5), with: .color(Color.white.opacity(0.22)), lineWidth: 0.7)
+                        }
+                    }
+                }
+
+                // 45-Degree Silver Reflex Mirror (Flips upward as mirrorFlipProgress -> 1.0)
+                let mirrorH = gateH * (1.0 - mirrorFlipProgress * 0.88)
+                let mirrorRect = CGRect(x: cx - gateW * 0.46, y: cy - gateH * 0.46, width: gateW * 0.92, height: max(3.0, mirrorH))
+                throatCtx.fill(
+                    Path(roundedRect: mirrorRect, cornerRadius: 2.5),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.55, green: 0.62, blue: 0.70).opacity(0.85),
+                            Color(red: 0.22, green: 0.26, blue: 0.32).opacity(0.90),
+                            Color(red: 0.75, green: 0.80, blue: 0.88).opacity(0.75)
+                        ]),
+                        startPoint: CGPoint(x: mirrorRect.minX, y: mirrorRect.minY),
+                        endPoint: CGPoint(x: mirrorRect.maxX, y: mirrorRect.maxY)
+                    )
+                )
+                throatCtx.stroke(Path(roundedRect: mirrorRect, cornerRadius: 2.5), with: .color(Color.white.opacity(0.45)), lineWidth: 0.8)
+            }
+
+            // 5. Three Machined Bayonet Locking Lugs Around Throat Perimeter
+            let lugAngles: [Double] = [-30.0, 90.0, 210.0]
+            for deg in lugAngles {
+                let rad = deg * .pi / 180.0
+                var lugArc = Path()
+                lugArc.addArc(
+                    center: CGPoint(x: cx, y: cy),
+                    radius: throatR + 2.0,
+                    startAngle: .radians(rad - 0.32),
+                    endAngle: .radians(rad + 0.32),
+                    clockwise: false
+                )
+                ctx.stroke(lugArc, with: .color(Color(red: 0.86, green: 0.89, blue: 0.94)), lineWidth: 3.5)
+            }
+
+            // 6. Red Enamel Alignment Dot (#E60012) at 12 O'Clock & Spring Lock-Pin at 3 O'Clock
+            let redDotR: CGFloat = 2.8
+            let redDotCenter = CGPoint(x: cx, y: cy - outerR + 5.0)
+            ctx.fill(
+                Path(ellipseIn: CGRect(x: redDotCenter.x - redDotR, y: redDotCenter.y - redDotR, width: redDotR * 2, height: redDotR * 2)),
+                with: .color(Color(red: 0.90, green: 0.0, blue: 0.07))
+            )
+
+            // Spring-Loaded Bayonet Lock Pin at 3 O'Clock (Shoots inward and turns gold when locked)
+            let pinR: CGFloat = 2.6 + lockPinProgress * 0.8
+            let pinX = cx + outerR - 5.5 - (lockPinProgress * 2.0)
+            let pinRect = CGRect(x: pinX - pinR, y: cy - pinR, width: pinR * 2, height: pinR * 2)
+            ctx.fill(
+                Path(ellipseIn: pinRect),
+                with: .color(lockPinProgress > 0.5 ? Palette.accent : Color(red: 0.82, green: 0.85, blue: 0.90))
+            )
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Procedural Co-Axial Lens Barrel, Multi-Coating & Iris Canvas
+
+struct ProceduralLensBarrelCanvas: View {
+    let lensBrand: String
+    let lensName: String
+    let mount: String
+    let minAperture: Double
+    let maxAperture: Double
+    var variantLabel: String = ""
+    var bayonetAngle: Double = 0.0         // 0 -> 65 -> 90 degrees during twist
+    var irisStopDownProgress: CGFloat = 0.0// 0.0 (wide open) -> 1.0 (stopped down to f/16)
+    var coatingFlareProgress: CGFloat = 0.0// 0.0 -> 1.0 test-fire dichroic ripple
+
+    // Entrance pupil diameter scales authentically with widest f-stop (f/0.95 = 0.86, f/4.0 = 0.46)
+    private var glassRatio: CGFloat {
+        let clampedF = min(max(minAperture, 0.95), 5.6)
+        return CGFloat(min(max(0.86 - (clampedF - 0.95) * 0.11, 0.44), 0.86))
+    }
+
+    // Sub-variant hardware detection
+    private var isNikonPreAI: Bool {
+        variantLabel.localizedCaseInsensitiveContains("pre-ai") || lensName.localizedCaseInsensitiveContains("pre-ai")
+    }
+    private var isNikonAIS: Bool {
+        variantLabel.localizedCaseInsensitiveContains("ai-s") || lensName.localizedCaseInsensitiveContains("ai-s")
+    }
+    private var isCanonBreechLock: Bool {
+        variantLabel.localizedCaseInsensitiveContains("breech") || lensName.localizedCaseInsensitiveContains("breech")
+    }
+    private var isRadioactiveThoriumTakumar: Bool {
+        let combined = "\(lensBrand) \(lensName) \(variantLabel)".lowercased()
+        return combined.contains("super-takumar") || (combined.contains("takumar") && !combined.contains("smc"))
+    }
+    private var isLeicaPreASPH: Bool {
+        variantLabel.localizedCaseInsensitiveContains("pre-asph") || variantLabel.localizedCaseInsensitiveContains("classic")
+    }
+    private var isZeissNinjaStarAE: Bool {
+        let b = "\(lensBrand) \(lensName)".lowercased()
+        let v = variantLabel.lowercased()
+        return (b.contains("zeiss") || b.contains("planar") || b.contains("distagon") || b.contains("sonnar")) && v.contains("ae")
+    }
+
+    // Authentic Thin-Film Interference Multi-Coating Colors by Optical House
+    private var coatingColors: (primary: Color, secondary: Color) {
+        let full = "\(lensBrand) \(lensName)".lowercased()
+        if full.contains("zeiss") || full.contains("planar") || full.contains("distagon") || full.contains("biogon") || full.contains("sonnar") && !full.contains("rollei") {
+            // Carl Zeiss T* Magenta & Cobalt Blue
+            return (Color(red: 0.66, green: 0.33, blue: 0.97), Color(red: 0.15, green: 0.39, blue: 0.92))
+        } else if full.contains("takumar") || full.contains("pentax") || full.contains("smc") {
+            // Asahi Pentax SMC Amber & Emerald Green
+            return (Color(red: 0.96, green: 0.62, blue: 0.04), Color(red: 0.06, green: 0.73, blue: 0.51))
+        } else if full.contains("leica") || full.contains("summicron") || full.contains("summilux") || full.contains("noctilux") || full.contains("elmar") {
+            // Leitz Wetzlar Cyan-Aqua & Champagne Gold
+            return (Color(red: 0.02, green: 0.71, blue: 0.83), Color(red: 0.83, green: 0.69, blue: 0.22))
+        } else if full.contains("rollei") || full.contains("hft") {
+            // Rollei HFT Ruby Red & Deep Violet
+            return (Color(red: 0.88, green: 0.11, blue: 0.28), Color(red: 0.43, green: 0.16, blue: 0.85))
+        } else {
+            // Nikon NIC / Canon S.S.C. Emerald Green & Crimson
+            return (Color(red: 0.06, green: 0.73, blue: 0.51), Color(red: 0.88, green: 0.11, blue: 0.28))
+        }
+    }
+
+    var body: some View {
+        Canvas { ctx, size in
+            let cx = size.width * 0.5
+            let cy = size.height * 0.5
+            let barrelR = min(size.width, size.height) * 0.44
+            let glassR = barrelR * glassRatio
+
+            ctx.translateBy(x: cx, y: cy)
+            ctx.rotate(by: .degrees(bayonetAngle))
+            ctx.translateBy(x: -cx, y: -cy)
+
+            // 1. Sub-Variant: Leica Pre-ASPH Concave Crescent Focusing Tab at 7 O'Clock
+            if isLeicaPreASPH {
+                var tabPath = Path()
+                let tabAngle = 135.0 * .pi / 180.0
+                let tx = cx + cos(tabAngle) * (barrelR + 4.0)
+                let ty = cy + sin(tabAngle) * (barrelR + 4.0)
+                tabPath.addEllipse(in: CGRect(x: tx - 7, y: ty - 5, width: 14, height: 10))
+                ctx.fill(tabPath, with: .color(Color(red: 0.22, green: 0.24, blue: 0.28)))
+                ctx.stroke(tabPath, with: .color(Color.white.opacity(0.35)), lineWidth: 1.0)
+            }
+
+            // 2. Sub-Variant: Nikon Pre-AI Silver "Bunny Ears" Metering Prong at 12 O'Clock
+            if isNikonPreAI {
+                let prongRect = CGRect(x: cx - 8.0, y: cy - barrelR - 4.5, width: 16.0, height: 6.5)
+                ctx.fill(Path(roundedRect: prongRect, cornerRadius: 2.0), with: .color(Color(red: 0.84, green: 0.87, blue: 0.92)))
+                let notchRect = CGRect(x: cx - 2.2, y: cy - barrelR - 5.0, width: 4.4, height: 4.0)
+                ctx.fill(Path(notchRect), with: .color(Color.black))
+            }
+
+            // 3. Outer Anodized Aluminum / Silver Breech-Lock Barrel Ring
+            let outerRect = CGRect(x: cx - barrelR, y: cy - barrelR, width: barrelR * 2, height: barrelR * 2)
+            if isCanonBreechLock {
+                // Brushed Silver Knurled Breech-Lock Collar
+                ctx.fill(
+                    Path(ellipseIn: outerRect),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.80, green: 0.83, blue: 0.88),
+                            Color(red: 0.45, green: 0.48, blue: 0.54),
+                            Color(red: 0.72, green: 0.76, blue: 0.82)
+                        ]),
+                        startPoint: CGPoint(x: outerRect.minX, y: outerRect.minY),
+                        endPoint: CGPoint(x: outerRect.maxX, y: outerRect.maxY)
+                    )
+                )
+            } else {
+                // Deep Anodized Black Machined Barrel
+                ctx.fill(
+                    Path(ellipseIn: outerRect),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.22, green: 0.24, blue: 0.28),
+                            Color(red: 0.08, green: 0.09, blue: 0.11),
+                            Color(red: 0.16, green: 0.18, blue: 0.21)
+                        ]),
+                        startPoint: CGPoint(x: outerRect.minX, y: outerRect.minY),
+                        endPoint: CGPoint(x: outerRect.maxX, y: outerRect.maxY)
+                    )
+                )
+            }
+
+            // 4. Knurled Focus Grip Teeth Around Perimeter (24 Machined Ribs)
+            let ribCount = 24
+            for i in 0..<ribCount {
+                let rad = (Double(i) / Double(ribCount)) * 2.0 * .pi
+                let r1 = barrelR - 3.2
+                let r2 = barrelR - 0.6
+                var rib = Path()
+                rib.move(to: CGPoint(x: cx + CGFloat(cos(rad)) * r1, y: cy + CGFloat(sin(rad)) * r1))
+                rib.addLine(to: CGPoint(x: cx + CGFloat(cos(rad)) * r2, y: cy + CGFloat(sin(rad)) * r2))
+                ctx.stroke(rib, with: .color(Color.white.opacity(isCanonBreechLock ? 0.45 : 0.18)), lineWidth: 1.3)
+            }
+
+            // 5. Stepped Matte-Black Anti-Reflection Baffle Ring & Aperture Detent Dots
+            let baffleR = barrelR * 0.88
+            let baffleRect = CGRect(x: cx - baffleR, y: cy - baffleR, width: baffleR * 2, height: baffleR * 2)
+            ctx.fill(Path(ellipseIn: baffleRect), with: .color(Color(red: 0.06, green: 0.07, blue: 0.09)))
+            ctx.stroke(Path(ellipseIn: baffleRect), with: .color(Color.white.opacity(0.14)), lineWidth: 0.8)
+
+            // Engraved Aperture Scale Dots Along Top Arc (Orange minimum stop if Nikon AI-S!)
+            let dotAngles: [Double] = [-125, -110, -95, -80, -65, -50]
+            for (idx, deg) in dotAngles.enumerated() {
+                let rad = deg * .pi / 180.0
+                let dr = (baffleR + glassR) * 0.5
+                let dx = cx + CGFloat(cos(rad)) * dr
+                let dy = cy + CGFloat(sin(rad)) * dr
+                let isLastStop = (idx == dotAngles.count - 1)
+                let dotColor: Color = (isLastStop && isNikonAIS)
+                    ? Color(red: 1.0, green: 0.43, blue: 0.0) // Nikon AI-S Orange
+                    : (idx == 0 ? Palette.accent : Color.white.opacity(0.65))
+                ctx.fill(Path(ellipseIn: CGRect(x: dx - 1.3, y: dy - 1.3, width: 2.6, height: 2.6)), with: .color(dotColor))
+            }
+
+            // 6. Optical Glass Element Base + Radioactive Thorium-232 Tint (if Super-Takumar)
+            let glassRect = CGRect(x: cx - glassR, y: cy - glassR, width: glassR * 2, height: glassR * 2)
+            ctx.fill(Path(ellipseIn: glassRect), with: .color(Color(red: 0.03, green: 0.04, blue: 0.06)))
+
+            if isRadioactiveThoriumTakumar {
+                ctx.fill(
+                    Path(ellipseIn: glassRect),
+                    with: .radialGradient(
+                        Gradient(colors: [
+                            Color(red: 0.85, green: 0.55, blue: 0.08).opacity(0.34),
+                            Color(red: 0.65, green: 0.38, blue: 0.04).opacity(0.16)
+                        ]),
+                        center: CGPoint(x: cx, y: cy),
+                        startRadius: 2,
+                        endRadius: glassR
+                    )
+                )
+            }
+
+            // 7. LIVE STOPPING-DOWN MULTI-BLADE IRIS DIAPHRAGM (Including Zeiss AE Ninja-Star!)
+            let minHoleRatio: CGFloat = 0.22
+            let maxHoleRatio: CGFloat = 0.76
+            let currentIrisRatio = maxHoleRatio - (maxHoleRatio - minHoleRatio) * irisStopDownProgress
+            let irisOpenR = glassR * currentIrisRatio
+
+            // Dark Iris Leaf Annulus
+            var irisCtx = ctx
+            irisCtx.clip(to: Path(ellipseIn: glassRect))
+
+            // Draw 7-blade polygon opening (with sawtooth Ninja-Star cusps if Zeiss AE!)
+            let bladeCount = isZeissNinjaStarAE ? 6 : 7
+            var irisOpeningPath = Path()
+            let totalVertices = bladeCount * 2
+            for v in 0..<totalVertices {
+                let angle = (Double(v) / Double(totalVertices)) * 2.0 * .pi + Double(irisStopDownProgress) * 0.45
+                let isCusp = (v % 2 == 1)
+                let rFactor: CGFloat = (isZeissNinjaStarAE && isCusp) ? (1.0 + 0.18 * (0.4 + irisStopDownProgress * 0.6)) : 1.0
+                let r = irisOpenR * rFactor
+                let px = cx + CGFloat(cos(angle)) * r
+                let py = cy + CGFloat(sin(angle)) * r
+                if v == 0 {
+                    irisOpeningPath.move(to: CGPoint(x: px, y: py))
+                } else {
+                    irisOpeningPath.addLine(to: CGPoint(x: px, y: py))
+                }
+            }
+            irisOpeningPath.closeSubpath()
+
+            // Fill Iris Blades Outside the Polygon Opening
+            var bladeMask = Path(ellipseIn: glassRect)
+            bladeMask.addPath(irisOpeningPath)
+            irisCtx.fill(bladeMask, with: .color(Color(red: 0.11, green: 0.12, blue: 0.15).opacity(0.94)), style: FillStyle(eoFill: true))
+            irisCtx.stroke(irisOpeningPath, with: .color(Color.white.opacity(0.28)), lineWidth: 0.9)
+
+            // Etched Blade Overlap Seam Lines
+            for b in 0..<bladeCount {
+                let a1 = (Double(b) / Double(bladeCount)) * 2.0 * .pi + Double(irisStopDownProgress) * 0.45
+                let a2 = a1 + 0.68
+                var seam = Path()
+                seam.move(to: CGPoint(x: cx + CGFloat(cos(a1)) * irisOpenR, y: cy + CGFloat(sin(a1)) * irisOpenR))
+                seam.addLine(to: CGPoint(x: cx + CGFloat(cos(a2)) * glassR, y: cy + CGFloat(sin(a2)) * glassR))
+                irisCtx.stroke(seam, with: .color(Color.black.opacity(0.70)), lineWidth: 0.8)
+            }
+
+            // 8. Brand-Authentic Thin-Film Multi-Coating Reflections (Upper-Left & Lower-Right Crescents)
+            let colors = coatingColors
+            let upperGlowCenter = CGPoint(x: cx - glassR * 0.32, y: cy - glassR * 0.32)
+            let lowerGlowCenter = CGPoint(x: cx + glassR * 0.34, y: cy + glassR * 0.34)
+
+            irisCtx.fill(
+                Path(ellipseIn: glassRect),
+                with: .radialGradient(
+                    Gradient(colors: [
+                        colors.primary.opacity(0.46),
+                        colors.primary.opacity(0.12),
+                        Color.clear
+                    ]),
+                    center: upperGlowCenter,
+                    startRadius: 1,
+                    endRadius: glassR * 0.85
+                )
+            )
+
+            irisCtx.fill(
+                Path(ellipseIn: glassRect),
+                with: .radialGradient(
+                    Gradient(colors: [
+                        colors.secondary.opacity(0.42),
+                        colors.secondary.opacity(0.10),
+                        Color.clear
+                    ]),
+                    center: lowerGlowCenter,
+                    startRadius: 1,
+                    endRadius: glassR * 0.78
+                )
+            )
+
+            // Crisp Specular Glass Caustic Highlight Arc
+            var causticArc = Path()
+            causticArc.addArc(
+                center: CGPoint(x: cx, y: cy),
+                radius: glassR * 0.74,
+                startAngle: .degrees(205),
+                endAngle: .degrees(250),
+                clockwise: false
+            )
+            irisCtx.stroke(causticArc, with: .color(Color.white.opacity(0.55)), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+
+            // Stage 3 Test-Fire Dichroic Flare Ring Ripple
+            if coatingFlareProgress > 0.01 {
+                let flareR = glassR * (0.25 + 0.75 * coatingFlareProgress)
+                let flareAlpha = Double(1.0 - coatingFlareProgress)
+                let flareRect = CGRect(x: cx - flareR, y: cy - flareR, width: flareR * 2, height: flareR * 2)
+                irisCtx.stroke(
+                    Path(ellipseIn: flareRect),
+                    with: .color(colors.primary.opacity(0.85 * flareAlpha)),
+                    lineWidth: 2.8
+                )
+            }
+
+            // Outer Glass Retaining Ring Bezel
+            ctx.stroke(Path(ellipseIn: glassRect), with: .color(Color.white.opacity(0.25)), lineWidth: 1.1)
+
+            // 9. Lens Red Alignment Dot at 12 O'Clock (Rotates into alignment with Camera Red Dot)
+            let lensDotR: CGFloat = 2.6
+            let lensDotCenter = CGPoint(x: cx, y: cy - barrelR + 4.5)
+            ctx.fill(
+                Path(ellipseIn: CGRect(x: lensDotCenter.x - lensDotR, y: lensDotCenter.y - lensDotR, width: lensDotR * 2, height: lensDotR * 2)),
+                with: .color(Color(red: 0.90, green: 0.0, blue: 0.07))
+            )
+        }
+        .allowsHitTesting(false)
+    }
+}
+

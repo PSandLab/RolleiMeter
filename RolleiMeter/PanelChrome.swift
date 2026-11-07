@@ -80,3 +80,36 @@ struct PressStyle: ButtonStyle {
             )
     }
 }
+
+// MARK: - Machined Brass Dial Limit Stop Pin
+
+struct BrassDialLimitPin: View {
+    let isEngaged: Bool
+    var scale: CGFloat = 1.0
+
+    var body: some View {
+        HStack(spacing: 2 * scale) {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            isEngaged ? Palette.accent : Color(red: 0.88, green: 0.69, blue: 0.31),
+                            Color(red: 0.52, green: 0.38, blue: 0.14)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 5.5 * scale, height: 5.5 * scale)
+                .overlay(
+                    Rectangle()
+                        .fill(Color.black.opacity(0.65))
+                        .frame(width: 3.5 * scale, height: 0.9 * scale)
+                        .rotationEffect(.degrees(35))
+                )
+                .shadow(color: isEngaged ? Palette.accent.opacity(0.55) : .clear, radius: 3 * scale)
+        }
+        .allowsHitTesting(false)
+    }
+}
+

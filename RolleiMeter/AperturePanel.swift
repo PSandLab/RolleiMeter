@@ -58,6 +58,16 @@ struct AperturePanel: View {
             PanelTitle(text: "APERTURE", k: k)
                 .scaleEffect(1.0 + 0.03 * detentKick)
         }
+        .overlay(alignment: .bottomLeading) {
+            BrassDialLimitPin(isEngaged: nearest == 0, scale: k)
+                .padding(.leading, 14 * k)
+                .padding(.bottom, 12 * k)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            BrassDialLimitPin(isEngaged: nearest == stopCount - 1, scale: k)
+                .padding(.trailing, 14 * k)
+                .padding(.bottom, 12 * k)
+        }
         .overlay(alignment: .topTrailing) {
             if auto {
                 ZStack {
