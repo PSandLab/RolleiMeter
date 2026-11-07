@@ -6,8 +6,8 @@ struct FilmCanisterArtwork: View {
     var filmName: String = ""
     var brand: String = ""
     var familyName: String = ""
-    var iso: Int = 400
     var category: String = "Color"
+    var iso: Int = 400
     var showLeader: Bool = true
     var leaderExtension: CGFloat = 1.0
     var spoolRotation: Double = 0.0

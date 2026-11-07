@@ -1114,9 +1114,9 @@ struct UnspoolingFilmStripCanvas: View {
             // Acetate Cupping Specular Wave (Diagonal plastic curl reflection that sharpens with tension)
             let waveCenter = startX + (flatBodyEndX - startX) * (0.35 + 0.30 * tension)
             let waveHalfW = max(14.0, 38.0 * (1.0 - tension * 0.55))
-            ctx.saveGState()
-            ctx.clip(to: stripPath)
-            ctx.fill(
+            var waveCtx = ctx
+            waveCtx.clip(to: stripPath)
+            waveCtx.fill(
                 stripPath,
                 with: .linearGradient(
                     Gradient(colors: [
@@ -1128,7 +1128,6 @@ struct UnspoolingFilmStripCanvas: View {
                     endPoint: CGPoint(x: waveCenter + waveHalfW, y: midY + stripHalfH)
                 )
             )
-            ctx.restoreGState()
 
             // Tooth-Clash Friction Amber Border Highlight
             let strokeColor = toothClash > 0.1
