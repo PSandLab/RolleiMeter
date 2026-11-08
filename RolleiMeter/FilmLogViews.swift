@@ -973,7 +973,7 @@ private struct FilmCanisterListRow: View {
 
     private var header: some View {
         Button(action: onSelect) {
-            HStack(spacing: 14) {
+            HStack(spacing: isExpanded ? 0 : 14) {
                 ZStack {
                     FilmCanisterArtwork(
                         brand: brand,
@@ -1014,7 +1014,8 @@ private struct FilmCanisterListRow: View {
                     .opacity(isExpanded ? 0 : 1)
                     .animation(.easeOut(duration: 0.2).delay(isExpanded ? 0.1 : 0.15), value: isExpanded)
                 }
-                .frame(width: 52, height: 54)
+                .frame(width: isExpanded ? 0 : 52, height: 54)
+                .animation(.spring(response: 0.42, dampingFraction: 0.80).delay(isExpanded ? 0.18 : 0.0), value: isExpanded)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(familyName)
@@ -1029,6 +1030,7 @@ private struct FilmCanisterListRow: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
+                .animation(.spring(response: 0.42, dampingFraction: 0.80).delay(isExpanded ? 0.18 : 0.0), value: isExpanded)
 
                 Spacer(minLength: 8)
 
