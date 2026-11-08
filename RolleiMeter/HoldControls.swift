@@ -67,7 +67,8 @@ struct InteractiveFilmLeaderChamber: View {
 
                 // Effective inward suck distance during Stage 0 cinch (gulps 34pt of leader into the drum)
                 let suckInShiftPt: CGFloat = suckInProgress * 34.0
-                let tipX: CGFloat = startX + travel * pullProgress + suckInShiftPt
+                let restingLeader: CGFloat = 18.0 // leader sticks out a bit more at rest
+                let tipX: CGFloat = startX + restingLeader + (travel - restingLeader) * pullProgress + suckInShiftPt
 
                 // Sprocket tooth misalignment penalty when pulled at extreme vertical angles (|dragY| > 0.14h)
                 let maxCleanDeflection: CGFloat = h * 0.14
@@ -159,14 +160,6 @@ struct InteractiveFilmLeaderChamber: View {
 
                     // Left Side: Supply Well + 3D Spinning & Tilting Canister
                     ZStack {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Palette.wellDeep)
-                            .frame(width: 62, height: 102)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(Palette.wellEdge, lineWidth: 1)
-                            )
-
                         FilmCanisterArtwork(
                             filmName: resolvedFilmName,
                             brand: brand,
