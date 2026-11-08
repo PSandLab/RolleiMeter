@@ -259,7 +259,6 @@ let BUILTIN_FILM_STOCKS: [FilmStockPreset] = BUILTIN_FILM_FAMILIES.flatMap { fam
 // MARK: - Expired Storage Condition
 
 enum ExpiredStorageCondition: String, Codable, CaseIterable, Identifiable {
-    case cold = "Cold"
     case room = "Room"
     case hot  = "Hot"
 
@@ -267,7 +266,6 @@ enum ExpiredStorageCondition: String, Codable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .cold: return "❄️ Cold"
         case .room: return "🏠 Room"
         case .hot:  return "☀️ Attic"
         }
@@ -276,7 +274,6 @@ enum ExpiredStorageCondition: String, Codable, CaseIterable, Identifiable {
     /// Stops-per-decade multiplier
     var slopeMultiplier: Double {
         switch self {
-        case .cold: return 0.25
         case .room: return 1.00
         case .hot:  return 1.50
         }

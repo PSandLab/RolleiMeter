@@ -70,31 +70,39 @@ private extension View {
 
 private struct RolleiGlassSegment: View {
     let title: String
+    var icon: String? = nil
     let isSelected: Bool
+    var activeColor: Color = Palette.accent
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(
-                    .caption.weight(
-                        isSelected ? .semibold : .medium
+            HStack(spacing: 4) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 10.5, weight: .semibold))
+                }
+                Text(title)
+                    .font(
+                        .caption.weight(
+                            isSelected ? .semibold : .medium
+                        )
                     )
-                )
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 9)
-                .foregroundStyle(
-                    isSelected ? Palette.accent : Palette.textSub
-                )
-                .rolleiGlassCapsule(
-                    tint: isSelected
-                        ? Palette.accent.opacity(0.24)
-                        : nil
-                )
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 9)
+            .foregroundStyle(
+                isSelected ? activeColor : Palette.textSub
+            )
+            .rolleiGlassCapsule(
+                tint: isSelected
+                    ? activeColor.opacity(0.28)
+                    : activeColor.opacity(0.08)
+            )
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -170,6 +178,21 @@ struct RollView: View {
 
     private let categories = ["Color", "B&W", "Slide", "Custom"]
     private let quickDecades = [10, 15, 20, 25, 30, 40]
+
+    private func categoryFlare(for cat: String) -> (color: Color, icon: String) {
+        switch cat {
+        case "Color":
+            return (Color(red: 0.96, green: 0.45, blue: 0.12), "sun.max.fill")
+        case "B&W":
+            return (Palette.text, "circle.lefthalf.filled")
+        case "Slide":
+            return (Color(red: 0.92, green: 0.16, blue: 0.54), "sparkles.rectangle.stack.fill")
+        case "Custom":
+            return (Color(red: 0.56, green: 0.30, blue: 0.96), "wand.and.stars")
+        default:
+            return (Palette.accent, "film")
+        }
+    }
 
     private var roll: FilmRollState { store.rollState }
     private var gear: ActiveGearProfile { store.activeGear }
@@ -302,10 +325,13 @@ struct RollView: View {
                     HStack(spacing: 6) {
                         ForEach(categories, id: \.self) { cat in
                             let active = selectedCategory == cat
+                            let flare = categoryFlare(for: cat)
 
                             RolleiGlassSegment(
                                 title: cat,
-                                isSelected: active
+                                icon: flare.icon,
+                                isSelected: active,
+                                activeColor: flare.color
                             ) {
                                 guard !active else { return }
 
@@ -709,6 +735,8 @@ struct RollView: View {
                                 .font(.system(size: 9, weight: .bold))
                         }
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(Palette.text)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 9)
@@ -734,6 +762,8 @@ struct RollView: View {
                             Text("Expired")
                                 .font(.caption.weight(.semibold))
                         }
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(
                             stagedExpired ? Palette.accent : Palette.text
                         )
@@ -981,7 +1011,7 @@ private struct FilmCanisterListRow: View {
                         category: category,
                         iso: defaultISO,
                         showLeader: true,
-                        leaderExtension: isExpanded ? 1.0 : 0.4,
+                        leaderExtension: 0.4,
                         yearsExpired: yearsExpired,
                         width: 46,
                         height: 50
@@ -1024,7 +1054,7 @@ private struct FilmCanisterListRow: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
-                    Text(isExpanded ? "Pull the leader to load · \(isoLabel)" : "\(brandLabel) · \(isoLabel)")
+                    Text("\(brandLabel) · \(isoLabel)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(Palette.textSub)
                         .lineLimit(1)
@@ -1097,7 +1127,7 @@ private struct ExpiredFilmFastScrubber: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("EXPIRED \(years) YRS · \(vintageYear)")
+                Text("EXPIRED \(years) YRS · \(String(vintageYear))")
                     .font(.caption.weight(.bold).monospacedDigit())
                     .foregroundStyle(Palette.accent)
 

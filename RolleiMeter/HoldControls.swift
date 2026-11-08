@@ -42,6 +42,7 @@ struct InteractiveFilmLeaderChamber: View {
     @State private var idlePulse: Bool = false
     @State private var canisterSwapPop: CGFloat = 0.0
     @State private var canisterFlight: CGFloat = 1.0 // 1 = still up in the list row, 0 = seated in chamber
+    @State private var leaderEmergence: CGFloat = 0.0 // 0 = hidden while canister drops, 1 = emerged after landing
 
     // Stage 0 Open-Chamber Suck-In & Mechanical Micro-States
     @State private var suckInProgress: CGFloat = 0.0        // 0.0 -> 1.0 during 450ms pre-door cinch
@@ -68,7 +69,7 @@ struct InteractiveFilmLeaderChamber: View {
 
                 // Effective inward suck distance during Stage 0 cinch (gulps 34pt of leader into the drum)
                 let suckInShiftPt: CGFloat = suckInProgress * 34.0
-                let restingLeader: CGFloat = 30.0 // leader sticks out a bit more at rest
+                let restingLeader: CGFloat = 30.0 * leaderEmergence // leader emerges only after canister lands
                 let tipX: CGFloat = startX + restingLeader + (travel - restingLeader) * pullProgress + suckInShiftPt
 
                 // Sprocket tooth misalignment penalty when pulled at extreme vertical angles (|dragY| > 0.14h)
@@ -140,6 +141,7 @@ struct InteractiveFilmLeaderChamber: View {
                         category: category,
                         yearsExpired: yearsExpired
                     )
+                    .opacity(Double(leaderEmergence))
 
                     // LAYER 3 (TOP): Spool Front Cheek Flanges & Over-Clamp Bar (Occludes Leader Tip Inside Slot)
                     TakeUpSpoolTopFlangeLayer(
@@ -189,6 +191,9 @@ struct InteractiveFilmLeaderChamber: View {
                         guard canisterFlight > 0 else { return }
                         withAnimation(.spring(response: 0.62, dampingFraction: 0.52).delay(0.14)) {
                             canisterFlight = 0.0
+                        }
+                        withAnimation(.spring(response: 0.36, dampingFraction: 0.68).delay(0.54)) {
+                            leaderEmergence = 1.0
                         }
                     }
 
@@ -339,35 +344,30 @@ struct InteractiveFilmLeaderChamber: View {
             }
             .frame(height: 132)
 
-            // Bottom status & instruction bar
-            HStack {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(statusDotColor)
-                        .frame(width: 6.5, height: 6.5)
-                        .scaleEffect(isLatchedHold ? heartbeatScale : 1.0)
+            // Bottom status bar (only visible during active loading ceremony)
+            if isRunningCeremony || ceremonyPhase > 0 {
+                HStack {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(statusDotColor)
+                            .frame(width: 6.5, height: 6.5)
 
-                    Text(statusText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(statusTextColor)
-                        .contentTransition(.numericText())
-                }
+                        Text(statusText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(statusTextColor)
+                            .contentTransition(.numericText())
+                    }
 
-                Spacer()
+                    Spacer()
 
-                if isLatchedHold {
-                    Text("SLIDE LEFT TO CANCEL")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .transition(.opacity)
-                } else {
                     Text(String(format: "ROLL #%02d", rollNumber))
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .contentTransition(.numericText())
                 }
+                .padding(.horizontal, 4)
+                .transition(.opacity)
             }
-            .padding(.horizontal, 4)
         }
         .onAppear {
             withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
