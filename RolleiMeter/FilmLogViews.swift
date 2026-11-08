@@ -939,6 +939,12 @@ struct RollView: View {
 
 // MARK: - Film Canister List Row
 
+private struct CanisterHop {
+    var offsetY: CGFloat = 0
+    var scaleX: CGFloat = 1
+    var scaleY: CGFloat = 1
+}
+
 private struct FilmCanisterListRow: View {
     let brand: String
     let brandLabel: String
@@ -980,7 +986,30 @@ private struct FilmCanisterListRow: View {
                         width: 46,
                         height: 50
                     )
-                    .scaleEffect(isExpanded ? 1.06 : 1.0)
+                    .scaleEffect(isExpanded ? 1.06 : 1.0, anchor: .bottom)
+                    .keyframeAnimator(initialValue: CanisterHop(), trigger: isExpanded) { content, hop in
+                        content
+                            .scaleEffect(x: hop.scaleX, y: hop.scaleY, anchor: .bottom)
+                            .offset(y: hop.offsetY)
+                    } keyframes: { _ in
+                        // Anticipation squat -> smooth lift -> soft landing with a small settle.
+                        KeyframeTrack(\.offsetY) {
+                            CubicKeyframe(1.5, duration: 0.10)
+                            CubicKeyframe(-7.0, duration: 0.22)
+                            SpringKeyframe(0, duration: 0.45, spring: .init(response: 0.38, dampingRatio: 0.62))
+                        }
+                        KeyframeTrack(\.scaleY) {
+                            CubicKeyframe(0.94, duration: 0.10)
+                            CubicKeyframe(1.07, duration: 0.22)
+                            SpringKeyframe(1.0, duration: 0.45, spring: .init(response: 0.38, dampingRatio: 0.60))
+                        }
+                        KeyframeTrack(\.scaleX) {
+                            CubicKeyframe(1.04, duration: 0.10)
+                            CubicKeyframe(0.97, duration: 0.22)
+                            SpringKeyframe(1.0, duration: 0.45, spring: .init(response: 0.38, dampingRatio: 0.60))
+                        }
+                    }
+                    .animation(.spring(response: 0.5, dampingFraction: 0.78), value: isExpanded)
                 }
                 .frame(width: 52, height: 54)
 
