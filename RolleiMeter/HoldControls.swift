@@ -141,7 +141,6 @@ struct InteractiveFilmLeaderChamber: View {
                         category: category,
                         yearsExpired: yearsExpired
                     )
-                    .opacity(Double(leaderEmergence))
 
                     // LAYER 3 (TOP): Spool Front Cheek Flanges & Over-Clamp Bar (Occludes Leader Tip Inside Slot)
                     TakeUpSpoolTopFlangeLayer(
@@ -192,7 +191,7 @@ struct InteractiveFilmLeaderChamber: View {
                         withAnimation(.spring(response: 0.62, dampingFraction: 0.52).delay(0.14)) {
                             canisterFlight = 0.0
                         }
-                        withAnimation(.spring(response: 0.36, dampingFraction: 0.68).delay(0.54)) {
+                        withAnimation(.spring(response: 0.52, dampingFraction: 0.72).delay(0.42)) {
                             leaderEmergence = 1.0
                         }
                     }
@@ -250,20 +249,9 @@ struct InteractiveFilmLeaderChamber: View {
                                         )
 
                                         if clamped >= latchThreshold {
-                                            let magnet =
-                                                latchThreshold
-                                                + (clamped - latchThreshold) * 0.45
-
-                                            pullProgress = min(
-                                                max(magnet, latchThreshold),
-                                                0.94
-                                            )
-
-                                            dragY = yDeflection * 0.22
-
-                                            if !isLatchedHold {
-                                                enterLatchedHoldHeartbeat()
-                                            }
+                                            isDragging = false
+                                            exitLatchedHoldHeartbeat()
+                                            runGrandLoadingCeremony()
                                         } else {
                                             if isLatchedHold {
                                                 exitLatchedHoldHeartbeat()
@@ -984,23 +972,36 @@ struct TakeUpSpoolTopFlangeLayer: View {
     }
 }
 
-struct UnspoolingFilmStripCanvas: View {
+struct UnspoolingFilmStripCanvas: View, Animatable {
     let startX: CGFloat
-    let tipX: CGFloat
+    var tipX: CGFloat
     let tangentX: CGFloat
     let drumCenterX: CGFloat
     let drumRadius: CGFloat
     let midY: CGFloat
-    let dragY: CGFloat
-    let pullProgress: CGFloat
-    let suckInProgress: CGFloat
-    let windShift: CGFloat
-    let tension: CGFloat
-    let toothClash: CGFloat
-    let pressurePlateProgress: CGFloat
+    var dragY: CGFloat
+    var pullProgress: CGFloat
+    var suckInProgress: CGFloat
+    var windShift: CGFloat
+    var tension: CGFloat
+    var toothClash: CGFloat
+    var pressurePlateProgress: CGFloat
     var filmName: String = ""
     let category: String
     var yearsExpired: Int = 0
+
+    var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>>> {
+        get {
+            AnimatablePair(tipX, AnimatablePair(dragY, AnimatablePair(pullProgress, AnimatablePair(suckInProgress, windShift))))
+        }
+        set {
+            tipX = newValue.first
+            dragY = newValue.second.first
+            pullProgress = newValue.second.second.first
+            suckInProgress = newValue.second.second.second.first
+            windShift = newValue.second.second.second.second
+        }
+    }
 
     private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
         let t = min(max((x - edge0) / max(edge1 - edge0, 0.0001), 0.0), 1.0)
@@ -1041,6 +1042,7 @@ struct UnspoolingFilmStripCanvas: View {
 
     var body: some View {
         Canvas { ctx, size in
+            guard tipX > startX + 0.5 else { return }
             let stripHalfH: CGFloat = 23.0 - (pressurePlateProgress * 0.8)
             let isLatched = pullProgress >= 0.82
             let latchBlend = smoothstep(0.78, 0.84, pullProgress)
@@ -1050,8 +1052,8 @@ struct UnspoolingFilmStripCanvas: View {
             let effectiveCtrlY = midY + dragY * (isLatched ? 0.55 : 0.85)
 
             // Tongue taper shrinks as Stage 0 sucks the narrow tongue inside the drum core
-            let tongueLen: CGFloat = 26.0 * (1.0 - suckInProgress * 0.85)
-            let rawBodyEndX = max(startX + 4.0, tipX - tongueLen)
+            let tongueLen: CGFloat = min(26.0 * (1.0 - suckInProgress * 0.85), max(0.0, tipX - startX))
+            let rawBodyEndX = max(startX, tipX - tongueLen)
             let flatBodyEndX = min(rawBodyEndX, tangentX)
             let ctrlX = startX + (flatBodyEndX - startX) * 0.52
 

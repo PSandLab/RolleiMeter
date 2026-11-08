@@ -355,8 +355,41 @@ struct CameraLensView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // 1. TOP ACTIVE RIG SUMMARY & INTEGRATED 2-STEP SWITCHER
-                activeRigHeaderCard
+                if !stagedCamera.isFixed {
+                    HStack(spacing: 8) {
+                        stepTabButton(
+                            stepNumber: "1",
+                            title: "BODY",
+                            isActive: step == .body
+                        ) {
+                            guard step != .body else { return }
+                            Haptics.tap()
+
+                            withAnimation(.snappy(duration: 0.22)) {
+                                searchText = ""
+                                step = .body
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        stepTabButton(
+                            stepNumber: "2",
+                            title: "LENS",
+                            isActive: step == .lens
+                        ) {
+                            guard step != .lens else { return }
+                            Haptics.tap()
+
+                            withAnimation(.snappy(duration: 0.22)) {
+                                searchText = ""
+                                step = .lens
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .gearGlassGroup(spacing: 8)
                     .padding(.horizontal, 16)
+                }
 
                 // 2. SINGLE HORIZONTAL FILTER BAR (44pt Touch Targets, Edge-to-Edge Content Margins)
                 if step == .body || stagedCamera.isFixed {
@@ -368,38 +401,11 @@ struct CameraLensView: View {
                     lensListSection
                         .padding(.horizontal, 16)
                 }
-
-                if store.activeGear.hasCamera {
-                    Button(role: .destructive) {
-                        showRemoveConfirm = true
-                    } label: {
-                        Label("Detach Camera from Meter", systemImage: "eject.fill")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Palette.bad)
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Palette.panel, in: .rect(cornerRadius: 16, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                }
             }
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
         .background(Palette.background.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom) {
-            BottomCockingLeverDock(
-                cameraModel: stagedCameraName,
-                lensSummary: resolvedPreviewProfile.hasLens
-                    ? cleanLensDisplayName(resolvedPreviewProfile.lensName, brand: stagedCamera.brand)
-                    : "Body Only",
-                isCocked: $isCocked,
-                throwProgress: $leverThrowProgress
-            ) {
-                commitStagedGear()
-            }
-        }
         .searchable(
             text: $searchText,
             prompt: (step == .body || stagedCamera.isFixed) ? "Search cameras" : "Search lenses"
@@ -532,25 +538,6 @@ struct CameraLensView: View {
 
                 Spacer(minLength: 0)
             }
-
-            // Co-Axial Optical Bench Visual
-            GearMountingCeremonyVisual(
-                cameraBrand: stagedCamera.brand,
-                cameraName: stagedCameraName,
-                lensBrand: preview.hasLens ? (stagedLensEntry?.lens.brand ?? stagedCamera.brand) : stagedCamera.brand,
-                lensName: preview.hasLens ? cleanLensDisplayName(preview.lensName, brand: stagedCamera.brand) : "Body Only",
-                mount: stagedCamera.mount,
-                isFixed: stagedCamera.isFixed,
-                isBodyOnly: !preview.hasLens,
-                isCocked: isCocked,
-                minAperture: preview.minAperture,
-                maxAperture: preview.maxAperture,
-                maxShutter: stagedCamera.maxShutter,
-                isAdapter: mountSetup == .adapter,
-                variantLabel: selectedVariantLabel,
-                leverThrowProgress: leverThrowProgress,
-                selectionPulseTrigger: selectionPulseTrigger
-            )
 
             if !stagedCamera.isFixed {
                 HStack(spacing: 8) {
@@ -843,7 +830,11 @@ struct CameraLensView: View {
                                         Haptics.tap()
                                         withAnimation(.snappy(duration: 0.2)) {
                                             stagedCameraVariant = name
-                                            isCocked = isStagedComboCurrentlyMounted
+                                            isCocked = true
+                                            store.activeGear = resolvedPreviewProfile
+                                            if !camera.isFixed {
+                                                step = .lens
+                                            }
                                         }
                                     }
                                 }
@@ -937,11 +928,13 @@ struct CameraLensView: View {
                             }
 
                             selectionPulseTrigger += 1
-                            isCocked = isStagedComboCurrentlyMounted
+                            isCocked = true
+                            store.activeGear = resolvedPreviewProfile
                         }
                     } onVariantChange: {
                         selectionPulseTrigger += 1
-                        isCocked = isStagedComboCurrentlyMounted
+                        isCocked = true
+                        store.activeGear = resolvedPreviewProfile
                     }
                     .contextMenu {
                         if entry.lens.isCustom {
@@ -1020,7 +1013,8 @@ struct CameraLensView: View {
             }
         }
 
-        isCocked = isStagedComboCurrentlyMounted
+        isCocked = true
+        store.activeGear = resolvedPreviewProfile
     }
 
     private func setAdapterMountFilter(_ filter: String) {
@@ -1048,7 +1042,8 @@ struct CameraLensView: View {
             stagedVariantID = candidates.first?.variants.first?.id ?? ""
         }
 
-        isCocked = isStagedComboCurrentlyMounted
+        isCocked = true
+        store.activeGear = resolvedPreviewProfile
     }
 
     private func setMountSetup(_ newMode: MountSetup) {
@@ -1085,7 +1080,8 @@ struct CameraLensView: View {
             }
         }
 
-        isCocked = isStagedComboCurrentlyMounted
+        isCocked = true
+        store.activeGear = resolvedPreviewProfile
     }
 
     private func selectCameraBody(_ cam: CameraGearSpec) {
@@ -1128,11 +1124,14 @@ struct CameraLensView: View {
                 mountSetup = .bodyOnly
             }
 
-            step = .lens
+            if cameraModelVariants(cam.model).count <= 1 {
+                step = .lens
+            }
         }
 
         selectionPulseTrigger += 1
-        isCocked = isStagedComboCurrentlyMounted
+        isCocked = true
+        store.activeGear = resolvedPreviewProfile
     }
 
     private func syncStagedWithActiveGearIfNeeded() {

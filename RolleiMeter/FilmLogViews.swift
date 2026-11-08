@@ -70,39 +70,31 @@ private extension View {
 
 private struct RolleiGlassSegment: View {
     let title: String
-    var icon: String? = nil
     let isSelected: Bool
-    var activeColor: Color = Palette.accent
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 10.5, weight: .semibold))
-                }
-                Text(title)
-                    .font(
-                        .caption.weight(
-                            isSelected ? .semibold : .medium
-                        )
+            Text(title)
+                .font(
+                    .caption.weight(
+                        isSelected ? .semibold : .medium
                     )
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 9)
-            .foregroundStyle(
-                isSelected ? activeColor : Palette.textSub
-            )
-            .rolleiGlassCapsule(
-                tint: isSelected
-                    ? activeColor.opacity(0.28)
-                    : activeColor.opacity(0.08)
-            )
+                )
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 9)
+                .foregroundStyle(
+                    isSelected ? Palette.accent : Palette.textSub
+                )
+                .rolleiGlassCapsule(
+                    tint: isSelected
+                        ? Palette.accent.opacity(0.24)
+                        : nil
+                )
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -178,21 +170,6 @@ struct RollView: View {
 
     private let categories = ["Color", "B&W", "Slide", "Custom"]
     private let quickDecades = [10, 15, 20, 25, 30, 40]
-
-    private func categoryFlare(for cat: String) -> (color: Color, icon: String) {
-        switch cat {
-        case "Color":
-            return (Color(red: 0.96, green: 0.45, blue: 0.12), "sun.max.fill")
-        case "B&W":
-            return (Palette.text, "circle.lefthalf.filled")
-        case "Slide":
-            return (Color(red: 0.92, green: 0.16, blue: 0.54), "sparkles.rectangle.stack.fill")
-        case "Custom":
-            return (Color(red: 0.56, green: 0.30, blue: 0.96), "wand.and.stars")
-        default:
-            return (Palette.accent, "film")
-        }
-    }
 
     private var roll: FilmRollState { store.rollState }
     private var gear: ActiveGearProfile { store.activeGear }
@@ -325,13 +302,10 @@ struct RollView: View {
                     HStack(spacing: 6) {
                         ForEach(categories, id: \.self) { cat in
                             let active = selectedCategory == cat
-                            let flare = categoryFlare(for: cat)
 
                             RolleiGlassSegment(
                                 title: cat,
-                                icon: flare.icon,
-                                isSelected: active,
-                                activeColor: flare.color
+                                isSelected: active
                             ) {
                                 guard !active else { return }
 
@@ -988,6 +962,11 @@ private struct FilmCanisterListRow: View {
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
 
+    @State private var headerCanisterWidth: CGFloat = 52
+    @State private var headerCanisterSpacing: CGFloat = 14
+    @State private var headerCanisterOpacity: Double = 1
+    @State private var headerAnimTask: Task<Void, Never>? = nil
+
     var body: some View {
         if let onDelete {
             header
@@ -1003,7 +982,7 @@ private struct FilmCanisterListRow: View {
 
     private var header: some View {
         Button(action: onSelect) {
-            HStack(spacing: isExpanded ? 0 : 14) {
+            HStack(spacing: headerCanisterSpacing) {
                 ZStack {
                     FilmCanisterArtwork(
                         brand: brand,
@@ -1039,13 +1018,9 @@ private struct FilmCanisterListRow: View {
                             SpringKeyframe(1.0, duration: 0.45, spring: .init(response: 0.38, dampingRatio: 0.60))
                         }
                     }
-                    .animation(.spring(response: 0.5, dampingFraction: 0.78), value: isExpanded)
-                    // One canister only: the header one hops out and the chamber one takes over.
-                    .opacity(isExpanded ? 0 : 1)
-                    .animation(.easeOut(duration: 0.2).delay(isExpanded ? 0.1 : 0.15), value: isExpanded)
+                    .opacity(headerCanisterOpacity)
                 }
-                .frame(width: isExpanded ? 0 : 52, height: 54)
-                .animation(.spring(response: 0.42, dampingFraction: 0.80).delay(isExpanded ? 0.18 : 0.0), value: isExpanded)
+                .frame(width: headerCanisterWidth, height: 54)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(familyName)
@@ -1060,7 +1035,6 @@ private struct FilmCanisterListRow: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
-                .animation(.spring(response: 0.42, dampingFraction: 0.80).delay(isExpanded ? 0.18 : 0.0), value: isExpanded)
 
                 Spacer(minLength: 8)
 
@@ -1084,6 +1058,16 @@ private struct FilmCanisterListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(FilmRowPressStyle())
+        .onAppear {
+            syncHeaderCanisterState(expanded: isExpanded, animated: false)
+        }
+        .onChange(of: isExpanded) { _, expanded in
+            syncHeaderCanisterState(expanded: expanded, animated: true)
+        }
+        .onDisappear {
+            headerAnimTask?.cancel()
+            headerAnimTask = nil
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(brandLabel), \(familyName), \(isoLabel)")
         .accessibilityValue(
@@ -1091,6 +1075,40 @@ private struct FilmCanisterListRow: View {
         )
         .accessibilityHint(isExpanded ? "Closes the loading chamber" : "Opens the loading chamber")
         .accessibilityAddTraits(.isButton)
+    }
+
+    private func syncHeaderCanisterState(expanded: Bool, animated: Bool) {
+        headerAnimTask?.cancel()
+        headerAnimTask = nil
+
+        guard animated else {
+            headerCanisterOpacity = expanded ? 0 : 1
+            headerCanisterWidth = expanded ? 0 : 52
+            headerCanisterSpacing = expanded ? 0 : 14
+            return
+        }
+
+        if expanded {
+            headerAnimTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.18)) {
+                    headerCanisterOpacity = 0
+                }
+                try? await Task.sleep(for: .milliseconds(80))
+                guard !Task.isCancelled else { return }
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.80)) {
+                    headerCanisterWidth = 0
+                    headerCanisterSpacing = 0
+                }
+            }
+        } else {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                headerCanisterWidth = 52
+                headerCanisterSpacing = 14
+                headerCanisterOpacity = 1
+            }
+        }
     }
 }
 
