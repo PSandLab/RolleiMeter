@@ -952,14 +952,6 @@ private struct FilmCanisterListRow: View {
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hopScaleX: CGFloat = 1.0
-    @State private var hopScaleY: CGFloat = 1.0
-    @State private var hopOffsetY: CGFloat = 0.0
-    @State private var spindleHopDegrees: Double = 0.0
-    @State private var idleBreath = false
-    @State private var hopTask: Task<Void, Never>? = nil
-
     var body: some View {
         if let onDelete {
             header
@@ -989,18 +981,11 @@ private struct FilmCanisterListRow: View {
                         iso: defaultISO,
                         showLeader: true,
                         leaderExtension: isExpanded ? 1.0 : 0.4,
-                        spindleAimAngle: spindleHopDegrees,
-                        leaderWag: isExpanded && idleBreath ? 1.0 : 0.0,
                         yearsExpired: yearsExpired,
                         width: 46,
                         height: 50
                     )
-                    .scaleEffect(
-                        x: (isExpanded ? 1.06 : 1.0) * hopScaleX * (idleBreath ? 0.9853 : 1.0154),
-                        y: (isExpanded ? 1.06 : 1.0) * hopScaleY * (idleBreath ? 1.03 : 0.97),
-                        anchor: .bottom
-                    )
-                    .offset(y: hopOffsetY)
+                    .scaleEffect(isExpanded ? 1.06 : 1.0)
                 }
                 .frame(width: 52, height: 54)
 
@@ -1040,42 +1025,6 @@ private struct FilmCanisterListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(FilmRowPressStyle())
-        .onAppear { restartIdleBreathing() }
-        .onChange(of: isExpanded) { _, expanded in
-            if expanded {
-                playSelectionHop()
-                restartIdleBreathing()
-            } else {
-                hopTask?.cancel()
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.62)) {
-                    hopScaleX = 1.0
-                    hopScaleY = 1.0
-                    hopOffsetY = 0.0
-                    spindleHopDegrees = 0.0
-                }
-                restartIdleBreathing()
-            }
-        }
-        .onDisappear {
-            hopTask?.cancel()
-            stopIdleBreathing()
-        }
-        .onChange(of: reduceMotion) { _, reduced in
-            if reduced {
-                hopTask?.cancel()
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    hopScaleX = 1.0
-                    hopScaleY = 1.0
-                    hopOffsetY = 0.0
-                    spindleHopDegrees = 0.0
-                }
-                stopIdleBreathing()
-            } else {
-                restartIdleBreathing()
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(brandLabel), \(familyName), \(isoLabel)")
         .accessibilityValue(
@@ -1083,65 +1032,6 @@ private struct FilmCanisterListRow: View {
         )
         .accessibilityHint(isExpanded ? "Closes the loading chamber" : "Opens the loading chamber")
         .accessibilityAddTraits(.isButton)
-    }
-
-    private func restartIdleBreathing() {
-        guard !reduceMotion else {
-            idleBreath = false
-            return
-        }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { idleBreath = false }
-        withAnimation(.easeInOut(duration: isExpanded ? 0.1965 : 0.393).repeatForever(autoreverses: true)) {
-            idleBreath = true
-        }
-    }
-
-    private func stopIdleBreathing() {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { idleBreath = false }
-    }
-
-    private func playSelectionHop() {
-        hopTask?.cancel()
-        guard !reduceMotion else {
-            withAnimation(.easeOut(duration: 0.12)) {
-                hopScaleX = 1.0
-                hopScaleY = 1.0
-                hopOffsetY = 0.0
-                spindleHopDegrees = 0.0
-            }
-            return
-        }
-
-        hopTask = Task { @MainActor in
-            withAnimation(.easeOut(duration: 0.06)) {
-                hopScaleX = 1.22
-                hopScaleY = 0.72
-                hopOffsetY = 0.0
-                spindleHopDegrees = 0.0
-            }
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled else { return }
-
-            withAnimation(.spring(response: 0.12, dampingFraction: 0.5)) {
-                hopScaleX = 0.85
-                hopScaleY = 1.25
-                hopOffsetY = -14.0
-                spindleHopDegrees = -12.0
-            }
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            guard !Task.isCancelled else { return }
-
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.62)) {
-                hopScaleX = 1.0
-                hopScaleY = 1.0
-                hopOffsetY = 0.0
-                spindleHopDegrees = 0.0
-            }
-        }
     }
 }
 
@@ -1161,12 +1051,6 @@ private struct ExpiredFilmFastScrubber: View {
     @Binding var years: Int
     let quickDecades: [Int]
     let supportsCompensation: Bool
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var combTickTimes: [Int: TimeInterval] = [:]
-    @State private var combTickDirections: [Int: CGFloat] = [:]
-    @State private var combDragX: CGFloat? = nil
-    @State private var combCleanupTask: Task<Void, Never>? = nil
 
     private var vintageYear: Int {
         Calendar.current.component(.year, from: Date()) - years
@@ -1256,13 +1140,9 @@ private struct ExpiredFilmFastScrubber: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color.black.opacity(0.45))
 
-                    // Ruler ticks from 1 to 50 years. Timeline is active only while ticks are deforming.
-                    TimelineView(
-                        .animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion || (combTickTimes.isEmpty && combDragX == nil))
-                    ) { timeline in
-                        Canvas { ctx, size in
-                            let now = timeline.date.timeIntervalSinceReferenceDate
-                            let tickCount = 50
+                    // Ruler ticks from 1 to 50 years
+                    Canvas { ctx, size in
+                        let tickCount = 50
                         let usableW = size.width - 20
                         for i in 1...tickCount {
                             let frac = CGFloat(i - 1) / 49.0
@@ -1273,31 +1153,14 @@ private struct ExpiredFilmFastScrubber: View {
                             let tickH: CGFloat = isActive ? 22 : (isDecade ? 16 : (isFive ? 11 : 6))
                             let topY = (size.height - tickH) * 0.5
 
-                            let elapsed = now - (combTickTimes[i] ?? now)
-                            let rebound = (!reduceMotion && elapsed >= 0 && elapsed <= 0.9)
-                                ? CGFloat(sin(elapsed * 25.0) * exp(-elapsed * 8.0))
-                                : 0.0
-                            let fingerPressure: CGFloat
-                            if !reduceMotion, let fingerX = combDragX {
-                                fingerPressure = max(0.0, 1.0 - abs(x - fingerX) / 24.0)
-                            } else {
-                                fingerPressure = 0.0
-                            }
-                            let direction = combTickDirections[i] ?? 1.0
-                            let bend = direction * (fingerPressure * 4.0 + rebound * 5.0)
-
                             var p = Path()
                             p.move(to: CGPoint(x: x, y: topY))
-                            p.addQuadCurve(
-                                to: CGPoint(x: x, y: topY + tickH),
-                                control: CGPoint(x: x + bend, y: topY + tickH * 0.5)
-                            )
+                            p.addLine(to: CGPoint(x: x, y: topY + tickH))
                             ctx.stroke(
                                 p,
                                 with: .color(isActive ? Palette.accent : (i <= years ? Palette.accent.opacity(0.55) : Color.white.opacity(isDecade ? 0.45 : 0.18))),
                                 lineWidth: isActive ? 2.5 : (isDecade ? 1.5 : 1.0)
                             )
-                        }
                         }
                     }
 
@@ -1312,51 +1175,22 @@ private struct ExpiredFilmFastScrubber: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            combDragX = value.location.x
                             let ratio = ((value.location.x - 10) / max(w - 20, 1)).clamped(to: 0...1)
                             let target = Int((1.0 + ratio * 49.0).rounded()).clamped(to: 1...50)
                             if target != years {
-                                let direction: CGFloat = target > years ? 1.0 : -1.0
-                                let timestamp = Date().timeIntervalSinceReferenceDate
-                                let crossedYears = target > years
-                                    ? Array((years + 1)...target)
-                                    : Array(target..<years)
-                                for crossedYear in crossedYears {
-                                    combTickTimes[crossedYear] = timestamp
-                                    combTickDirections[crossedYear] = direction
-                                }
-
                                 if target % 10 == 0 {
                                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
                                 } else {
                                     UISelectionFeedbackGenerator().selectionChanged()
                                 }
                                 years = target
-
-                                combCleanupTask?.cancel()
-                                combCleanupTask = Task { @MainActor in
-                                    try? await Task.sleep(nanoseconds: 950_000_000)
-                                    guard !Task.isCancelled else { return }
-                                    combTickTimes.removeAll()
-                                    combTickDirections.removeAll()
-                                }
                             }
-                        }
-                        .onEnded { _ in
-                            combDragX = nil
                         }
                 )
             }
             .frame(height: 32)
         }
         .padding(12)
-        .onDisappear {
-            combCleanupTask?.cancel()
-            combCleanupTask = nil
-            combTickTimes.removeAll()
-            combTickDirections.removeAll()
-            combDragX = nil
-        }
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.035))
