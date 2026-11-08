@@ -58,7 +58,7 @@ struct InteractiveFilmLeaderChamber: View {
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
-                let startX: CGFloat = 78.0
+                let startX: CGFloat = 56.0 // strip emerges from behind the canister body
                 let drumCenterX: CGFloat = w - 34.0
                 let drumRadius: CGFloat = 16.0
                 let tangentX: CGFloat = drumCenterX - drumRadius // Left horizon of 3D take-up drum
@@ -67,7 +67,7 @@ struct InteractiveFilmLeaderChamber: View {
 
                 // Effective inward suck distance during Stage 0 cinch (gulps 34pt of leader into the drum)
                 let suckInShiftPt: CGFloat = suckInProgress * 34.0
-                let restingLeader: CGFloat = 18.0 // leader sticks out a bit more at rest
+                let restingLeader: CGFloat = 30.0 // leader sticks out a bit more at rest
                 let tipX: CGFloat = startX + restingLeader + (travel - restingLeader) * pullProgress + suckInShiftPt
 
                 // Sprocket tooth misalignment penalty when pulled at extreme vertical angles (|dragY| > 0.14h)
