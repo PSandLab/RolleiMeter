@@ -326,10 +326,10 @@ struct EVChip: View {
         .foregroundStyle(Palette.text)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Color.black.opacity(0.58), in: .capsule)
+        .background(Palette.panel.opacity(0.92), in: .capsule)
         .overlay(
             Capsule()
-                .strokeBorder(frozen ? Palette.accent.opacity(0.45) : Color.white.opacity(0.12), lineWidth: 0.75)
+                .strokeBorder(frozen ? Palette.accent.opacity(0.45) : Palette.border, lineWidth: 0.75)
         )
         .animation(.spring(response: 0.30, dampingFraction: 0.68), value: frozen)
         .animation(.spring(response: 0.30, dampingFraction: 0.68), value: spot)

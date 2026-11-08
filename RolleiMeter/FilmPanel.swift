@@ -60,7 +60,7 @@ struct FilmPanel: View {
 
             ZStack {
                 RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
-                    .fill(Palette.accentInk)
+                    .fill(Palette.readout)
                     .overlay(
                         RoundedRectangle(cornerRadius: 14 * k, style: .continuous)
                             .strokeBorder(
@@ -83,7 +83,7 @@ struct FilmPanel: View {
                             var p = Path()
                             p.move(to: CGPoint(x: tx, y: bottomY - tickH))
                             p.addLine(to: CGPoint(x: tx, y: bottomY))
-                            ctx.stroke(p, with: .color(isCenter ? Palette.accent : Color.white.opacity(0.18)), lineWidth: 1.0 * k)
+                            ctx.stroke(p, with: .color(isCenter ? Palette.accent : Palette.text.opacity(0.18)), lineWidth: 1.0 * k)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 14 * k, style: .continuous))
@@ -92,7 +92,7 @@ struct FilmPanel: View {
 
                 Text(readout)
                     .font(AppTypography.next(size: (isPullOrPush ? 23 : 27) * k, weight: .medium).monospacedDigit())
-                    .foregroundStyle(isUnloaded || isPullOrPush ? Palette.accent : Palette.onInk)
+                    .foregroundStyle(isUnloaded || isPullOrPush ? Palette.accent : Palette.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
                     .padding(.horizontal, 14 * k)
@@ -112,7 +112,7 @@ struct FilmPanel: View {
                             // Struck-through original box ISO
                             Text("\(boxISO)")
                                 .font(AppTypography.next(size: 11 * k, weight: .semibold).monospacedDigit())
-                                .foregroundStyle(Palette.onInk.opacity(0.55))
+                                .foregroundStyle(Palette.textDim)
                                 .strikethrough(true, color: Palette.accent)
 
                             // Push/Pull Stop Badge
