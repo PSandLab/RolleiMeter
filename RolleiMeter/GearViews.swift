@@ -120,6 +120,17 @@ struct CameraLensView: View {
     @State private var stagedCamera: CameraGearSpec = GearCatalogCache.defaultCamera
     @State private var stagedLensEntry: PrewarmedLensEntry? = nil
     @State private var stagedVariantID: String = ""
+    @State private var stagedCameraVariant: String = ""
+
+    /// Exact camera model recorded in the gear profile and photo metadata.
+    /// Catalog entries like "Rollei 35 S / 35 SE" are split so only the chosen variant is written.
+    private var stagedCameraName: String {
+        let variants = cameraModelVariants(stagedCamera.model)
+        if variants.count > 1 {
+            return variants.contains(stagedCameraVariant) ? stagedCameraVariant : variants[0]
+        }
+        return stagedCamera.model
+    }
     @State private var isCocked: Bool = true
     @State private var leverThrowProgress: CGFloat = 0.0
     @State private var selectionPulseTrigger: Int = 0
@@ -158,7 +169,7 @@ struct CameraLensView: View {
             let fixedTitle = stagedCamera.fixedLensName.isEmpty ? "Fixed lens" : stagedCamera.fixedLensName
             return ActiveGearProfile(
                 cameraId: stagedCamera.id,
-                cameraName: stagedCamera.model,
+                cameraName: stagedCameraName,
                 mount: "Fixed",
                 isFixedLens: true,
                 minShutter: stagedCamera.minShutter,
@@ -175,7 +186,7 @@ struct CameraLensView: View {
         case .bodyOnly:
             return ActiveGearProfile(
                 cameraId: stagedCamera.id,
-                cameraName: stagedCamera.model,
+                cameraName: stagedCameraName,
                 mount: stagedCamera.mount,
                 isFixedLens: false,
                 minShutter: stagedCamera.minShutter,
@@ -190,7 +201,7 @@ struct CameraLensView: View {
             if let lens = activeVariantSpec {
                 return ActiveGearProfile(
                     cameraId: stagedCamera.id,
-                    cameraName: stagedCamera.model,
+                    cameraName: stagedCameraName,
                     mount: stagedCamera.mount,
                     isFixedLens: false,
                     minShutter: stagedCamera.minShutter,
@@ -204,7 +215,7 @@ struct CameraLensView: View {
             }
             return ActiveGearProfile(
                 cameraId: stagedCamera.id,
-                cameraName: stagedCamera.model,
+                cameraName: stagedCameraName,
                 mount: stagedCamera.mount,
                 isFixedLens: false,
                 minShutter: stagedCamera.minShutter,
@@ -379,7 +390,7 @@ struct CameraLensView: View {
         .background(Palette.background.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
             BottomCockingLeverDock(
-                cameraModel: stagedCamera.model,
+                cameraModel: stagedCameraName,
                 lensSummary: resolvedPreviewProfile.hasLens
                     ? cleanLensDisplayName(resolvedPreviewProfile.lensName, brand: stagedCamera.brand)
                     : "Body Only",
@@ -525,7 +536,7 @@ struct CameraLensView: View {
             // Co-Axial Optical Bench Visual
             GearMountingCeremonyVisual(
                 cameraBrand: stagedCamera.brand,
-                cameraName: stagedCamera.model,
+                cameraName: stagedCameraName,
                 lensBrand: preview.hasLens ? (stagedLensEntry?.lens.brand ?? stagedCamera.brand) : stagedCamera.brand,
                 lensName: preview.hasLens ? cleanLensDisplayName(preview.lensName, brand: stagedCamera.brand) : "Body Only",
                 mount: stagedCamera.mount,
@@ -818,6 +829,29 @@ struct CameraLensView: View {
                             }
                         }
                     }
+
+                    let camVariants = cameraModelVariants(camera.model)
+                    if isSelected && camVariants.count > 1 {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(camVariants, id: \.self) { name in
+                                    GearGlassChip(
+                                        title: name,
+                                        isSelected: stagedCameraName == name,
+                                        minHeight: 44
+                                    ) {
+                                        Haptics.tap()
+                                        withAnimation(.snappy(duration: 0.2)) {
+                                            stagedCameraVariant = name
+                                            isCocked = isStagedComboCurrentlyMounted
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 2)
+                        }
+                        .gearGlassGroup(spacing: 8)
+                    }
                 }
             }
 
@@ -1056,6 +1090,7 @@ struct CameraLensView: View {
 
     private func selectCameraBody(_ cam: CameraGearSpec) {
         stagedCamera = cam
+        stagedCameraVariant = cameraModelVariants(cam.model).first ?? ""
 
         selectedBrand = cam.isCustom
             ? "Custom"
@@ -1106,6 +1141,11 @@ struct CameraLensView: View {
         let active = store.activeGear
         if let matchCam = allCameras.first(where: { $0.id == active.cameraId }) {
             stagedCamera = matchCam
+            if cameraModelVariants(matchCam.model).contains(active.cameraName) {
+                stagedCameraVariant = active.cameraName
+            } else {
+                stagedCameraVariant = cameraModelVariants(matchCam.model).first ?? ""
+            }
             selectedBrand = brandList.first(where: {
                 $0.caseInsensitiveCompare(matchCam.brand) == .orderedSame
             }) ?? "Other"
@@ -2153,4 +2193,44 @@ private func shortFocalBadge(_ entry: PrewarmedLensEntry) -> String {
         return "\(mm)mm f/\(f)"
     }
     return cleanLensDisplayName(entry.lens.model, brand: entry.lens.brand)
+}
+
+
+// MARK: - Camera model variants
+
+/// Splits catalog models such as "Rollei 35 S / 35 SE" into the exact models
+/// ["Rollei 35 S", "Rollei 35 SE"], so metadata records the specific body.
+/// Trailing parentheticals like "(TLR)" are dropped from the variant names.
+func cameraModelVariants(_ model: String) -> [String] {
+    var base = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let paren = base.range(of: " (") { base = String(base[..<paren.lowerBound]) }
+    let parts = base.components(separatedBy: " / ")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    guard parts.count > 1 else { return [model] }
+
+    let firstTokens = parts[0].split(separator: " ").map(String.init)
+    guard let brand = firstTokens.first else { return [model] }
+    var result = [parts[0]]
+    for part in parts.dropFirst() {
+        if part.lowercased().hasPrefix(brand.lowercased() + " ") {
+            result.append(part)
+            continue
+        }
+        let partTokens = part.split(separator: " ").map(String.init)
+        var prefix = Array(firstTokens.dropLast())
+        // Drop any overlap between the end of the prefix and the start of this variant.
+        var overlap = min(prefix.count, partTokens.count)
+        while overlap > 0 {
+            if Array(prefix.suffix(overlap)).map({ $0.lowercased() }) == Array(partTokens.prefix(overlap)).map({ $0.lowercased() }) {
+                prefix.removeLast(overlap)
+                break
+            }
+            overlap -= 1
+        }
+        if prefix.isEmpty { prefix = [brand] }
+        result.append((prefix + partTokens).joined(separator: " "))
+    }
+    var seen = Set<String>()
+    return result.filter { seen.insert($0).inserted }
 }
