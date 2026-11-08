@@ -228,7 +228,6 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .background(Palette.background.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .dynamicTypeSize(.large)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)

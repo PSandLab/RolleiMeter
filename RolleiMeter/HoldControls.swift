@@ -49,6 +49,15 @@ struct InteractiveFilmLeaderChamber: View {
     @State private var dxPinCompression: CGFloat = 0.0      // 0.0 -> 1.0 leaf-spring compression on canister seat
     @State private var dxTracePulse: CGFloat = 0.0          // 0.0 -> 1.0 gold electrical trace pulse
     @State private var lastToothClashStep: Int = -1
+    @State private var pluckPulse: CGFloat = 0.0
+    @State private var snapbackInflation: CGFloat = 0.0
+    @State private var snapbackWobble: CGFloat = 0.0
+    @State private var snapbackTask: Task<Void, Never>? = nil
+    @State private var spindleAimAngle: Double = 0.0
+    @State private var chamberImpact: CGFloat = 0.0
+    @State private var doorAnticipation: CGFloat = 0.0
+    @State private var windHeave: CGFloat = 0.0
+    @State private var frameLockImpact: CGFloat = 0.0
 
     private let latchThreshold: CGFloat = 0.82
     private var latchPulseScale: CGFloat { heartbeatScale }
@@ -76,6 +85,15 @@ struct InteractiveFilmLeaderChamber: View {
                 // Tension mounts from 0.06 to 0.88; spikes to 1.0 during Stage 0 suck-in cinch
                 let baseTension = min(max((pullProgress - 0.06) / 0.82, 0.0), 1.0)
                 let tension: CGFloat = max(baseTension, suckInProgress)
+
+                // Presentation-only rubber-hose deformation, driven by the existing pull state.
+                let resistanceLean = min(max(pullProgress / 0.50, 0.0), 1.0)
+                let squeezeProgress = min(max((pullProgress - 0.50) / 0.32, 0.0), 1.0)
+                let canisterScaleX = 1.0 - 0.22 * squeezeProgress
+                let canisterScaleY = 1.0 + 0.08 * squeezeProgress
+                let canisterShearX = 0.25 * resistanceLean
+                let ageSlouch = min(max(CGFloat(yearsExpired - 20) / 20.0, 0.0), 1.0)
+                let spoolApproachProgress = min(max((pullProgress - 0.62) / 0.20, 0.0), 1.0)
 
                 // High-frequency friction jitter amplified by toothClash
                 let jitterAmp: CGFloat = (isDragging && tension > 0.35) ? (1.4 + toothClash * 2.2) : 0.0
@@ -116,7 +134,8 @@ struct InteractiveFilmLeaderChamber: View {
                         isLatched: pullProgress >= 0.82,
                         suckInProgress: suckInProgress,
                         windProgress: CGFloat(min(max(motorWindAngle / 720.0, 0.0), 1.0)),
-                        emulsionCategory: category
+                        emulsionCategory: category,
+                        approachProgress: spoolApproachProgress
                     )
 
                     // LAYER 2 (MIDDLE): Unspooling Celluloid Strip + 3D Cylindrical Drum Wrap
@@ -134,6 +153,7 @@ struct InteractiveFilmLeaderChamber: View {
                         tension: tension,
                         toothClash: toothClash,
                         pressurePlateProgress: pressurePlateProgress,
+                        pluckPulse: pluckPulse,
                         filmName: resolvedFilmName,
                         category: category,
                         yearsExpired: yearsExpired
@@ -146,7 +166,8 @@ struct InteractiveFilmLeaderChamber: View {
                         drumRadius: drumRadius,
                         spoolDegrees: spoolDegrees,
                         isLatched: pullProgress >= 0.82,
-                        heartbeatScale: latchPulseScale
+                        heartbeatScale: latchPulseScale,
+                        approachProgress: spoolApproachProgress
                     )
 
                     // Left Side: Supply Well DX Leaf-Spring Contact Pins
@@ -178,18 +199,26 @@ struct InteractiveFilmLeaderChamber: View {
                             spoolRotation: spoolDegrees,
                             tension: tension,
                             yearsExpired: yearsExpired,
+                            bodyScaleX: canisterScaleX * (1.0 + 0.06 * ageSlouch) * (1.0 + 0.35 * snapbackInflation),
+                            bodyScaleY: canisterScaleY * (1.0 - 0.06 * ageSlouch) * (1.0 - 0.25 * snapbackInflation),
+                            bodyShearX: canisterShearX,
+                            spindleAimAngle: spindleAimAngle,
+                            strainPulse: idlePulse ? 1.0 : 0.0,
                             width: 66,
                             height: 86
                         )
                         .scaleEffect(1.0 + canisterSwapPop * 0.14)
-                        .rotationEffect(.degrees(Double(tension) * 6.5 + frictionJitter), anchor: .bottom)
+                        .rotationEffect(
+                            .degrees(Double(tension) * 6.5 + frictionJitter + Double(snapbackWobble) * 6.0),
+                            anchor: .bottom
+                        )
                         .offset(x: tension * 5.0, y: CGFloat(frictionJitter * 0.35))
                         .shadow(color: .black.opacity(0.7), radius: 6, x: 3, y: 3)
                     }
                     .position(x: 42, y: h * 0.5)
 
                     // 6. Grand Film Loading Ceremony Overlay (Camera Back Door + Odometer Wind S -> 00 -> 0 -> 1)
-                    if doorClosedProgress > 0.01 {
+                    if doorClosedProgress > 0.01 || doorAnticipation > 0.01 {
                         GrandFilmLoadingCeremonyView(
                             brand: brand,
                             stockFullName: stockFullName,
@@ -201,7 +230,11 @@ struct InteractiveFilmLeaderChamber: View {
                             odometerPosition: odometerPosition,
                             motorWindAngle: motorWindAngle,
                             ceremonyGlow: ceremonyGlow,
-                            rewindForkAngle: rewindForkAngle
+                            rewindForkAngle: rewindForkAngle,
+                            doorAnticipation: doorAnticipation,
+                            impactPulse: chamberImpact,
+                            windHeave: windHeave,
+                            frameLockImpact: frameLockImpact
                         )
                         .transition(.opacity)
                     }
@@ -224,12 +257,22 @@ struct InteractiveFilmLeaderChamber: View {
                                                 return
                                             }
 
+                                            snapbackTask?.cancel()
+                                            snapbackTask = nil
+                                            snapbackInflation = 0.0
+                                            snapbackWobble = 0.0
                                             isDragging = true
                                             UIImpactFeedbackGenerator(style: .medium)
                                                 .impactOccurred(intensity: 0.7)
                                         }
 
                                         guard isDragging else { return }
+
+                                        let touchAngle = atan2(
+                                            Double(value.translation.height),
+                                            Double(max(abs(value.translation.width), 1.0))
+                                        ) * 180.0 / .pi
+                                        spindleAimAngle = min(max(touchAngle, -45.0), 45.0)
 
                                         let rawProgress = value.translation.width / travel
                                         let clamped = min(max(rawProgress, 0.0), 1.0)
@@ -295,6 +338,11 @@ struct InteractiveFilmLeaderChamber: View {
 
                                         if pullProgress >= latchThreshold {
                                             exitLatchedHoldHeartbeat()
+                                            pluckPulse = 1.0
+                                            withAnimation(.spring(response: 0.18, dampingFraction: 0.38)) {
+                                                pluckPulse = 0.0
+                                                spindleAimAngle = 0.0
+                                            }
                                             runGrandLoadingCeremony()
                                         } else {
                                             exitLatchedHoldHeartbeat()
@@ -302,6 +350,14 @@ struct InteractiveFilmLeaderChamber: View {
                                             UIImpactFeedbackGenerator(style: .light)
                                                 .impactOccurred(intensity: 0.55)
 
+                                            snapbackTask?.cancel()
+                                            pluckPulse = 1.0
+                                            snapbackInflation = 1.0
+                                            snapbackWobble = 1.0
+                                            withAnimation(.spring(response: 0.18, dampingFraction: 0.38)) {
+                                                pluckPulse = 0.0
+                                                spindleAimAngle = 0.0
+                                            }
                                             withAnimation(
                                                 .spring(response: 0.38, dampingFraction: 0.52)
                                             ) {
@@ -310,6 +366,26 @@ struct InteractiveFilmLeaderChamber: View {
                                                 suckInProgress = 0.0
                                                 pressurePlateProgress = 0.0
                                                 rewindForkAngle = 0.0
+                                            }
+                                            snapbackTask = Task { @MainActor in
+                                                // Keep the inflated pose visible during the initial leader recoil.
+                                                try? await Task.sleep(nanoseconds: 65_000_000)
+                                                guard !Task.isCancelled else { return }
+                                                withAnimation(.spring(response: 0.10, dampingFraction: 0.46)) {
+                                                    snapbackInflation = 0.0
+                                                    snapbackWobble = -1.0
+                                                }
+                                                // Three complete damped wobble oscillations: three + / - cycles.
+                                                for nextPose: CGFloat in [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 0.0] {
+                                                    try? await Task.sleep(nanoseconds: 70_000_000)
+                                                    guard !Task.isCancelled else { return }
+                                                    withAnimation(.spring(response: 0.10, dampingFraction: 0.46)) {
+                                                        snapbackWobble = nextPose
+                                                    }
+                                                }
+                                                snapbackInflation = 0.0
+                                                snapbackWobble = 0.0
+                                                snapbackTask = nil
                                             }
 
                                             lastSprocketTick = 0
@@ -332,6 +408,11 @@ struct InteractiveFilmLeaderChamber: View {
                     }
                 }
                 .clipShape(.rect(cornerRadius: 20, style: .continuous))
+                .scaleEffect(
+                    x: 1.0 + chamberImpact * 0.06,
+                    y: 1.0 - chamberImpact * 0.08,
+                    anchor: .center
+                )
             }
             .frame(height: 132)
 
@@ -373,6 +454,8 @@ struct InteractiveFilmLeaderChamber: View {
         .onDisappear {
             heartbeatTask?.cancel()
             heartbeatTask = nil
+            snapbackTask?.cancel()
+            snapbackTask = nil
         }
         .onChange(of: stockFullName) { _, _ in
             dxPinCompression = 1.0
@@ -493,8 +576,12 @@ struct InteractiveFilmLeaderChamber: View {
             try? await Task.sleep(nanoseconds: 120_000_000)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.90)
 
-            // Allow user to admire the wrapped, drum-tight film across the open rails
-            try? await Task.sleep(nanoseconds: 330_000_000)
+            // Preserve the existing 330ms Stage 0 rest. Use its final 120ms for door anticipation.
+            try? await Task.sleep(nanoseconds: 210_000_000)
+            withAnimation(.easeOut(duration: 0.12)) {
+                doorAnticipation = 1.0
+            }
+            try? await Task.sleep(nanoseconds: 120_000_000)
 
             // =========================================================================
             // STAGE 1 (t = 0.45s - 0.98s): SPRING-STEEL PRESSURE PLATE & BACK DOOR SLAM
@@ -509,10 +596,20 @@ struct InteractiveFilmLeaderChamber: View {
 
             withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
                 doorClosedProgress = 1.0
+                doorAnticipation = 0.0
             }
 
             try? await Task.sleep(nanoseconds: 460_000_000)
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 1.0)
+            withAnimation(.spring(response: 0.12, dampingFraction: 0.42)) {
+                chamberImpact = 1.0
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 75_000_000)
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.48)) {
+                    chamberImpact = 0.0
+                }
+            }
 
             // =========================================================================
             // STAGE 2 (t = 0.98s - 2.48s): TWO-STROKE WIND (S -> 00 -> 0 -> 1) & REWIND FORK SPIN
@@ -521,6 +618,11 @@ struct InteractiveFilmLeaderChamber: View {
             try? await Task.sleep(nanoseconds: 120_000_000)
 
             // Stroke 1: S (-2.0) -> 0 (0.0)
+            withAnimation(.spring(response: 0.12, dampingFraction: 0.58)) { windHeave = 1.0 }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 75_000_000)
+                withAnimation(.spring(response: 0.20, dampingFraction: 0.42)) { windHeave = 0.0 }
+            }
             withAnimation(.spring(response: 0.55, dampingFraction: 0.76)) {
                 odometerPosition = 0.0
                 motorWindAngle = 360.0
@@ -545,6 +647,11 @@ struct InteractiveFilmLeaderChamber: View {
             try? await Task.sleep(nanoseconds: 240_000_000)
 
             // Stroke 2: 0 (0.0) -> 1 (1.0) with full 360-degree counter-clockwise rewind fork rotation
+            withAnimation(.spring(response: 0.12, dampingFraction: 0.58)) { windHeave = 1.0 }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 75_000_000)
+                withAnimation(.spring(response: 0.20, dampingFraction: 0.42)) { windHeave = 0.0 }
+            }
             withAnimation(.spring(response: 0.52, dampingFraction: 0.68)) {
                 odometerPosition = 1.0
                 motorWindAngle = 720.0
@@ -568,6 +675,15 @@ struct InteractiveFilmLeaderChamber: View {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.62)) {
                 isFrameOneLocked = true
                 ceremonyGlow = 1.0
+            }
+            withAnimation(.spring(response: 0.16, dampingFraction: 0.38)) {
+                frameLockImpact = 1.0
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) {
+                    frameLockImpact = 0.0
+                }
             }
 
             try? await Task.sleep(nanoseconds: 880_000_000)
@@ -599,6 +715,10 @@ private struct GrandFilmLoadingCeremonyView: View {
     let motorWindAngle: Double
     let ceremonyGlow: Double
     var rewindForkAngle: Double = 0.0
+    var doorAnticipation: CGFloat = 0.0
+    var impactPulse: CGFloat = 0.0
+    var windHeave: CGFloat = 0.0
+    var frameLockImpact: CGFloat = 0.0
 
     var body: some View {
         ZStack {
@@ -688,26 +808,56 @@ private struct GrandFilmLoadingCeremonyView: View {
 
                     OdometerDialWindow(
                         position: odometerPosition,
-                        locked: ceremonyPhase == 3
+                        locked: ceremonyPhase == 3,
+                        frameLockImpact: frameLockImpact
                     )
                     .frame(width: 86, height: 54)
                 }
             }
             .padding(.horizontal, 16)
+            .offset(x: windHeave * 3.0)
+            .rotationEffect(.degrees(Double(windHeave) * 0.55))
             .scaleEffect(0.94 + 0.06 * doorClosedProgress)
-            .opacity(Double(doorClosedProgress))
+            .opacity(Double(max(doorClosedProgress, doorAnticipation)))
         }
-        .scaleEffect(y: max(0.05, doorClosedProgress), anchor: .top)
+        .offset(y: -doorAnticipation * 4.0)
+        .scaleEffect(
+            y: max(0.05, doorClosedProgress + doorAnticipation * 0.12),
+            anchor: .top
+        )
+        .overlay {
+            Canvas { ctx, size in
+                guard impactPulse > 0.02 else { return }
+                for corner in [CGPoint(x: 8, y: size.height - 4), CGPoint(x: size.width - 8, y: size.height - 4)] {
+                    for puff in 0..<3 {
+                        let direction: CGFloat = corner.x < size.width * 0.5 ? -1.0 : 1.0
+                        let offset = CGFloat(puff) * 5.0
+                        let rect = CGRect(
+                            x: corner.x + direction * (4.0 + offset) - 2.0,
+                            y: corner.y - 3.0 - offset * 0.35,
+                            width: 3.0 + impactPulse * 2.0,
+                            height: 2.5 + impactPulse
+                        )
+                        ctx.fill(Path(ellipseIn: rect), with: .color(Color.white.opacity(Double(impactPulse) * 0.42)))
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        }
     }
 }
 
 private struct OdometerDialWindow: View, Animatable {
     var position: Double // -2 = S, -1 = 00, 0 = 0, 1 = 1
     let locked: Bool
+    var frameLockImpact: CGFloat = 0.0
 
-    var animatableData: Double {
-        get { position }
-        set { position = newValue }
+    var animatableData: AnimatablePair<Double, CGFloat> {
+        get { AnimatablePair(position, frameLockImpact) }
+        set {
+            position = newValue.first
+            frameLockImpact = newValue.second
+        }
     }
 
     private let stops: [(val: Double, label: String)] = [
@@ -745,19 +895,51 @@ private struct OdometerDialWindow: View, Animatable {
                         ? (locked ? Palette.good : (item.label == "S" ? Palette.accent : Palette.text))
                         : Palette.textDim.opacity(max(0.15, 0.65 - 0.35 * ad))
 
+                    let stopCompression: CGFloat = isCenter ? 0.12 : 0.0
+                    let lockHop: CGFloat = isCenter && item.label == "1" ? frameLockImpact : 0.0
                     let txt = Text(item.label)
                         .font(.system(size: isCenter ? 26 : 17, weight: isCenter ? .bold : .medium, design: .default).monospacedDigit())
                         .foregroundColor(color)
+                        .scaleEffect(
+                            x: 1.0 + stopCompression + lockHop * 0.08,
+                            y: 1.0 - stopCompression + lockHop * 0.08
+                        )
+                        .offset(y: -CGFloat(lockHop) * 4.0)
                     ctx.draw(ctx.resolve(txt), at: CGPoint(x: x, y: cy), anchor: .center)
                 }
 
                 // Top index pointer triangle
                 var ptr = Path()
+                let pointerDepth = 5.0 - 2.5 * frameLockImpact
                 ptr.move(to: CGPoint(x: cx - 4, y: 4))
                 ptr.addLine(to: CGPoint(x: cx + 4, y: 4))
-                ptr.addLine(to: CGPoint(x: cx, y: 9))
+                ptr.addLine(to: CGPoint(x: cx, y: 4 + pointerDepth))
                 ptr.closeSubpath()
                 ctx.fill(ptr, with: .color(locked ? Palette.good : Palette.accent))
+
+                // Eight short vector action marks around the odometer at frame-one lock.
+                if frameLockImpact > 0.02 {
+                    let inset: CGFloat = 3.0
+                    let length: CGFloat = 5.0 + 3.0 * frameLockImpact
+                    let corners = [
+                        CGPoint(x: inset, y: inset),
+                        CGPoint(x: size.width - inset, y: inset),
+                        CGPoint(x: inset, y: size.height - inset),
+                        CGPoint(x: size.width - inset, y: size.height - inset)
+                    ]
+                    for (index, corner) in corners.enumerated() {
+                        let sx: CGFloat = index % 2 == 0 ? 1.0 : -1.0
+                        let sy: CGFloat = index < 2 ? 1.0 : -1.0
+                        var ray = Path()
+                        ray.move(to: corner)
+                        ray.addLine(to: CGPoint(x: corner.x + sx * length, y: corner.y + sy * length * 0.55))
+                        ctx.stroke(ray, with: .color(Palette.good.opacity(Double(frameLockImpact))), lineWidth: 1.2)
+                        var secondRay = Path()
+                        secondRay.move(to: CGPoint(x: corner.x + sx * 1.0, y: corner.y - sy * 1.0))
+                        secondRay.addLine(to: CGPoint(x: corner.x + sx * (length - 1.0), y: corner.y - sy * (length * 0.55)))
+                        ctx.stroke(secondRay, with: .color(Palette.good.opacity(Double(frameLockImpact) * 0.8)), lineWidth: 0.9)
+                    }
+                }
             }
             .clipShape(.rect(cornerRadius: 12, style: .continuous))
         }
@@ -823,6 +1005,7 @@ struct TakeUpSpoolBottomLayer: View {
     let suckInProgress: CGFloat
     let windProgress: CGFloat
     let emulsionCategory: String
+    var approachProgress: CGFloat = 0.0
 
     private var woundCollarColor: Color {
         switch emulsionCategory.lowercased() {
@@ -883,7 +1066,8 @@ struct TakeUpSpoolBottomLayer: View {
             let slitOffset = CGFloat(sin(angleRad)) * (drumRadius * 0.72)
             let slitX = drumCenterX + slitOffset
 
-            let slitRect = CGRect(x: slitX - 2.2, y: midY - 24.0, width: 4.4, height: 48.0)
+            let slitWidth = isLatched ? 2.2 : (4.4 + 3.0 * min(max(approachProgress, 0.0), 1.0))
+            let slitRect = CGRect(x: slitX - slitWidth * 0.5, y: midY - 24.0, width: slitWidth, height: 48.0)
             ctx.fill(
                 Path(roundedRect: slitRect, cornerRadius: 1.5),
                 with: .color(isLatched ? Palette.accent.opacity(0.45) : Color.black.opacity(0.92))
@@ -907,16 +1091,21 @@ struct TakeUpSpoolTopFlangeLayer: View {
     let spoolDegrees: Double
     let isLatched: Bool
     let heartbeatScale: CGFloat
+    var approachProgress: CGFloat = 0.0
 
     var body: some View {
         Canvas { ctx, size in
+            var drawContext = ctx
+            drawContext.translateBy(x: drumCenterX, y: midY)
+            drawContext.rotate(by: .degrees(-3.0 * Double(min(max(approachProgress, 0.0), 1.0))))
+            drawContext.translateBy(x: -drumCenterX, y: -midY)
             let flangeW = (drumRadius * 2.0) + 6.0
             let topFlange = CGRect(x: drumCenterX - flangeW * 0.5, y: midY - 31.0, width: flangeW, height: 5.5)
             let botFlange = CGRect(x: drumCenterX - flangeW * 0.5, y: midY + 25.5, width: flangeW, height: 5.5)
 
             // Top & Bottom Knurled Spool Flanges (Gear Teeth)
             for flange in [topFlange, botFlange] {
-                ctx.fill(
+                drawContext.fill(
                     Path(roundedRect: flange, cornerRadius: 2.0),
                     with: .linearGradient(
                         Gradient(colors: [
@@ -936,7 +1125,7 @@ struct TakeUpSpoolTopFlangeLayer: View {
                     let norm = (CGFloat(i) / CGFloat(notchCount) + phase).truncatingRemainder(dividingBy: 1.0)
                     let nx = flange.minX + 2.0 + norm * (flange.width - 4.0)
                     let nRect = CGRect(x: nx - 0.8, y: flange.minY + 1.0, width: 1.6, height: flange.height - 2.0)
-                    ctx.fill(Path(nRect), with: .color(Color.black.opacity(0.65)))
+                    drawContext.fill(Path(nRect), with: .color(Color.black.opacity(0.65)))
                 }
             }
 
@@ -947,7 +1136,7 @@ struct TakeUpSpoolTopFlangeLayer: View {
                 width: drumRadius - 1.5,
                 height: 51.0
             )
-            ctx.fill(
+            drawContext.fill(
                 Path(roundedRect: clampRect, cornerRadius: 2.0),
                 with: .linearGradient(
                     Gradient(colors: [
@@ -969,7 +1158,7 @@ struct TakeUpSpoolTopFlangeLayer: View {
                     width: haloW,
                     height: haloH
                 )
-                ctx.stroke(
+                drawContext.stroke(
                     Path(roundedRect: haloRect, cornerRadius: 8.0),
                     with: .color(Palette.accent.opacity(0.85)),
                     lineWidth: 1.6
@@ -994,6 +1183,7 @@ struct UnspoolingFilmStripCanvas: View {
     let tension: CGFloat
     let toothClash: CGFloat
     let pressurePlateProgress: CGFloat
+    var pluckPulse: CGFloat = 0.0
     var filmName: String = ""
     let category: String
     var yearsExpired: Int = 0
@@ -1049,21 +1239,27 @@ struct UnspoolingFilmStripCanvas: View {
             let tongueLen: CGFloat = 26.0 * (1.0 - suckInProgress * 0.85)
             let rawBodyEndX = max(startX + 4.0, tipX - tongueLen)
             let flatBodyEndX = min(rawBodyEndX, tangentX)
-            let ctrlX = startX + (flatBodyEndX - startX) * 0.52
+            let ctrl1X = startX + (flatBodyEndX - startX) * 0.34
+            let ctrl2X = startX + (flatBodyEndX - startX) * 0.68
+            let pluckOffset = min(max(pluckPulse, -1.0), 1.0) * 7.0
+            let ctrl1Y = midY + (effectiveCtrlY - midY) * (2.0 / 3.0) + pluckOffset
+            let ctrl2Y = effectiveTipY + (effectiveCtrlY - effectiveTipY) * (2.0 / 3.0) - pluckOffset
 
             // 1. Vision3 Remjet Carbon Underside Shadow when bowed
             if isVision3Remjet && abs(dragY) > 2.0 {
                 var remjetPath = Path()
                 let offset: CGFloat = dragY > 0 ? 2.5 : -2.5
                 remjetPath.move(to: CGPoint(x: startX, y: midY - stripHalfH + offset))
-                remjetPath.addQuadCurve(
+                remjetPath.addCurve(
                     to: CGPoint(x: flatBodyEndX, y: effectiveTipY - stripHalfH + offset),
-                    control: CGPoint(x: ctrlX, y: effectiveCtrlY - stripHalfH + offset)
+                    control1: CGPoint(x: ctrl1X, y: ctrl1Y - stripHalfH + offset),
+                    control2: CGPoint(x: ctrl2X, y: ctrl2Y - stripHalfH + offset)
                 )
                 remjetPath.addLine(to: CGPoint(x: flatBodyEndX, y: effectiveTipY + stripHalfH + offset))
-                remjetPath.addQuadCurve(
+                remjetPath.addCurve(
                     to: CGPoint(x: startX, y: midY + stripHalfH + offset),
-                    control: CGPoint(x: ctrlX, y: effectiveCtrlY + stripHalfH + offset)
+                    control1: CGPoint(x: ctrl2X, y: ctrl2Y + stripHalfH + offset),
+                    control2: CGPoint(x: ctrl1X, y: ctrl1Y + stripHalfH + offset)
                 )
                 remjetPath.closeSubpath()
                 ctx.fill(remjetPath, with: .color(Color(red: 0.04, green: 0.05, blue: 0.06)))
@@ -1072,9 +1268,10 @@ struct UnspoolingFilmStripCanvas: View {
             // 2. Flat Chamber Parallel Bezier Strip (from startX up to tangentX)
             var stripPath = Path()
             stripPath.move(to: CGPoint(x: startX, y: midY - stripHalfH))
-            stripPath.addQuadCurve(
+            stripPath.addCurve(
                 to: CGPoint(x: flatBodyEndX, y: effectiveTipY - stripHalfH),
-                control: CGPoint(x: ctrlX, y: effectiveCtrlY - stripHalfH)
+                control1: CGPoint(x: ctrl1X, y: ctrl1Y - stripHalfH),
+                control2: CGPoint(x: ctrl2X, y: ctrl2Y - stripHalfH)
             )
 
             // If tip hasn't reached the 3D drum horizon yet, draw the stepped 35mm leader tongue in 2D
@@ -1089,9 +1286,10 @@ struct UnspoolingFilmStripCanvas: View {
                 stripPath.addLine(to: CGPoint(x: flatBodyEndX, y: effectiveTipY + stripHalfH))
             }
 
-            stripPath.addQuadCurve(
+            stripPath.addCurve(
                 to: CGPoint(x: startX, y: midY + stripHalfH),
-                control: CGPoint(x: ctrlX, y: effectiveCtrlY + stripHalfH)
+                control1: CGPoint(x: ctrl2X, y: ctrl2Y + stripHalfH),
+                control2: CGPoint(x: ctrl1X, y: ctrl1Y + stripHalfH)
             )
             stripPath.closeSubpath()
 
@@ -1184,9 +1382,10 @@ struct UnspoolingFilmStripCanvas: View {
                     // Flat Bezier Parametric Curve Mapping
                     let t = min(max((hx - startX) / max(flatBodyEndX - startX, 1.0), 0.0), 1.0)
                     let oneMinusT = 1.0 - t
-                    let curveY = (oneMinusT * oneMinusT * midY)
-                        + (2.0 * oneMinusT * t * effectiveCtrlY)
-                        + (t * t * effectiveTipY)
+                    let curveY = (oneMinusT * oneMinusT * oneMinusT * midY)
+                        + (3.0 * oneMinusT * oneMinusT * t * ctrl1Y)
+                        + (3.0 * oneMinusT * t * t * ctrl2Y)
+                        + (t * t * t * effectiveTipY)
 
                     // Latent Exposure Negative Window every 4 perforations
                     if holeIndex % 4 == 0 && (hx + 30.0) < flatBodyEndX {
@@ -1203,9 +1402,17 @@ struct UnspoolingFilmStripCanvas: View {
                         ctx.fill(Path(rebateRect), with: .color(Palette.accent.opacity(0.38)))
                     }
 
+                    // Local warm-taffy strain: strongest beside the moving leader tip.
+                    let fingerDistance = abs(tipX - hx)
+                    let fingerInfluence = 1.0 - smoothstep(0.0, 36.0, fingerDistance)
+                    let mouthInfluence = 1.0 - smoothstep(0.0, 24.0, hx - startX)
+                    let localStrain = min(max(tension * fingerInfluence, 0.0), 1.0)
+                    let localHoleW = max(4.0, holeW + (12.0 - holeW) * localStrain - 1.2 * mouthInfluence * tension)
+                    let localHoleH = min(3.8, max(2.2, holeH - (holeH - 2.2) * localStrain + 0.2 * mouthInfluence * tension))
+
                     // Top & Bottom Sprocket Perforations
-                    let topHole = CGRect(x: hx - holeW * 0.5, y: curveY - stripHalfH + 2.4, width: holeW, height: holeH)
-                    let botHole = CGRect(x: hx - holeW * 0.5, y: curveY + stripHalfH - 2.4 - holeH, width: holeW, height: holeH)
+                    let topHole = CGRect(x: hx - localHoleW * 0.5, y: curveY - stripHalfH + 2.4, width: localHoleW, height: localHoleH)
+                    let botHole = CGRect(x: hx - localHoleW * 0.5, y: curveY + stripHalfH - 2.4 - localHoleH, width: localHoleW, height: localHoleH)
 
                     // CineStill Remjet-Free Red Halation Glow around Sprockets
                     if isCineStillHalation {
@@ -1231,14 +1438,19 @@ struct UnspoolingFilmStripCanvas: View {
 
                     let cosPhi = cos(phi)
                     let wrappedX = tangentX + drumRadius * sin(phi)
-                    let foreshortenedW = max(0.8, holeW * cosPhi)
+                    let fingerDistance = abs(tipX - hx)
+                    let fingerInfluence = 1.0 - smoothstep(0.0, 36.0, fingerDistance)
+                    let localStrain = min(max(tension * fingerInfluence, 0.0), 1.0)
+                    let localHoleW = holeW + (12.0 - holeW) * localStrain
+                    let localHoleH = holeH - (holeH - 2.2) * localStrain
+                    let foreshortenedW = max(0.8, localHoleW * cosPhi)
                     let holeOpacity = 0.88 * Double(cosPhi)
 
                     let botWrappedHole = CGRect(
                         x: wrappedX - foreshortenedW * 0.5,
-                        y: midY + stripHalfH - 2.4 - holeH,
+                        y: midY + stripHalfH - 2.4 - localHoleH,
                         width: foreshortenedW,
-                        height: holeH
+                        height: localHoleH
                     )
                     ctx.fill(
                         Path(roundedRect: botWrappedHole, cornerRadius: 0.6),
@@ -1251,7 +1463,7 @@ struct UnspoolingFilmStripCanvas: View {
                             x: wrappedX - foreshortenedW * 0.5,
                             y: midY - stripHalfH + 2.4,
                             width: foreshortenedW,
-                            height: holeH
+                            height: localHoleH
                         )
                         ctx.fill(
                             Path(roundedRect: topWrappedHole, cornerRadius: 0.6),

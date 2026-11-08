@@ -83,7 +83,7 @@ struct FilmPanel: View {
                             var p = Path()
                             p.move(to: CGPoint(x: tx, y: bottomY - tickH))
                             p.addLine(to: CGPoint(x: tx, y: bottomY))
-                            ctx.stroke(p, with: .color(isCenter ? Palette.accent : Color.white.opacity(0.18)), lineWidth: 1.0 * k)
+                            ctx.stroke(p, with: .color(isCenter ? Palette.accent : Palette.text.opacity(0.18)), lineWidth: 1.0 * k)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 14 * k, style: .continuous))

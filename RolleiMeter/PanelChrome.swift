@@ -44,8 +44,8 @@ struct MattePanelModifier: ViewModifier {
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.08 + 0.14 * glowIntensity),
-                                    Color.white.opacity(0.02)
+                                    Palette.text.opacity(0.08 + 0.14 * glowIntensity),
+                                    Palette.text.opacity(0.02)
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom

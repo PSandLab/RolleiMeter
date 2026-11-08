@@ -90,7 +90,7 @@ private struct FrameTapeStrip: View, Animatable {
                 let holeRect = CGRect(x: hx, y: holeY, width: holeW, height: holeH)
                 ctx.fill(
                     Path(roundedRect: holeRect, cornerRadius: 1.2 * k),
-                    with: .color(Color.white.opacity((0.14 + 0.14 * advancePulse) * Double(fade)))
+                    with: .color(Palette.text.opacity((0.14 + 0.14 * advancePulse) * Double(fade)))
                 )
             }
 
