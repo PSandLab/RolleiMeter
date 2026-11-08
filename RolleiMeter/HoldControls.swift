@@ -87,13 +87,13 @@ struct InteractiveFilmLeaderChamber: View {
                 ZStack {
                     // 1. Recessed Camera Film-Back Chamber Track
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color(red: 0.035, green: 0.038, blue: 0.045))
+                        .fill(Palette.well)
                         .overlay(
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .strokeBorder(
                                     isRunningCeremony
                                         ? Palette.accent.opacity(0.65)
-                                        : (isLatchedHold ? Palette.accent.opacity(0.85) : Color.white.opacity(0.08)),
+                                        : (isLatchedHold ? Palette.accent.opacity(0.85) : Palette.wellEdge),
                                     lineWidth: isLatchedHold || isRunningCeremony ? 1.5 : 1.0
                                 )
                         )
@@ -160,11 +160,11 @@ struct InteractiveFilmLeaderChamber: View {
                     // Left Side: Supply Well + 3D Spinning & Tilting Canister
                     ZStack {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.black.opacity(0.55))
+                            .fill(Palette.wellDeep)
                             .frame(width: 62, height: 102)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                                    .strokeBorder(Palette.wellEdge, lineWidth: 1)
                             )
 
                         FilmCanisterArtwork(
@@ -783,14 +783,14 @@ private struct FilmChamberBackdropCanvas: View {
             rails.addLine(to: CGPoint(x: endX, y: gateTop))
             rails.move(to: CGPoint(x: startX, y: gateBot))
             rails.addLine(to: CGPoint(x: endX, y: gateBot))
-            ctx.stroke(rails, with: .color(.white.opacity(0.07)), lineWidth: 1.0)
+            ctx.stroke(rails, with: .color(Palette.text.opacity(0.10)), lineWidth: 1.0)
 
             // Film gate exposure aperture window in center of chamber
             let gateW: CGFloat = 72
             let gateH: CGFloat = 46
             let gateRect = CGRect(x: (startX + endX) * 0.5 - gateW * 0.5, y: midY - gateH * 0.5, width: gateW, height: gateH)
-            ctx.fill(Path(roundedRect: gateRect, cornerRadius: 4), with: .color(.black.opacity(0.55)))
-            ctx.stroke(Path(roundedRect: gateRect, cornerRadius: 4), with: .color(.white.opacity(0.08)), lineWidth: 1.0)
+            ctx.fill(Path(roundedRect: gateRect, cornerRadius: 4), with: .color(Palette.wellDeep))
+            ctx.stroke(Path(roundedRect: gateRect, cornerRadius: 4), with: .color(Palette.wellEdge), lineWidth: 1.0)
 
             // Guide chevrons inviting the pull gesture
             if pullProgress < 0.15 && !isWinding {

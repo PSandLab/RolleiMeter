@@ -32,6 +32,11 @@ enum Palette {
     /// Text drawn on the fixed-dark readout windows (stays light in both modes).
     static let onInk = Color(red: 0.949, green: 0.949, blue: 0.961)
 
+    /// Recessed wells/chambers: near-black in dark mode, soft grey in light mode.
+    static let well = dyn((0.875, 0.870, 0.855), (0.035, 0.038, 0.045))
+    static let wellDeep = dyn((0.80, 0.795, 0.78), (0.0, 0.0, 0.0), darkAlpha: 0.55)
+    static let wellEdge = border
+
     static let good = Color(red: 0.204, green: 0.827, blue: 0.451)
     static let slow = Color(red: 0.969, green: 0.776, blue: 0.000)
     static let bad = Color(red: 0.961, green: 0.231, blue: 0.231)

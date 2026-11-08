@@ -971,7 +971,7 @@ private struct FilmCanisterListRow: View {
                 ZStack {
                     // Recessed physical foam slot.
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color.black.opacity(0.42))
+                        .fill(Palette.wellDeep)
                         .frame(width: 48, height: 52)
 
                     FilmCanisterArtwork(
@@ -1138,7 +1138,7 @@ private struct ExpiredFilmFastScrubber: View {
 
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.black.opacity(0.45))
+                        .fill(Palette.wellDeep)
 
                     // Ruler ticks from 1 to 50 years
                     Canvas { ctx, size in
