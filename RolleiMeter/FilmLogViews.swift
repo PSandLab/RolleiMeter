@@ -969,11 +969,6 @@ private struct FilmCanisterListRow: View {
         Button(action: onSelect) {
             HStack(spacing: 14) {
                 ZStack {
-                    // Recessed physical foam slot.
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Palette.wellDeep)
-                        .frame(width: 48, height: 52)
-
                     FilmCanisterArtwork(
                         brand: brand,
                         familyName: familyName,
