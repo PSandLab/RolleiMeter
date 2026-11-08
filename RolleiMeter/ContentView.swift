@@ -229,6 +229,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .background(Palette.background.ignoresSafeArea())
         .dynamicTypeSize(.large)
+        .tint(Palette.accent)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .onAppear {
