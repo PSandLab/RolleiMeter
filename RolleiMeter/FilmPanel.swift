@@ -92,7 +92,7 @@ struct FilmPanel: View {
 
                 Text(readout)
                     .font(AppTypography.next(size: (isPullOrPush ? 23 : 27) * k, weight: .medium).monospacedDigit())
-                    .foregroundStyle(isUnloaded || isPullOrPush ? Palette.accent : Palette.text)
+                    .foregroundStyle(isUnloaded || isPullOrPush ? Palette.accent : Palette.readoutText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
                     .padding(.horizontal, 14 * k)

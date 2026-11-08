@@ -40,6 +40,9 @@ enum Palette {
     /// Film readout window: whitish in light mode, near-black in dark mode.
     static let readout = dyn((0.965, 0.980, 1.0), (0.078, 0.078, 0.086))
 
+    /// Film readout text: blue in light mode, near-white in dark mode.
+    static let readoutText = dyn((0.10, 0.40, 0.88), (0.949, 0.949, 0.961))
+
     static let good = Color(red: 0.204, green: 0.827, blue: 0.451)
     static let slow = accent
     static let bad = Color(red: 0.961, green: 0.231, blue: 0.231)
