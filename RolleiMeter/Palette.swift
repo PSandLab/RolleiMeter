@@ -38,7 +38,7 @@ enum Palette {
     static let wellEdge = border
 
     /// Film readout window: whitish in light mode, near-black in dark mode.
-    static let readout = dyn((0.965, 0.980, 1.0), (0.078, 0.078, 0.086))
+    static let readout = dyn((0.925, 0.947, 0.985), (0.078, 0.078, 0.086))
 
     /// Film readout text: blue in light mode, near-white in dark mode.
     static let readoutText = dyn((0.10, 0.40, 0.88), (0.949, 0.949, 0.961))
