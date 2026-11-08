@@ -1272,8 +1272,8 @@ struct UnspoolingFilmStripCanvas: View {
                     width: badgeR * 2.0,
                     height: badgeR * 2.0
                 )
-                ctx.fill(Path(ellipseIn: badgeRect), with: .color(Palette.accent.opacity(Double(gripBadgeScale))))
-                ctx.stroke(Path(ellipseIn: badgeRect), with: .color(Palette.accentInk), lineWidth: 1.5 * gripBadgeScale)
+                // Grip badge circle removed (rendered as a stray blue semicircle beside the pull tab).
+                _ = badgeRect
             }
         }
         .allowsHitTesting(false)
