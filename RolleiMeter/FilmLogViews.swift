@@ -1010,6 +1010,9 @@ private struct FilmCanisterListRow: View {
                         }
                     }
                     .animation(.spring(response: 0.5, dampingFraction: 0.78), value: isExpanded)
+                    // One canister only: the header one hops out and the chamber one takes over.
+                    .opacity(isExpanded ? 0 : 1)
+                    .animation(.easeOut(duration: 0.2).delay(isExpanded ? 0.1 : 0.15), value: isExpanded)
                 }
                 .frame(width: 52, height: 54)
 
@@ -1020,7 +1023,7 @@ private struct FilmCanisterListRow: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
-                    Text("\(brandLabel) · \(isoLabel)")
+                    Text(isExpanded ? "Pull the leader to load · \(isoLabel)" : "\(brandLabel) · \(isoLabel)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(Palette.textSub)
                         .lineLimit(1)

@@ -41,6 +41,7 @@ struct InteractiveFilmLeaderChamber: View {
     @State private var lastSpindleThunk: Int = 0
     @State private var idlePulse: Bool = false
     @State private var canisterSwapPop: CGFloat = 0.0
+    @State private var canisterFlight: CGFloat = 1.0 // 1 = still up in the list row, 0 = seated in chamber
 
     // Stage 0 Open-Chamber Suck-In & Mechanical Micro-States
     @State private var suckInProgress: CGFloat = 0.0        // 0.0 -> 1.0 during 450ms pre-door cinch
@@ -179,7 +180,17 @@ struct InteractiveFilmLeaderChamber: View {
                         .offset(x: tension * 5.0, y: CGFloat(frictionJitter * 0.35))
                         .shadow(color: .black.opacity(0.7), radius: 6, x: 3, y: 3)
                     }
+                    // The header canister "bounces" in here: drop from the list row, land with a soft bounce.
+                    .scaleEffect(1.0 - 0.3 * canisterFlight)
+                    .offset(y: -104.0 * canisterFlight)
+                    .opacity(1.0 - 0.0 * canisterFlight)
                     .position(x: 42, y: h * 0.5)
+                    .onAppear {
+                        guard canisterFlight > 0 else { return }
+                        withAnimation(.spring(response: 0.62, dampingFraction: 0.52).delay(0.14)) {
+                            canisterFlight = 0.0
+                        }
+                    }
 
                     // 6. Grand Film Loading Ceremony Overlay (Camera Back Door + Odometer Wind S -> 00 -> 0 -> 1)
                     if doorClosedProgress > 0.01 {
