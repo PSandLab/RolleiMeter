@@ -29,7 +29,7 @@ private struct GearGlassCapsuleModifier: ViewModifier {
                 .overlay {
                     Capsule()
                         .strokeBorder(
-                            Color.white.opacity(0.14),
+                            Palette.text.opacity(0.14),
                             lineWidth: 0.7
                         )
                 }
@@ -583,7 +583,7 @@ struct CameraLensView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(
-                            Color.white.opacity(0.07),
+                            Palette.text.opacity(0.07),
                             lineWidth: 0.8
                         )
                 }
@@ -606,7 +606,7 @@ struct CameraLensView: View {
                             .fill(
                                 isActive
                                     ? Palette.accent.opacity(0.22)
-                                    : Color.white.opacity(0.08)
+                                    : Palette.text.opacity(0.08)
                             )
                     }
 
@@ -1219,7 +1219,7 @@ private struct CameraBodyListRow: View {
                         .fill(
                             isSelected
                                 ? Palette.accent
-                                : Color.white.opacity(0.07)
+                                : Palette.text.opacity(0.07)
                         )
                         .frame(width: 24, height: 24)
 
@@ -1245,7 +1245,7 @@ private struct CameraBodyListRow: View {
                             .strokeBorder(
                                 isSelected
                                     ? Palette.accent.opacity(0.36)
-                                    : Color.white.opacity(0.055),
+                                    : Palette.text.opacity(0.055),
                                 lineWidth: isSelected ? 1.1 : 0.7
                             )
                     }
@@ -1296,7 +1296,7 @@ private struct OpticalLensListRow: View {
                             .fill(
                                 isSelected
                                     ? Palette.accent
-                                    : Color.white.opacity(0.07)
+                                    : Palette.text.opacity(0.07)
                             )
                             .frame(width: 24, height: 24)
 
@@ -1364,7 +1364,7 @@ private struct OpticalLensListRow: View {
                         .strokeBorder(
                             isSelected
                                 ? Palette.accent.opacity(0.36)
-                                : Color.white.opacity(0.055),
+                                : Palette.text.opacity(0.055),
                             lineWidth: isSelected ? 1.1 : 0.7
                         )
                 }
@@ -1414,7 +1414,7 @@ struct BrassRatchetEscapementCanvas: View {
             let searRect = CGRect(x: w - 16, y: midY - 5.5, width: 6.5, height: 11.0)
             ctx.fill(
                 Path(roundedRect: searRect, cornerRadius: 1.5),
-                with: .color(isCocked ? Palette.good : (throwProgress >= 0.88 ? Palette.accent : Color.white.opacity(0.55)))
+                with: .color(isCocked ? Palette.good : (throwProgress >= 0.88 ? Palette.accent : Palette.text.opacity(0.55)))
             )
         }
         .allowsHitTesting(false)
@@ -1631,7 +1631,7 @@ struct BottomCockingLeverDock: View {
             Palette.background.opacity(0.96)
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color.white.opacity(0.08))
+                        .fill(Palette.text.opacity(0.08))
                         .frame(height: 1)
                 }
                 .ignoresSafeArea(edges: .bottom)
@@ -1799,7 +1799,7 @@ struct GearMountingCeremonyVisual: View {
                     .foregroundStyle(Palette.textDim)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.white.opacity(0.06), in: Capsule())
+                    .background(Palette.text.opacity(0.06), in: Capsule())
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
@@ -1913,7 +1913,7 @@ struct GearMountingCeremonyVisual: View {
                 .stroke(
                     isCocked
                         ? Palette.good.opacity(0.45 + 0.45 * Double(ceremonyGlow))
-                        : (leverThrowProgress > 0.05 ? Palette.accent.opacity(0.45) : Color.white.opacity(0.08)),
+                        : (leverThrowProgress > 0.05 ? Palette.accent.opacity(0.45) : Palette.text.opacity(0.08)),
                     lineWidth: isCocked ? 1.5 : 1.0
                 )
         )
@@ -2063,8 +2063,8 @@ struct SculptedMetalAdvanceHandle: View {
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    (isCocked || isLatched) ? Palette.accent.opacity(0.85) : Color.white.opacity(0.32),
-                                    Color.white.opacity(0.08)
+                                    (isCocked || isLatched) ? Palette.accent.opacity(0.85) : Palette.text.opacity(0.32),
+                                    Palette.text.opacity(0.08)
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
@@ -2080,11 +2080,11 @@ struct SculptedMetalAdvanceHandle: View {
                     .frame(width: 16, height: 16)
                     .overlay(
                         Circle()
-                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                            .strokeBorder(Palette.text.opacity(0.18), lineWidth: 1)
                     )
                     .overlay(
                         Circle()
-                            .fill((isCocked || isLatched) ? Palette.accent : Color.white.opacity(0.35))
+                            .fill((isCocked || isLatched) ? Palette.accent : Palette.text.opacity(0.35))
                             .frame(width: 5, height: 5)
                     )
 
@@ -2095,7 +2095,7 @@ struct SculptedMetalAdvanceHandle: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        Color.white.opacity(0.38),
+                                        Palette.text.opacity(0.38),
                                         Color.black.opacity(0.65)
                                     ],
                                     startPoint: .leading,

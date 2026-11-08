@@ -29,6 +29,9 @@ enum Palette {
     static let accentInk = Color(red: 0.078, green: 0.078, blue: 0.086)
     static let onAccent = Color(red: 0.078, green: 0.078, blue: 0.086)
 
+    /// Text drawn on the fixed-dark readout windows (stays light in both modes).
+    static let onInk = Color(red: 0.949, green: 0.949, blue: 0.961)
+
     static let good = Color(red: 0.204, green: 0.827, blue: 0.451)
     static let slow = Color(red: 0.969, green: 0.776, blue: 0.000)
     static let bad = Color(red: 0.961, green: 0.231, blue: 0.231)
