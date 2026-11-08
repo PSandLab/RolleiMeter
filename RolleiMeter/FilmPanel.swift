@@ -53,7 +53,7 @@ struct FilmPanel: View {
             PanelTitle(
                 text: hasCam ? cameraBadge.uppercased() : "FILM",
                 k: k,
-                color: Palette.accentInk
+                color: Palette.onAccent
             )
             .padding(.horizontal, 14 * k)
             .scaleEffect(1.0 + 0.03 * isoPulse)

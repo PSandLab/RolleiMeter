@@ -10,35 +10,35 @@ enum Palette {
         })
     }
 
-    static let background = dyn((0.945, 0.940, 0.925), (0.020, 0.020, 0.024))
+    static let background = dyn((0.925, 0.947, 0.985), (0.020, 0.020, 0.024))
     static let bg = background
-    static let panel = dyn((0.985, 0.982, 0.972), (0.078, 0.078, 0.086))
+    static let panel = dyn((0.975, 0.985, 1.0), (0.078, 0.078, 0.086))
     static let panelRaised = dyn((1, 1, 1), (0.118, 0.118, 0.129))
     static let groupedBackground = Color(uiColor: .systemGroupedBackground)
     static let groupedCell = Color(uiColor: .secondarySystemGroupedBackground)
 
-    static let text = dyn((0.098, 0.098, 0.110), (0.949, 0.949, 0.961))
-    static let textSub = dyn((0.36, 0.36, 0.39), (0.557, 0.557, 0.576))
-    static let textDim = dyn((0.47, 0.47, 0.50), (0.420, 0.420, 0.443))
+    static let text = dyn((0.059, 0.098, 0.169), (0.949, 0.949, 0.961))
+    static let textSub = dyn((0.31, 0.38, 0.49), (0.557, 0.557, 0.576))
+    static let textDim = dyn((0.42, 0.49, 0.59), (0.420, 0.420, 0.443))
     static let dim = textDim
-    static let faint = dyn((0.80, 0.80, 0.82), (0.220, 0.220, 0.239))
-    static let border = dyn((0, 0, 0), (1, 1, 1), lightAlpha: 0.10, darkAlpha: 0.06)
+    static let faint = dyn((0.77, 0.83, 0.92), (0.220, 0.220, 0.239))
+    static let border = dyn((0.10, 0.25, 0.55), (1, 1, 1), lightAlpha: 0.14, darkAlpha: 0.06)
 
     // Signature Kodak/Rollei Yellow
-    static let accent = dyn((0.90, 0.68, 0.0), (0.969, 0.776, 0.000))
+    static let accent = dyn((0.10, 0.40, 0.88), (0.969, 0.776, 0.000))
     static let accentInk = Color(red: 0.078, green: 0.078, blue: 0.086)
-    static let onAccent = Color(red: 0.078, green: 0.078, blue: 0.086)
+    static let onAccent = dyn((1, 1, 1), (0.078, 0.078, 0.086))
 
     /// Text drawn on the fixed-dark readout windows (stays light in both modes).
     static let onInk = Color(red: 0.949, green: 0.949, blue: 0.961)
 
     /// Recessed wells/chambers: near-black in dark mode, soft grey in light mode.
-    static let well = dyn((0.875, 0.870, 0.855), (0.035, 0.038, 0.045))
-    static let wellDeep = dyn((0.80, 0.795, 0.78), (0.0, 0.0, 0.0), darkAlpha: 0.55)
+    static let well = dyn((0.855, 0.895, 0.950), (0.035, 0.038, 0.045))
+    static let wellDeep = dyn((0.78, 0.84, 0.92), (0.0, 0.0, 0.0), darkAlpha: 0.55)
     static let wellEdge = border
 
     static let good = Color(red: 0.204, green: 0.827, blue: 0.451)
-    static let slow = Color(red: 0.969, green: 0.776, blue: 0.000)
+    static let slow = accent
     static let bad = Color(red: 0.961, green: 0.231, blue: 0.231)
 
     static let lensLight = Color.white
